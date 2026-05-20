@@ -2,7 +2,7 @@
 
 > A six-phase methodology for evaluating commercial viability of digital products. Built for solo founders; adaptable to other founder profiles.
 
-This plugin packages the market-research methodology as installable Claude Code components: one umbrella skill, six slash commands corresponding to the methodology's six structured agent passes, and six matching subagents that execute each phase with adapted prompt templates. Designed to work alongside (not bundle) marketplace plugins for Firecrawl, Exa, Airtable, and Apollo — falls back to general-purpose tools when those are absent.
+This plugin packages the market-research methodology as installable Claude Code components: one umbrella skill, seven slash commands (Phase 0 demand-discovery plus the six structured agent passes), and seven matching subagents that execute each phase with adapted prompt templates. Multi-candidate state persists as JSONL files in the project's `.claude/market-research/` directory — no external service required. Designed to work alongside (not bundle) marketplace plugins for Firecrawl, Exa, and Apollo — falls back to general-purpose tools when those are absent.
 
 ## Install
 
@@ -26,23 +26,85 @@ The plugin works without these — agents fall back to WebSearch + WebFetch — 
 |---|---|---|---|
 | **Firecrawl** (CLI + skill bundle, NOT MCP) | `/plugin install firecrawl@claude-plugins-official` then `npx -y firecrawl-cli@1.16.2 init -y --browser` | Phases 0, 2-5 | Multi-page web scraping with clean markdown output. Invoked via Bash (`firecrawl scrape <url> -o <file>`) not as an MCP tool. |
 | **Exa MCP** | `/plugin install exa@claude-plugins-official` then authenticate | Phases 0, 2b, 2c, 4, 5 | Semantic search for varied-phrasing pain signals. |
-| **Airtable MCP** | `/plugin install airtable@claude-plugins-official` then authenticate | All phases (state tracking) | Multi-candidate state, phase outputs, pain signals. See `resources/airtable-schema.json` for the suggested base schema. |
 | **Apollo MCP** | `/plugin install apollo@claude-plugins-official` then authenticate | Phases 0, 2, 2c, 4 | ICP density + reachability checks (firmographics, named accounts, decision-makers). |
 | **Perplexity** (raw MCP, optional) | Configure in `claude_desktop_config.json` | Phases 2b, 5 | Conversational synthesis with citations. |
 
 **Credit awareness:** Firecrawl (~1500 cycle credits), Apollo (lead credits limited on free tier — ~95), Exa (per-search). Reserve Apollo lead credits for Phase 4 reachability checks specifically. See SKILL.md's "Tool-selection fallback matrix" section for the per-task tool routing.
 
-## Setting up the Airtable base
+## Persistence (project-local JSONL)
 
-The methodology uses Airtable as its persistence layer (state across multi-pass research engagements). The plugin includes a starter schema at `resources/airtable-schema.json` with three tables: Candidates, Phase Outputs, Pain Signals.
+The methodology persists multi-candidate state in three JSONL files under your active project, resolved via `git rev-parse --show-toplevel` (with `pwd` fallback):
 
-**Two setup paths:**
+```
+<your-project>/.claude/market-research/
+├── candidates.jsonl       # one line per candidate; latest line wins for updates
+├── phase-outputs.jsonl    # one line per (candidate, phase) result, append-only
+└── pain-signals.jsonl     # one line per mined pain quote, append-only
+```
 
-1. **Programmatic** (recommended if you have the Airtable MCP plugin installed): the subagent will use `mcp__plugin_airtable_airtable__create_base` and `create_field` to set up the base on first invocation, or you can ask Claude to "create the methodology base in Airtable from `resources/airtable-schema.json`".
+No external service, no setup, no API keys. The directory is created on first write. State travels with the repo — different projects keep different research ledgers.
 
-2. **Manual**: open Airtable, create a base named "Market Research" with the three tables, fields, and choices listed in `resources/airtable-schema.json`. Save the base ID (format: `appXXXXXXXXXXXXXX`) somewhere subagents can read it — typically a `.claude/market-research.local.md` file in your project.
+**Schemas** (each line is a JSON object):
 
-After setup, the base ID becomes per-user runtime config. Future versions of this plugin will support a `.claude/market-research.local.md` settings file that stores the base ID; for v0.1.1, you can either pass the base ID to commands as needed or hardcode it in a small wrapper.
+```jsonc
+// candidates.jsonl
+{
+  "id": "kebab-slug",
+  "name": "Display Name",
+  "source": "Reddit r/foo | Acquire.com listing | founder's idea | ...",
+  "industry": "Retail/SMB|Developer tools|Consumer apps|Infrastructure SaaS|AI tools|Services/Local|Other",
+  "status": "mapping|audit-done|angle-named|verified|pressure-tested|decided",
+  "verdict": "pass|kill|pending",
+  "kill_reason": "one paragraph if killed",
+  "updated_at": "2026-05-19T20:30:00Z"
+}
+
+// phase-outputs.jsonl
+{
+  "candidate_id": "kebab-slug",
+  "phase": "Map|Audit|Profitability|Adjacent scan|Angle|Verify|Pressure-test|Extraction|Decide",
+  "verdict": "pass|kill|conditional|no angle exists",
+  "evidence_summary": "short summary; full report saved elsewhere",
+  "full_output_path": "docs/research/acmepos-audit.md",
+  "agent_run_date": "2026-05-19"
+}
+
+// pain-signals.jsonl
+{
+  "candidate_id": "kebab-slug",
+  "pain_phrase": "verbatim quote in user's own words",
+  "source_url": "https://...",
+  "source_type": "Review|Reddit|Forum|Cold DM|App store|Other",
+  "severity": 1,
+  "captured_at": "2026-05-19T20:30:00Z"
+}
+```
+
+**Resolving the path inside a command/agent:**
+
+```bash
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+MR_DIR="$PROJECT_ROOT/.claude/market-research"
+mkdir -p "$MR_DIR"
+CANDIDATES="$MR_DIR/candidates.jsonl"
+PHASE_OUTPUTS="$MR_DIR/phase-outputs.jsonl"
+PAIN_SIGNALS="$MR_DIR/pain-signals.jsonl"
+```
+
+**Querying with jq** (latest-line-wins for candidates):
+
+```bash
+# All currently-active candidates (not killed)
+jq -s 'group_by(.id) | map(max_by(.updated_at)) | map(select(.verdict != "kill"))' "$CANDIDATES"
+
+# Pressure-test verdicts only
+jq 'select(.phase == "Pressure-test")' "$PHASE_OUTPUTS"
+
+# Acute pain signals for a specific candidate
+jq --arg id "acmepos" 'select(.candidate_id == $id and .severity >= 3)' "$PAIN_SIGNALS"
+```
+
+If you'd rather not commit these to git, add `.claude/market-research/` to your `.gitignore`.
 
 ## Usage
 
@@ -82,7 +144,7 @@ Three commands, ~1-2 days. Skips Phases 2/2b/2c/6 (those are brownfield-specific
            └─ no viable adjacency → /research-extraction → verdict
 ```
 
-Each pass produces a written report (~1500-2500 words). Log the verdict and evidence summary to your Airtable base as you go.
+Each pass produces a written report (~1500-2500 words). Append the verdict and evidence summary as a line in `<project>/.claude/market-research/phase-outputs.jsonl` (see Persistence section above for the schema).
 
 ## What this plugin will not do
 

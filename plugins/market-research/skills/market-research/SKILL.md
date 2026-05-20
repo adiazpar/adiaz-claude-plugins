@@ -1,6 +1,6 @@
 ---
 name: market-research
-description: Use when evaluating commercial viability of a digital product — either brownfield (built but don't know who pays) or greenfield (starting from nothing and looking for a problem worth building for via demand discovery). Six-phase methodology plus a Phase-0 demand-discovery entry point. Disciplined kill criteria, named-angle requirement, adversarial pressure-testing, NO as a valid output at every phase. Reaches for installed marketplace plugins (Firecrawl, Exa, Airtable, Apollo) when available; degrades gracefully without them.
+description: Use when evaluating commercial viability of a digital product — either brownfield (built but don't know who pays) or greenfield (starting from nothing and looking for a problem worth building for via demand discovery). Six-phase methodology plus a Phase-0 demand-discovery entry point. Disciplined kill criteria, named-angle requirement, adversarial pressure-testing, NO as a valid output at every phase. Persists candidate state as JSONL under the project's .claude/market-research/ directory. Reaches for installed marketplace plugins (Firecrawl, Exa, Apollo) when available; degrades gracefully without them.
 ---
 
 # Market Research Methodology
@@ -112,14 +112,31 @@ Phase 0 is the from-nothing entry point. Greenfield workflow: Phase 0 → 3 → 
 | Competitor codebase analysis (if relevant) | **GitHub MCP** (if installed) | WebFetch on `github.com/owner/repo` URLs | GitHub MCP can query issues, PRs, contributor stats systematically. |
 | ICP density + reachability check (named accounts, decision-makers, firmographic filtering) | **Apollo.io** (installed via `/plugin`) | WebSearch on company names + LinkedIn lookups | Apollo aggregates 250M+ contacts with firmographic filters. WebSearch on category terms returns marketing content, not segment-density numbers. Phase 2 (ICP audit) and Phase 4 (verify angle reachability) both depend on this signal. |
 
-### Workflow-state tools (a different category)
+### Workflow-state persistence (a different category)
 
-The tools below are *not* data-gathering — they hold the structured state of the research itself across multi-pass engagements. Use them when the research becomes complex enough that markdown notes no longer support the queries you need to ask ("which candidates passed Phase 4?", "which kills had reachability as the killer?").
+State is persisted as project-local JSONL files, not in any external service. The plugin writes to three files under `<project_root>/.claude/market-research/` (path resolved via `git rev-parse --show-toplevel`, falling back to `pwd`):
 
-| Workflow task | Preferred tool | Fallback | Why the preference matters |
-|---|---|---|---|
-| Multi-candidate state tracking across passes 1–6 | **Airtable** (installed via `/plugin`) | Markdown files in `active-research/` | Once you're running 4+ candidates in parallel, candidate state in markdown becomes hard to query. Airtable's structured schema + filtered views (one view per methodology phase) makes status, verdicts, and kill-reasons trivially queryable. |
-| Structured pain-signal capture from many sources | **Airtable** linked table | Markdown bullets per candidate | When pain signals come from 3+ sources (reviews, Reddit, cold-DM) across multiple candidates, an Airtable `pain_signals` table linked to candidates beats nested markdown. |
+| File | Purpose | Write pattern |
+|---|---|---|
+| `candidates.jsonl` | One line per candidate (product / category / segment being evaluated). Updated as candidates move through phases. | Append a new line whenever status changes; latest line per `id` wins on read. |
+| `phase-outputs.jsonl` | One line per (candidate, phase) result. Verdict + evidence summary + path to the full agent report. | Append-only. |
+| `pain-signals.jsonl` | One line per mined pain quote. Severity 1-3, linked to a candidate by `candidate_id`. | Append-only. |
+
+Resolve paths in any command or agent with:
+
+```bash
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+MR_DIR="$PROJECT_ROOT/.claude/market-research"
+mkdir -p "$MR_DIR"
+```
+
+Query active candidates (latest-line-wins, excluding kills):
+
+```bash
+jq -s 'group_by(.id) | map(max_by(.updated_at)) | map(select(.verdict != "kill"))' "$MR_DIR/candidates.jsonl"
+```
+
+This persistence layer requires no external service, no API keys, and no setup — the directory is created on first write. See the plugin's README for the full per-file schema and example records.
 
 ### How to apply
 

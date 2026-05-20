@@ -20,14 +20,17 @@ This is the methodology's most subtle and recently-noticed gap. This principle c
 | Competitor codebase analysis (if relevant) | **GitHub MCP** (if installed) | WebFetch on `github.com/owner/repo` URLs | GitHub MCP can query issues, PRs, contributor stats systematically. |
 | ICP density + reachability check (named accounts, decision-makers, firmographic filtering) | **Apollo.io** (installed via `/plugin`) | WebSearch on company names + LinkedIn lookups | Apollo aggregates 250M+ contacts with firmographic filters. WebSearch on category terms returns marketing content, not segment-density numbers. Phase 2 (ICP audit) and Phase 4 (verify angle reachability) both depend on this signal. |
 
-## Workflow-state tools (a different category)
+## Workflow-state persistence (a different category)
 
-The tools below are *not* data-gathering — they hold the structured state of the research itself across multi-pass engagements. Use them when the research becomes complex enough that markdown notes no longer support the queries you need to ask ("which candidates passed Phase 4?", "which kills had reachability as the killer?").
+State across multi-pass research engagements is held in project-local JSONL files, not in any external service. The plugin writes three files under `<project_root>/.claude/market-research/` (path resolved via `git rev-parse --show-toplevel`, falling back to `pwd`):
 
-| Workflow task | Preferred tool | Fallback | Why the preference matters |
-|---|---|---|---|
-| Multi-candidate state tracking across passes 1–6 | **Airtable** (installed via `/plugin`) | Markdown files in `active-research/` | Once you're running 4+ candidates in parallel, candidate state in markdown becomes hard to query. Airtable's structured schema + filtered views (one view per methodology phase) makes status, verdicts, and kill-reasons trivially queryable. |
-| Structured pain-signal capture from many sources | **Airtable** linked table | Markdown bullets per candidate | When pain signals come from 3+ sources (reviews, Reddit, cold-DM) across multiple candidates, an Airtable `pain_signals` table linked to candidates beats nested markdown. |
+| File | Purpose | Write pattern |
+|---|---|---|
+| `candidates.jsonl` | One line per candidate (product / category / segment being evaluated). | Append on status change; latest line per `id` wins on read. |
+| `phase-outputs.jsonl` | One line per (candidate, phase) verdict. Evidence summary plus path to the full agent report. | Append-only. |
+| `pain-signals.jsonl` | One line per mined pain quote. Severity 1-3, linked to a candidate by `candidate_id`. | Append-only. |
+
+Querying ("which candidates passed Phase 4?", "which kills had reachability as the killer?") is trivial via `jq`. No API keys, no setup, no third-party dependency. See the plugin's SKILL.md and README for full schemas and example records.
 
 ## How to apply
 
