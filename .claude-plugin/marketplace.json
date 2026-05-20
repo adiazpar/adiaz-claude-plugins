@@ -1,0 +1,29 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "adiaz-claude-plugins",
+  "description": "Solo-founder product-discovery toolkit: idea-hunt surfaces defensible product ideas from free public web signals; market-research evaluates commercial viability via a six-phase methodology.",
+  "owner": {
+    "name": "Alex Diaz",
+    "email": "alexdiaz0923@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "idea-hunt",
+      "description": "Slash command that scans free public web sources (HN, GitHub, Reddit, IH, YC RFS, Product Hunt) and surfaces one ranked software-product idea per run with cited evidence. No paid APIs.",
+      "source": "./plugins/idea-hunt",
+      "author": {
+        "name": "Alex Diaz",
+        "email": "alexdiaz0923@gmail.com"
+      }
+    },
+    {
+      "name": "market-research",
+      "description": "Six-phase methodology for evaluating commercial viability of digital products. Calibrated for solo founder context. Seven slash commands for phase invocation, seven subagents for adapted prompt execution.",
+      "source": "./plugins/market-research",
+      "author": {
+        "name": "Alex Diaz",
+        "email": "alexdiaz0923@gmail.com"
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "name": "Market Research",
+  "description": "State-tracking base for the market-research methodology. Three linked tables. Each Phase Output is linked to a Candidate; each Pain Signal is linked to a Candidate. Import via the Airtable MCP plugin's create_base / create_table / create_field tools, or set up manually following this schema as a guide.",
+  "tables": [
+    {
+      "name": "Candidates",
+      "description": "Products / categories / segments being evaluated. One row per candidate. Updated as candidates move through the 6-phase methodology.",
+      "fields": [
+        { "name": "Name", "type": "singleLineText", "description": "Short candidate name (product, category, or segment). Primary field." },
+        { "name": "Source", "type": "singleLineText", "description": "Where this candidate was surfaced (Acquire.com listing, Reddit thread, founder's own idea, etc.)" },
+        { "name": "Industry", "type": "singleSelect", "options": { "choices": [{ "name": "Retail/SMB" }, { "name": "Developer tools" }, { "name": "Consumer apps" }, { "name": "Infrastructure SaaS" }, { "name": "AI tools" }, { "name": "Services/Local" }, { "name": "Other" }] } },
+        { "name": "Status", "type": "singleSelect", "options": { "choices": [{ "name": "mapping" }, { "name": "audit-done" }, { "name": "angle-named" }, { "name": "verified" }, { "name": "pressure-tested" }, { "name": "decided" }] } },
+        { "name": "Verdict", "type": "singleSelect", "options": { "choices": [{ "name": "pass", "color": "greenBright" }, { "name": "kill", "color": "redBright" }, { "name": "pending", "color": "grayBright" }] } },
+        { "name": "Kill reason", "type": "multilineText", "description": "One-paragraph explanation of why this candidate was killed, if it was. Reference the specific failure (no angle, reachability, profitability, etc.)" }
+      ]
+    },
+    {
+      "name": "Phase Outputs",
+      "description": "Per-phase agent run verdicts. Linked to Candidates. One row per (candidate, phase) pair.",
+      "fields": [
+        { "name": "Title", "type": "singleLineText", "description": "Short summary, e.g. 'AcmePOS - ICP Audit - kill'. Primary field." },
+        { "name": "Phase", "type": "singleSelect", "options": { "choices": [{ "name": "Map" }, { "name": "Audit" }, { "name": "Profitability" }, { "name": "Adjacent scan" }, { "name": "Angle" }, { "name": "Verify" }, { "name": "Pressure-test" }, { "name": "Extraction" }, { "name": "Decide" }] } },
+        { "name": "Verdict", "type": "singleSelect", "options": { "choices": [{ "name": "pass", "color": "greenBright" }, { "name": "kill", "color": "redBright" }, { "name": "conditional", "color": "yellowBright" }, { "name": "no angle exists", "color": "redDark1" }] } },
+        { "name": "Evidence summary", "type": "multilineText", "description": "Short evidence summary. Full agent report belongs in 'Full output (link to file)'" },
+        { "name": "Agent run date", "type": "date", "options": { "dateFormat": { "name": "iso" } } },
+        { "name": "Full output (link to file)", "type": "url", "description": "Path or URL to the agent's full written report" },
+        { "name": "Candidate", "type": "multipleRecordLinks", "options": { "linkedTableName": "Candidates" }, "description": "Link to the Candidate this phase output belongs to" }
+      ]
+    },
+    {
+      "name": "Pain Signals",
+      "description": "Mined complaints / pain phrases / demand signals from research. Linked to Candidates.",
+      "fields": [
+        { "name": "Pain phrase", "type": "multilineText", "description": "The pain quote or paraphrase, in the user's own words where possible. Primary field." },
+        { "name": "Source URL", "type": "url" },
+        { "name": "Source type", "type": "singleSelect", "options": { "choices": [{ "name": "Review" }, { "name": "Reddit" }, { "name": "Forum" }, { "name": "Cold DM" }, { "name": "App store" }, { "name": "Other" }] } },
+        { "name": "Severity", "type": "singleSelect", "options": { "choices": [{ "name": "1 - mild", "color": "grayBright" }, { "name": "2 - moderate", "color": "yellowBright" }, { "name": "3 - acute", "color": "redBright" }] } },
+        { "name": "Candidate", "type": "multipleRecordLinks", "options": { "linkedTableName": "Candidates" }, "description": "Link to the Candidate this pain signal belongs to" }
+      ]
+    }
+  ],
+  "suggestedViews": {
+    "Candidates": [
+      { "name": "By status", "type": "grid", "groupBy": "Status" },
+      { "name": "Kill log", "type": "grid", "filter": "Verdict = 'kill'", "sortBy": "Updated desc" },
+      { "name": "Active (pass + pending)", "type": "grid", "filter": "Verdict != 'kill'" }
+    ],
+    "Phase Outputs": [
+      { "name": "By candidate", "type": "grid", "groupBy": "Candidate" },
+      { "name": "Adversarial verdicts only", "type": "grid", "filter": "Phase = 'Pressure-test'" }
+    ],
+    "Pain Signals": [
+      { "name": "By candidate", "type": "grid", "groupBy": "Candidate" },
+      { "name": "Acute pain only", "type": "grid", "filter": "Severity = '3 - acute'" }
+    ]
+  },
+  "installNotes": "Two paths to set up this base in your Airtable account: (1) Use the Airtable MCP plugin's `create_base` tool with the `tables` array from this file, then `create_field` to add the `Candidate` multipleRecordLinks fields on Phase Outputs and Pain Signals (those linked fields cannot be created at base-creation time because the Candidates table ID doesn't exist yet). (2) Manually create the base in the Airtable UI following the schema above as a guide. After setup, save your base ID (format: `app[A-Za-z0-9]{14}`) in your plugin settings so subagents know where to write."
+}

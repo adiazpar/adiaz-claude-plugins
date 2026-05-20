@@ -1,0 +1,11 @@
+{
+  "name": "market-research",
+  "displayName": "Market Research Methodology",
+  "version": "0.1.1",
+  "description": "Six-phase methodology for evaluating commercial viability of digital products. Calibrated for solo founder context. Six slash commands for phase invocation, six subagents for adapted prompt execution. References Firecrawl, Exa, Airtable, and Apollo marketplace plugins when installed; falls back to general-purpose tools when absent.",
+  "author": {
+    "name": "Alex Diaz",
+    "email": "alexdiaz0923@gmail.com"
+  },
+  "license": "MIT"
+}
