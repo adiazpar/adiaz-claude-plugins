@@ -40,7 +40,7 @@ Source hierarchy — prefer evidence where humans behave economically over where
 
 Tier 1 (highest signal — paying behavior):
 - Sold-business marketplaces: Acquire.com, Empire Flippers, Flippa, Tiny Acquisitions. Scrape sold listings in candidate categories via Firecrawl; extract MRR, multiple, asking price, category. Real prices for real businesses.
-- Apollo firmographic browsing (mcp__plugin_apollo_apollo__apollo_mixed_companies_search — no credit cost for company-level listing): explore segment density by industry/headcount/revenue/tech-stack.
+- Apollo firmographic browsing (free company-level listing — see Tool Registry): explore segment density by industry/headcount/revenue/tech-stack.
 - Incumbent pricing pages: what category leaders currently charge. Scrape via Firecrawl.
 - B2B contract values: surface from case studies, LinkedIn Sales Navigator signal, or industry pricing reports.
 
@@ -49,7 +49,7 @@ Tier 2 (medium signal — visible complaint):
 - G2 / Capterra one-star reviews of category incumbents. Firecrawl handles JS-rendered review pages. Paying customers complaining about specific tools is high-signal demand for a better version.
 - Hacker News "Who Is Hiring" / "Who Wants to Be Hired" archives: emergent demand from a high-signal community.
 - IndieHackers discussions: launches with traction or its absence; founder-to-founder complaint threads.
-- Exa MCP (mcp__plugin_exa_exa__web_search_exa): semantic search for "X is so frustrating" / "why does no one make Y" / "I would pay for a tool that does Z."
+- Exa semantic search for "X is so frustrating" / "why does no one make Y" / "I would pay for a tool that does Z."
 
 Tier 3 (use only for triangulation, never as primary basis):
 - Google Trends / Glimpse — search interest signal.
@@ -104,15 +104,18 @@ Returning a NO verdict ("no problem surfaced with enough signal density + reacha
 
 ## Tool selection
 
-Per the `market-research` skill's "Tool-selection fallback matrix" — this pass uses the broadest tool stack in the methodology:
+Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
 
-- **For sold-business marketplace data (Tier 1):** invoke `firecrawl scrape <url> -o <file>` via Bash on Acquire.com, Empire Flippers, Flippa, Tiny Acquisitions listing pages. Firecrawl handles JS-rendered listing pages and pagination.
-- **For firmographic density and segment exploration (Tier 1):** use Apollo MCP — `mcp__plugin_apollo_apollo__apollo_mixed_companies_search` for browsing companies by filter (no credit cost), `mcp__plugin_apollo_apollo__apollo_organizations_enrich` (1 credit) reserved for top-2 finalist segments only. Do NOT burn enrichment credits during exploratory browsing.
-- **For complaint mining and semantic search (Tier 2):** use `mcp__plugin_exa_exa__web_search_exa` for varied-phrasing queries ("X is so frustrating", "I would pay for", "why does no one make Y"); use `firecrawl scrape` for G2 / Capterra review pages; use WebFetch on Reddit JSON endpoints (`/r/SUBREDDIT/top.json?limit=100`) for free Reddit access.
-- **For incumbent pricing (Tier 1):** `firecrawl scrape` on pricing pages of category leaders.
-- **For trend triangulation (Tier 3, supplementary only):** WebSearch + Glimpse if available. Never use trend data as the sole basis for ranking a candidate.
+**This phase (0 — demand discovery) prioritizes — the broadest stack in the methodology:**
+- **Firecrawl** — sold-business marketplaces (Acquire, Empire Flippers, Flippa, Tiny Acquisitions), incumbent pricing pages, G2/Capterra reviews
+- **Apollo** — firmographic density + segment exploration (enrich finalists only)
+- **Exa** — complaint / willingness-to-pay semantic mining ("X is so frustrating", "I would pay for")
+- **Reddit (free)** — `WebFetch` on `reddit.com/r/<sub>/top.json?limit=100`
+- **WebSearch** — trend triangulation only (supplementary; never the sole basis for ranking)
 
-Keep research targeted: you are mining for problems with evidence, not producing a general market overview. Depth per candidate (≥3 source URLs for top-3) beats breadth (a sprawling list of speculative candidates). The forcing function is 6-12 problems with top 3 expanded and one recommended next — not an open-ended exploration.
+Fallback: WebSearch + WebFetch (note the limitation in your output).
+
+Keep research targeted: mine for problems with evidence, not a general market overview. Depth per candidate (≥3 source URLs for top-3) beats a sprawling list of speculative candidates. The forcing function is 6-12 problems with top 3 expanded and one recommended next.
 
 ## Common adjustments
 

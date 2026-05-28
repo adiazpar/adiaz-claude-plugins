@@ -83,13 +83,15 @@ This is the analytical move that catches load-bearing wrong claims before months
 
 ## Tool selection
 
-Per the `market-research` skill's "Tool-selection fallback matrix":
+Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
 
-- **For missed-competitor search and systematic review mining** of the named alternatives (the central analytical move of this phase — most kills come from a hidden incumbent the first scan missed): invoke `firecrawl scrape <url> -o <file>` via Bash. Firecrawl handles JS-rendered pages, pagination, and bulk extraction that WebFetch cannot. Mine Capterra / G2 / Trustpilot / App Store / Play Store / Indie Hackers / Product Hunt for one-star and three-star reviews of EACH named alternative, plus active searches for products NOT in the named-alternatives list that might be hidden incumbents.
-- **For semantic search of disconfirming evidence** across forums (e.g., "people who tried [the candidate's approach] and failed," "why [the platform] doesn't work for [the segment]," "switched away from [proposed angle] because…"): use the Exa MCP tool (`mcp__plugin_exa_exa__web_search_exa`) if available in your tool list. Exa's semantic search surfaces disconfirming patterns that exact-keyword search misses.
-- **For verifying the target segment is reachable AND profitable enough to support the angle's pricing assumption** (the angle is moot if the segment can't be reached or can't sustain the price): use Apollo.io's MCP tools — `mcp__plugin_apollo_apollo__apollo_mixed_companies_search` for browsing companies matching the segment's firmographics (no lead credits) and `mcp__plugin_apollo_apollo__apollo_contacts_search` to assess decision-maker reachability. Reserve `mcp__plugin_apollo_apollo__apollo_organizations_enrich` (1 credit per enrich) for top-2 finalist verifications only — do not burn credits on exploratory firmographic browsing.
-- **For conversational synthesis with citations** ("what does the public web say about why [proposed angle] would or wouldn't work for [segment]"): use Perplexity Sonar if available.
-- **Fallback**: WebSearch + WebFetch are always available. If neither Firecrawl nor Exa is installed, WebSearch + WebFetch + careful URL-by-URL reading covers the same ground, just slower. Note the limitation in your output.
+**This phase (5 — pressure test) prioritizes:**
+- **Firecrawl** — missed-competitor search + review mining of named alternatives (central move; hidden incumbents, 1★/3★ reviews)
+- **Exa** — disconfirming evidence ("people who tried [approach] and failed", "switched away from [angle] because…")
+- **Apollo** — segment reachability + price-sustainability of the angle's pricing assumption
+
+Fallback: WebSearch + WebFetch (note the limitation in your output).
+
 - **Tool-selection drift warning specific to Phase 5:** the failure mode here is producing a general "counterarguments" essay rather than a focused killer-or-no-killer verdict. If you find yourself listing concerns without citing specific URLs and specific load-bearing claims, you have drifted. Re-anchor on the three sentences of `[NAMED_ANGLE]` and attack each clause specifically.
 - Keep research targeted: you are attacking specific clauses in the named angle, not producing a general competitor landscape. Depth on the load-bearing claims (with URLs and quote-level evidence) beats breadth across tangentially-related concerns.
 

@@ -58,12 +58,11 @@ Critical constraints:
 
 ## Tool selection
 
-Per the `market-research` skill's "Tool-selection fallback matrix":
+Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
 
-- **For firmographic exploration of adjacent segments** (how many named companies match this segment? what's the segment density? can the founder reach them?): use Apollo.io's MCP tools. `mcp__plugin_apollo_apollo__apollo_mixed_companies_search` is the primary tool for browsing companies by firmographic filter (industry, size, geography) — this costs no lead credits and is appropriate for exploratory browsing. `mcp__plugin_apollo_apollo__apollo_organizations_enrich` is reserved for the top-2 finalist candidates only (1 credit per enrich) to get detailed company data. `mcp__plugin_apollo_apollo__apollo_contacts_search` is used to assess decision-maker reachability for top candidates. Reserve enrichment credits for finalist segments — do not burn credits on exploratory firmographic browsing.
-- **For trade-publication and category-roundup site scraping** (app-store reviews, Capterra, G2, vertical directories, trade association sites): invoke `firecrawl scrape <url> -o <file>` via Bash. Firecrawl handles JS-rendered pages and pagination that WebFetch cannot.
-- **For semantic search of adjacent-segment pain points** (forums, Reddit, Discord, product-hunt threads — varied phrasing of "what tool do [segment X] businesses use"): use the Exa MCP tool (`mcp__plugin_exa_exa__web_search_exa`) if available in your tool list.
-- **For conversational synthesis with citations** ("what does the public web say about segment X's tool landscape and spending patterns"): use Perplexity Sonar if available.
-- **Fallback**: WebSearch + WebFetch are always available. If neither Firecrawl nor Exa is installed, WebSearch + WebFetch + careful URL-by-URL reading covers the same ground, just slower. Note the limitation in your output.
+**This phase (2c — adjacent market scan) prioritizes:**
+- **Apollo** — firmographic exploration of adjacent segments (density, reachability; enrich finalists only)
+- **Firecrawl** — trade-publication / category-roundup / app-store / G2 / Capterra scraping
+- **Exa** — semantic adjacent-segment pain ("what tool do [segment] businesses use")
 
-Do NOT default to WebSearch when the preferred tool is available. Check your tool list at dispatch time and select accordingly.
+Fallback: WebSearch + WebFetch (note the limitation in your output).

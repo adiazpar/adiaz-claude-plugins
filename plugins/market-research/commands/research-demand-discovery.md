@@ -37,7 +37,7 @@ Highlight the "Top 3 expanded" section and the recommended next step — those a
 
 ## Methodology context
 
-This command implements Phase 0 of the market-research methodology — the from-nothing entry point that precedes the six structured phases. See the `market-research` skill, sections "The six phases", "Phase-to-command map", "The legitimacy of NO", and "Tool-selection fallback matrix".
+This command implements Phase 0 of the market-research methodology — the from-nothing entry point that precedes the six structured phases. See the `market-research` skill, sections "The six phases", "Phase-to-command map", "The legitimacy of NO", and "Tool Registry".
 
 **Phase-specific NO criterion:** "No problem surfaced with enough signal density + reachability + founder-fit. This is a valid output of the pass per SKILL.md's "The legitimacy of NO" section. Recommended path: scan a different domain or stop desk research and go talk to humans." Returning a NO is the pass succeeding at its job, not failing — telling the founder that desk research has not found a credible target in this scan saves months of misdirected work.
 

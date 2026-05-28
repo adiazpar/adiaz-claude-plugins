@@ -70,14 +70,16 @@ The framing flip: don't sell the app shell. Sell a specific capability the codeb
 
 ## Tool selection
 
-Per the `market-research` skill's "Tool-selection fallback matrix":
+Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
 
-- **For reading the codebase** (the primary input — this is the central analytical move of this phase): use Read, Grep, Glob, and Bash to understand what the codebase actually contains. Read the schema, the route handlers, the component boundaries. Do not speculate about extractions whose viability depends on rewriting more than 30% of the codebase.
-- **For market validation of extraction candidates** — checking whether standalone products in the candidate category have existing market signal: invoke `firecrawl scrape <url> -o <file>` via Bash for review-heavy pages (Capterra, G2, Indie Hackers, Product Hunt, App Store, Play Store). Firecrawl handles JS-rendered pages and pagination that WebFetch cannot.
-- **For semantic search of developer / indie forums** ("people who tried to sell [capability type] standalone," "is [capability] worth building as a SaaS," "buy vs build [capability]"): use the Exa MCP tool (`mcp__plugin_exa_exa__web_search_exa`) if available in your tool list. Exa's semantic search surfaces signal across developer forums, Indie Hackers threads, and Reddit that exact-keyword search misses.
-- **For B2B reachability of extraction targets** (if the candidate is a B2B tool or API targeting businesses): use Apollo.io's MCP tools — `mcp__plugin_apollo_apollo__apollo_mixed_companies_search` for browsing companies matching the target buyer's firmographics (no lead credits, appropriate for exploratory verification). Reserve `mcp__plugin_apollo_apollo__apollo_organizations_enrich` (1 credit per enrich) for top-1 finalist segments only — do not burn credits on exploratory firmographic browsing.
-- **For conversational synthesis with citations** ("what does the public web say about standalone [capability type] products"): use Perplexity Sonar if available.
-- **Fallback**: WebSearch + WebFetch are always available. If neither Firecrawl nor Exa is installed, WebSearch + WebFetch + careful URL-by-URL reading covers the same ground, just slower. Note the limitation in your output.
+**This phase (6 — extraction) prioritizes:**
+- **Read / Grep / Glob / Bash** — read the codebase (the central move): schema, route handlers, component boundaries
+- **Firecrawl** — market validation of extraction candidates (Capterra, G2, Indie Hackers, Product Hunt, App/Play Store)
+- **Exa** — developer / indie-forum signal ("buy vs build [capability]")
+- **Apollo** — B2B reachability if the candidate targets businesses
+
+Fallback: WebSearch + WebFetch (note the limitation in your output).
+
 - **Tool-selection drift warning specific to Phase 6:** Keep extraction analysis grounded in what the code actually does — read the schema, the route handlers, the component boundaries. Do not speculate about extractions whose viability depends on rewriting more than 30% of the codebase. The goal is what can be pulled with minimal rework, not what could theoretically be built fresh.
 
 Do NOT default to WebSearch when the preferred tool is available. Check your tool list at dispatch time and select accordingly.

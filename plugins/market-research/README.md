@@ -22,14 +22,13 @@ After install, reload plugins with `/reload-plugins` and verify the six commands
 
 The plugin works without these — agents fall back to WebSearch + WebFetch — but the methodology's research quality degrades meaningfully without Tier 1 tooling. Install in priority order:
 
-| Tool | Install via | Used in | Purpose |
-|---|---|---|---|
-| **Firecrawl** (CLI + skill bundle, NOT MCP) | `/plugin install firecrawl@claude-plugins-official` then `npx -y firecrawl-cli@1.16.2 init -y --browser` | Phases 0, 2-5 | Multi-page web scraping with clean markdown output. Invoked via Bash (`firecrawl scrape <url> -o <file>`) not as an MCP tool. |
-| **Exa MCP** | `/plugin install exa@claude-plugins-official` then authenticate | Phases 0, 2b, 2c, 4, 5 | Semantic search for varied-phrasing pain signals. |
-| **Apollo MCP** | `/plugin install apollo@claude-plugins-official` then authenticate | Phases 0, 2, 2c, 4 | ICP density + reachability checks (firmographics, named accounts, decision-makers). |
-| **Perplexity** (raw MCP, optional) | Configure in `claude_desktop_config.json` | Phases 2b, 5 | Conversational synthesis with citations. |
+- **Firecrawl** (CLI + skill bundle, NOT MCP) — `/plugin install firecrawl@claude-plugins-official` then `npx -y firecrawl-cli@1.16.2 init -y --browser`
+- **Exa MCP** — `/plugin install exa@claude-plugins-official` then authenticate
+- **Apollo MCP** — `/plugin install apollo@claude-plugins-official` then authenticate
 
-**Credit awareness:** Firecrawl (~1500 cycle credits), Apollo (lead credits limited on free tier — ~95), Exa (per-search). Reserve Apollo lead credits for Phase 4 reachability checks specifically. See SKILL.md's "Tool-selection fallback matrix" section for the per-task tool routing.
+**Credit awareness:** Firecrawl (~1500 cycle credits), Apollo (lead credits limited on free tier — ~95, reserve enrich for Phase 4 reachability checks), Exa (per-search).
+
+For the full tool list, per-task routing, invocations, and fallbacks, see the **Tool Registry** in SKILL.md — the single canonical source. Agents reference tools by name and defer there.
 
 ## Persistence (project-local JSONL)
 

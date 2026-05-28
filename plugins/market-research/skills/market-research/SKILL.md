@@ -92,25 +92,34 @@ The founder using this methodology should be able to take a NO without it feelin
 
 Phase 0 is the from-nothing entry point. Greenfield workflow: Phase 0 → 3 → 5 → Decide. Brownfield workflow (existing codebase): unchanged, Phase 2 → 2b → 3 → 5, with Phase 0 as optional cross-check.
 
-## 5. Tool-selection fallback matrix
+## 5. Tool Registry
 
-> **Not every preferred tool is MCP.** Each subagent inherits the host session's tool list. If a preferred tool (e.g., `mcp__plugin_firecrawl_firecrawl__scrape` or the `firecrawl` CLI) is not in the list, fall back to the documented alternative without erroring. Firecrawl in 2026 ships as a CLI invoked via Bash, not as an MCP server — agents that try to call `mcp__plugin_firecrawl_*` and find it missing should switch to `firecrawl scrape <url> -o <file>` via Bash without retrying the MCP path.
+This is the **canonical list** of research tools for the methodology — the single place tool
+names, invocations, phase coverage, and fallbacks are defined. Each agent's `## Tool selection`
+section names only the tools its phase prioritizes (with a one-phrase rationale) and defers
+here for the rest.
 
-### Tool preference by research task
+> **Not every tool is MCP.** Each subagent inherits the host session's tool list. MCP tools
+> appear as `mcp__server__tool`; Firecrawl ships as a CLI invoked via Bash (not an MCP server);
+> npm libraries run via Bash/Node. If a preferred tool is not in your list, fall back to the
+> documented alternative without erroring — do not retry a missing MCP path.
 
-| Research task | Preferred tool | Fallback | Why the preference matters |
-|---|---|---|---|
-| Systematic review mining across multiple pages (Capterra, G2, App Store, Play Store, Trustpilot) | **Firecrawl** (multi-page crawl with structured output) | WebFetch (one URL at a time) | WebFetch produces summarization drift on long review pages and can't crawl pagination. Firecrawl returns clean markdown across pages. |
-| Semantic search across forums for varied phrasing of a pain point | **Exa** (neural embeddings, intent-aware) | WebSearch (keyword match) | The same complaint gets phrased 10 different ways. Exa aggregates them; WebSearch keyword-matches will miss most. |
-| Single known URL lookup | **WebFetch** | — | Specialized tools add no value when the URL is already known. WebFetch is faster. |
-| Time-sensitive web queries (current events, recent funding, recent product launches) | **WebSearch** with explicit current year in the query | — | WebSearch is well-suited to fresh queries; specialized scrapers add latency. |
-| Library / framework / API documentation | **Context7** (`mcp__plugin_context7_context7__query-docs`) | WebFetch on official docs | Training-data drift on library APIs is common; Context7 is purpose-built for fresh docs. |
-| Reddit thread analysis | **Apify Reddit Scraper** (if installed) | WebFetch on `reddit.com/r/X/top.json?limit=N` endpoints | Direct JSON endpoints work for small queries; Apify becomes necessary for systematic multi-sub mining. |
-| App Store / Play Store data (listings, reviews, ratings) | **app-store-scraper** / **google-play-scraper** (npm libraries via Bash) | WebFetch on individual listing pages | npm scrapers handle pagination, structured fields, and review extraction; WebFetch returns rendered HTML that's noisy. |
-| Conversational synthesis with citations | **Perplexity Sonar** (if installed) | WebSearch + manual synthesis | Perplexity returns synthesized answers with sources in one call; useful for "what does the public web say about X" questions. |
-| Public news / press releases / blog posts (general web reading) | **WebSearch + WebFetch** combination | — | Standard reading pattern. No specialized tool needed. |
-| Competitor codebase analysis (if relevant) | **GitHub MCP** (if installed) | WebFetch on `github.com/owner/repo` URLs | GitHub MCP can query issues, PRs, contributor stats systematically. |
-| ICP density + reachability check (named accounts, decision-makers, firmographic filtering) | **Apollo.io** (installed via `/plugin`) | WebSearch on company names + LinkedIn lookups | Apollo aggregates 250M+ contacts with firmographic filters. WebSearch on category terms returns marketing content, not segment-density numbers. Phase 2 (ICP audit) and Phase 4 (verify angle reachability) both depend on this signal. |
+| Tool | Shape | Invoke as | Use it for | Phases | Fallback |
+|---|---|---|---|---|---|
+| **Firecrawl** | CLI + skill (Bash) | `firecrawl scrape <url> -o <file>` | Multi-page review/complaint mining (Capterra, G2, App/Play Store, Trustpilot), incumbent pricing pages, sold-business marketplaces | 0, 2b–5 | WebFetch (one URL) |
+| **Exa** | MCP | `mcp__plugin_exa_exa__web_search_exa` | Semantic search for varied-phrasing pain / disconfirming evidence | 0, 2b, 2c, 4, 5 | WebSearch |
+| **Apollo** | MCP | `apollo_mixed_companies_search`, `apollo_contacts_search` (free); `apollo_organizations_enrich` (1 credit, finalists only) | ICP density + decision-maker reachability | 0, 2b, 2c, 4, 5 | WebSearch + LinkedIn |
+| **app-store-scraper / google-play-scraper** | npm lib (Bash) | `npx ...` | Structured App Store / Play Store reviews + ratings | 0, 2b, 4 | WebFetch on listing page |
+| **Context7** *(optional)* | MCP | `mcp__plugin_context7_context7__query-docs` | Fresh library / framework / API docs | dev-tools vertical | WebFetch on official docs |
+| **GitHub MCP** *(optional)* | MCP | github tools | Competitor codebase signals (issues, PRs, contributors) | when relevant | WebFetch on `github.com/owner/repo` |
+| **WebSearch / WebFetch** | built-in | — | Time-sensitive queries (use the current year), single known URLs, general news/blog reading; free Reddit via `WebFetch` on `reddit.com/r/<sub>/top.json?limit=N` | all | — |
+
+### How agents use this
+
+Check your tool list at dispatch, prefer the specialized tool over WebSearch/WebFetch, note
+which tool retrieved each source, and fall back cleanly if a tool is absent. When changing a
+tool's invocation, credit cost, or fallback, edit this table only — agents reference tools by
+name and do not restate invocations.
 
 ### Workflow-state persistence (a different category)
 
@@ -150,7 +159,7 @@ Before starting any research pass:
 ## 6. What to skip
 
 - **General "AI research assistant" SaaS.** You already have Claude Code with WebSearch and Firecrawl. Most consumer "AI research" tools wrap the same primitives at higher cost.
-- **AI-native "validate your startup idea" tools.** ~20 launched 2024-2026 (ValidatorAI, IdeaProof, WorthBuild, ValidateMySaaS, ProductGapHunt, etc.). All GPT wrappers with no proprietary data — they produce TAM / SAM / SOM-style reports from a one-paragraph prompt. The Tier 1 stack (Firecrawl + Exa + Perplexity) gathers actual primary data and is strictly stronger. Treat the entire category as zombie-from-birth. If a tool's pitch is "we'll validate your idea with AI," its evidence has either been validated by someone else (and is now publicly available, so why pay) or made up (in which case the tool is worse than no tool because it manufactures false confidence). See the stance discipline rule below — false-positive validation is a worse failure mode than no validation.
+- **AI-native "validate your startup idea" tools.** ~20 launched 2024-2026 (ValidatorAI, IdeaProof, WorthBuild, ValidateMySaaS, ProductGapHunt, etc.). All GPT wrappers with no proprietary data — they produce TAM / SAM / SOM-style reports from a one-paragraph prompt. The Tier 1 stack (Firecrawl + Exa + Apollo) gathers actual primary data and is strictly stronger. Treat the entire category as zombie-from-birth. If a tool's pitch is "we'll validate your idea with AI," its evidence has either been validated by someone else (and is now publicly available, so why pay) or made up (in which case the tool is worse than no tool because it manufactures false confidence). See the stance discipline rule below — false-positive validation is a worse failure mode than no validation.
 - **LinkedIn data scrapers.** ToS violations + LinkedIn enforcement = high risk. Use sparingly and for direct outreach only, not for systematic data collection.
 - **Twitter/X API.** Pricing changes in 2023+ made it impractical for indie research. Use Exa / Firecrawl / direct WebFetch for X content.
 - **Survey tools (Typeform, Google Forms).** Useful for primary research, not for market research desk work. Add them when you're past desk research and into customer discovery.

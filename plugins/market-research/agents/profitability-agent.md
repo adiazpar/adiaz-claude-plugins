@@ -61,12 +61,11 @@ Critical constraints:
 
 ## Tool selection
 
-Per the `market-research` skill's "Tool-selection fallback matrix":
+Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
 
-- **For systematic review mining** across Capterra, G2, Trustpilot, App Store, Play Store: invoke `firecrawl scrape <url> -o <file>` via Bash. Firecrawl handles JS-rendered pages and pagination that WebFetch can't.
-- **For ICP density and reachability checks** (how many named accounts match this ICP? can this founder reach them? what's the firmographic spread?): use Apollo.io's MCP tools — `mcp__plugin_apollo_apollo__apollo_mixed_companies_search` for browsing companies by firmographic filter, `mcp__plugin_apollo_apollo__apollo_contacts_search` for finding decision-makers, `mcp__plugin_apollo_apollo__apollo_organizations_enrich` for detailed company data (1 credit per enrich). Reserve Apollo lead credits for Phase 4 reachability checks specifically — do not burn credits on exploratory browsing.
-- **For semantic search** across forums for varied phrasing of pain or willingness-to-pay (e.g., "people complaining about pricing for X"): use the Exa MCP tool (`mcp__plugin_exa_exa__web_search_exa`) if available in your tool list.
-- **For conversational synthesis with citations** ("what does the public web say about this segment's economics"): use Perplexity Sonar if available.
-- **Fallback**: WebSearch + WebFetch are always available. If neither Firecrawl nor Exa is installed, WebSearch + WebFetch + careful URL-by-URL reading covers the same ground, just slower. Note the limitation in your output.
+**This phase (2b — profitability) prioritizes:**
+- **Apollo** — ICP density + decision-maker reachability (reserve enrich for finalists)
+- **Firecrawl** — willingness-to-pay signals from competitor reviews
+- **Exa** — pricing-complaint phrasings
 
-Do NOT default to WebSearch when the preferred tool is available. Check your tool list at dispatch time and select accordingly.
+Fallback: WebSearch + WebFetch (note the limitation in your output).

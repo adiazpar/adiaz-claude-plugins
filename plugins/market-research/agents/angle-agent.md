@@ -106,13 +106,13 @@ This is the analytical move that produces something worth pressure-testing. With
 
 ## Tool selection
 
-Per the `market-research` skill's "Tool-selection fallback matrix":
+Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
 
-- **For competitor review mining** across Capterra, G2, Trustpilot, App Store, Play Store reviews of the named alternatives — this is the central analytical move of this phase: invoke `firecrawl scrape <url> -o <file>` via Bash. Firecrawl handles JS-rendered pages and pagination that WebFetch cannot. Mine review pages of EACH named alternative for one-star and three-star complaints (those contain the unmet-need signal).
-- **For semantic search of varied phrasings of pain** across forums (e.g., "people frustrated with [named alternative] X," "users switched from MindBody because…," "wish [alternative] could do Y"): use the Exa MCP tool (`mcp__plugin_exa_exa__web_search_exa`) if available in your tool list. Exa's semantic search surfaces complaint patterns that exact-keyword search misses.
-- **For verifying the target segment is reachable** (the angle must be defensible against the alternatives FOR the named ICP — if the ICP isn't reachable, the angle is moot): use Apollo.io's MCP tools — `mcp__plugin_apollo_apollo__apollo_mixed_companies_search` for browsing companies matching the segment's firmographics (no lead credits, appropriate for exploratory verification), and `mcp__plugin_apollo_apollo__apollo_contacts_search` to assess decision-maker reachability. Reserve `mcp__plugin_apollo_apollo__apollo_organizations_enrich` (1 credit per enrich) for top-2 finalist segments only — do not burn credits on exploratory firmographic browsing.
-- **For conversational synthesis with citations** ("what does the public web say about complaints against [named alternative]"): use Perplexity Sonar if available.
-- **Fallback**: WebSearch + WebFetch are always available. If neither Firecrawl nor Exa is installed, WebSearch + WebFetch + careful URL-by-URL reading covers the same ground, just slower. Note the limitation in your output.
-- Keep research targeted: you are mining for complaint patterns that the candidate specifically addresses, not producing a general competitor landscape. Depth per named alternative (3-5 complaints with URLs) beats breadth across a wider competitor set.
+**This phase (4 — differentiated angle) prioritizes:**
+- **Firecrawl** — competitor review mining of the named alternatives (central move; mine 1★/3★ complaints on EACH alternative for unmet-need signal)
+- **Exa** — varied phrasings of pain ("users switched from X because…", "wish [alternative] could do Y")
+- **Apollo** — verify the target segment is reachable (the angle is moot if it isn't)
 
-Do NOT default to WebSearch when the preferred tool is available. Check your tool list at dispatch time and select accordingly.
+Fallback: WebSearch + WebFetch (note the limitation in your output).
+
+Keep research targeted: mine for complaint patterns the candidate specifically addresses, not a general competitor landscape. Depth per named alternative (3-5 complaints with URLs) beats breadth.
