@@ -1,10 +1,10 @@
 {
   "name": "re-discipline",
   "version": "0.1.0",
-  "description": "Knowledge-management discipline for the snaphak-re reverse-engineering project (v2: campaign lifecycle). Directory = epistemic status (active/provisional, docs/truth/verified, docs/history/chronicles retrospective, archive/irreproducible). Campaign-lifecycle skills: onboard, open-campaign, delegate, review-subagent, promote-truth (the DIRECT-evidence Wall), overturn, close-campaign. Agent-team-lifecycle skills: hire-agent + decide-agent (promote|reject|fire) - interview and onboard external AI agents (Codex, Gemini, local runners) as RE drafters in an isolated recruiting/ dir, benchmarked against the team. Manager (Claude Code) ratifies; subagents draft.",
-  "version_note": "v2 supersedes the v1 four-Rituals model.",
+  "description": "Disciplined, evidence-based knowledge management for reverse-engineering and research projects. Core rule: where a file lives tells you how much to trust it -- provisional work in active/, facts verified by DIRECT evidence in docs/truth/ (nothing becomes 'truth' without it -- the 'Wall'), finished investigations written up as chronicles in docs/history/. You work in 'campaigns': open an investigation, optionally delegate parts to subagents, review their findings against the Wall, promote only what's proven, then close it into a chronicle. Includes an optional lifecycle for hiring external AI agents (Codex, Gemini, local models) as research drafters. Run /init-project to add the whole structure to any repo -- the generic method stays in the plugin; your project's mission and specifics live in a project profile.",
   "author": {
-    "name": "snaphak-re project"
+    "name": "Alex Diaz",
+    "email": "alexdiaz0923@gmail.com"
   },
-  "keywords": ["reverse-engineering", "knowledge-management", "discipline", "workflow"]
+  "keywords": ["reverse-engineering", "research", "knowledge-management", "discipline", "workflow"]
 }
