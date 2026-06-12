@@ -24,6 +24,15 @@
         "name": "Alex Diaz",
         "email": "alexdiaz0923@gmail.com"
       }
+    },
+    {
+      "name": "re-discipline",
+      "description": "Reusable knowledge-management discipline for evidence-driven / reverse-engineering projects: directory = epistemic status (active=provisional, docs/truth=verified, history=retrospective), a DIRECT-evidence Wall, the campaign lifecycle (onboard/open/delegate/review/promote/close), a generic-laws vs project-profile split with init-project scaffolding + self-healing recovery, and an external-agent (Codex/Gemini/local) hire/interview/decide lifecycle. Manager ratifies; subagents draft.",
+      "source": "./plugins/re-discipline",
+      "author": {
+        "name": "Alex Diaz",
+        "email": "alexdiaz0923@gmail.com"
+      }
     }
   ]
 }

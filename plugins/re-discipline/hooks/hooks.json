@@ -1,0 +1,27 @@
+{
+  "description": "Reminder hooks for the re-discipline plugin. BOTH are CONDITIONAL: they emit only in a re-discipline-INITIALIZED project (one with .claude/project-profile.md or docs/INDEX.md). This makes the plugin safe to install machine-wide -- in a project that hasn't adopted re-discipline the hooks stay silent (run /init-project to adopt). SessionStart nudges onboard; PreCompact nudges checkpoint/close. The command is POSIX sh (Claude Code runs hook commands via sh -c / Git Bash on Windows -- the default 'bash' shell); $CLAUDE_PROJECT_DIR is exported by Claude Code. To disable per-project even when initialized, disable the plugin in that project's .claude/settings.json.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ [ -f \"$CLAUDE_PROJECT_DIR/.claude/project-profile.md\" ] || [ -f \"$CLAUDE_PROJECT_DIR/docs/INDEX.md\" ]; } && echo 'Reminder: invoke the onboard skill before taking any action. Reads docs/INDEX.md -> docs/truth/INDEX.md + docs/history/INDEX.md + any active/<slug>/CAMPAIGN.md.' || true"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ [ -f \"$CLAUDE_PROJECT_DIR/.claude/project-profile.md\" ] || [ -f \"$CLAUDE_PROJECT_DIR/docs/INDEX.md\" ]; } && echo 'Reminder: context about to compact. If a campaign is in flight, rewrite active/<slug>/CAMPAIGN.md (Current state + dead-ends) NOW so the next post-compact agent can pick up cold. If the campaign is solved, invoke close-campaign.' || true"
+          }
+        ]
+      }
+    ]
+  }
+}
