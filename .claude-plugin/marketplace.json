@@ -26,8 +26,8 @@
       }
     },
     {
+      "description": "Disciplined, evidence-based knowledge management for reverse-engineering and research projects. Where a file lives tells you how much to trust it: provisional work in active/, facts verified by DIRECT evidence in docs/truth/ (the 'Wall'), finished investigations as chronicles in docs/history/. You work in 'campaigns' (open -> investigate -> delegate to subagents -> review against the Wall -> promote what's proven -> close into a chronicle), with an optional lifecycle for hiring external AI agents as research drafters. /init-project drops the structure into any repo.",
       "name": "re-discipline",
-      "description": "Reusable knowledge-management discipline for evidence-driven / reverse-engineering projects: directory = epistemic status (active=provisional, docs/truth=verified, history=retrospective), a DIRECT-evidence Wall, the campaign lifecycle (onboard/open/delegate/review/promote/close), a generic-laws vs project-profile split with init-project scaffolding + self-healing recovery, and an external-agent (Codex/Gemini/local) hire/interview/decide lifecycle. Manager ratifies; subagents draft.",
       "source": "./plugins/re-discipline",
       "author": {
         "name": "Alex Diaz",
