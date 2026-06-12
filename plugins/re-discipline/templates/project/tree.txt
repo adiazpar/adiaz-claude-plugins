@@ -1,0 +1,12 @@
+# Directory skeleton created by init-project (one dir per line, repo-relative).
+# Each is the home of one epistemic status (CLAUDE.md s1). Empty dirs get a .gitkeep.
+docs
+docs/truth
+docs/history
+docs/history/chronicles
+docs/backlog
+active
+archive
+src
+tests
+tools

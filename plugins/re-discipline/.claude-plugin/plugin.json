@@ -1,0 +1,10 @@
+{
+  "name": "re-discipline",
+  "version": "0.1.0",
+  "description": "Knowledge-management discipline for the snaphak-re reverse-engineering project (v2: campaign lifecycle). Directory = epistemic status (active/provisional, docs/truth/verified, docs/history/chronicles retrospective, archive/irreproducible). Campaign-lifecycle skills: onboard, open-campaign, delegate, review-subagent, promote-truth (the DIRECT-evidence Wall), overturn, close-campaign. Agent-team-lifecycle skills: hire-agent + decide-agent (promote|reject|fire) - interview and onboard external AI agents (Codex, Gemini, local runners) as RE drafters in an isolated recruiting/ dir, benchmarked against the team. Manager (Claude Code) ratifies; subagents draft.",
+  "version_note": "v2 supersedes the v1 four-Rituals model.",
+  "author": {
+    "name": "snaphak-re project"
+  },
+  "keywords": ["reverse-engineering", "knowledge-management", "discipline", "workflow"]
+}
