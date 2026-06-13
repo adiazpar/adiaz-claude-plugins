@@ -66,8 +66,8 @@ The report may list **MEMORY CANDIDATES** (durable cross-session facts the draft
 
 ### Step 6: Fold the rest into the campaign
 
-- Update `active/<slug>/CAMPAIGN.md`: record the subagent (name, date), which claims were PROMOTEd, which are on HOLD (with the DIRECT evidence that would resolve them), which are DROPped (into "Dead ends so far"), and any new open questions.
-- For NEW QUESTIONS worth their own pass: add to Open questions or `delegate` a follow-up subagent.
+- Update `active/<slug>/CAMPAIGN.md`: record the subagent (name, date), which claims were PROMOTEd, which are on HOLD (with the DIRECT evidence that would resolve them), which are DROPped (into "Dead ends so far"), and any CORRECTIONS/OVERTURNS the report flagged against earlier claims (reconcile them now, before they propagate).
+- A report's **RESIDUAL UNCERTAINTIES** are its evidence boundary, not a work queue. YOU (the manager) decide what becomes next work: fold a `blocks`-tagged item into the campaign's Open questions, `delegate` a follow-up, or let it rest. The subagent reported where its evidence ended; choosing the next move is your call, not theirs.
 - **Subagent artifacts STAY** in `active/<slug>/subagents/<name>/` — they're provenance until close-campaign dispositions them.
 
 ### Step 7: Commit (only if something was promoted)

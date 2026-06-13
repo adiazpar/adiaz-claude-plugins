@@ -32,6 +32,17 @@ data for flag names — CLIs churn. Record findings in `CANDIDATE.md`; map them 
 11. **Local-runner specifics** (Qwen/Ollama/LM Studio/llama.cpp) — the `command` is the local
     runner or an OpenAI-compatible endpoint shim; confirm it accepts the same exec/prompt shape.
     Capability is the real risk here — the interview is what catches a too-small model.
+12. **How this model prefers to be prompted** (the prompt-style — feeds the agent PROFILE, not the
+    config). WebSearch the provider's *current* prompting guide for THIS model — never rely on
+    training data; models churn their prompting advice as fast as their flags. Capture the
+    model-true specifics: prompt STRUCTURE (XML-tagged spec blocks vs markdown vs plain prose);
+    instruction-following literalness (and whether contradictory instructions are especially
+    harmful — they are for some models); autonomy posture ("propose and proceed" vs "ask"; whether
+    it wants explicit stop-conditions / tool-call budgets); context ordering (context-first vs
+    instructions-first); and any reasoning/effort knob + the right default for substantive RE work.
+    These become the profile's **How to prompt this model** section, which the dispatcher prepends
+    to every brief. Distinct from items 1-11 (how to *drive* the CLI) — this is how to *talk to* the
+    model. Record in `CANDIDATE.md`; draft into `profile-draft.md` (Step 4).
 
 ## Field map → config-draft.json
 
@@ -44,3 +55,8 @@ data for flag names — CLIs churn. Record findings in `CANDIDATE.md`; map them 
 | instructions-file name | `instructions_file` |
 
 Leave `promoted` absent/false in the draft — only `decide-agent promote` sets it.
+
+Item 12 does NOT map into `config.json` — it maps into the **agent profile** (`profile-draft.md`,
+from the `agent-profile.md` template): its `role-fit` is filled after the interview, its "How to
+prompt this model" from item-12 research. `config.json` only gains a `profile` POINTER to that file
+(set at promote). Mechanics → config; prompt-style + role-fit → profile.

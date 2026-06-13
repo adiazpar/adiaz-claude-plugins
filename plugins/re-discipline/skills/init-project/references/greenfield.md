@@ -27,9 +27,12 @@ Anything the user can't answer yet → leave a clearly-marked `TODO` in the prof
    and the body sections from the answers; `TODO`-mark the rest.
 4. Write `docs/INDEX.md`, `docs/truth/INDEX.md`, `docs/history/INDEX.md` from the templates (fill
    `{{PROJECT_NAME}}` / `{{ONE_LINE_FRAMING}}`).
-5. If the agent framework was requested, set up `tools/agents/` and `AGENTS.md` by designing them from
-   the schema in `tools/agents/README.md` + the existing `AGENTS.md` as the reference pattern (no
-   dedicated template ships yet — adapt the documented structure to the new project); otherwise skip.
+5. If the agent framework was requested, set up `tools/agents/` and write `AGENTS.md` from
+   `${CLAUDE_PLUGIN_ROOT}/templates/project/AGENTS.md` (the canonical shared drafter contract — fill
+   `{{PROJECT_NAME}}`, `{{PROJECT_TOOLING_RULES}}`, `{{PROJECT_LIVE_SURFACES}}` from the profile; the
+   report-format section ships filled — do NOT rewrite it). Create `tools/agents/profiles/` (empty
+   until the first hire) — per-agent prompt-style + role-fit overlays live there, materialized by
+   `decide-agent` from the `agent-profile.md` template. Otherwise skip the whole framework.
 6. Note that auto-memory is harness-managed (lives outside the repo at `~/.claude/projects/<proj>/memory/`)
    — do NOT seed memory content; it is earned per-project.
 
