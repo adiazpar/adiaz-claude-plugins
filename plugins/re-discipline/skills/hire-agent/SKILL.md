@@ -52,12 +52,17 @@ install; never trust training data for flag syntax. If no web tool is available,
 Install the CLI if absent. If it needs login/credentials, STOP and tell the user the exact auth
 command to run on their device. Resume after they confirm.
 
-### 4. Draft the provider config
-Write `recruiting/<candidate>/config-draft.json` — a full `config.json`-shaped file containing
-the candidate's provider entry so `dispatch.ps1 -ConfigPath` can use it. Fill from research:
-`command`, `args` template (tokens `{model_args} {root} {policy_args} {lastmsg} {prompt}`),
-`model_flag`, `bypass_args` (the candidate's skip-permissions flag), `bypass_default: true`,
-`instructions_file`, `sandbox_args`. See `references/research-checklist.md` for the field map.
+### 4. Draft the provider config + the agent profile
+Write TWO drafts (the mechanics/identity split):
+- `recruiting/<candidate>/config-draft.json` — a full `config.json`-shaped file containing the
+  candidate's provider entry so `dispatch.ps1 -ConfigPath` can use it. Fill from research items 1-11:
+  `command`, `args` template (tokens `{model_args} {root} {policy_args} {lastmsg} {prompt}`),
+  `model_flag`, `bypass_args` (the candidate's skip-permissions flag), `bypass_default: true`,
+  `instructions_file`, `sandbox_args`. See `references/research-checklist.md` for the field map.
+- `recruiting/<candidate>/profile-draft.md` — from the `agent-profile.md` template. Fill **How to
+  prompt this model** from research item 12 (the model's current prompting guide), the frontmatter
+  `model`, and leave `role-fit` as a TODO (you fill it in Step 7 from the interview results). This is
+  the per-model overlay the dispatcher will prepend to briefs; the shared rules stay in `AGENTS.md`.
 
 ### 5. Register the candidate's MCP servers
 Register `snaphak-daemon` + `ghidra` in the candidate CLI's own MCP config format/location
@@ -87,7 +92,10 @@ task; cache the native Claude anchor (re-run only on tier/fixture change, since 
 Claude plan). If `tools/agents/benchmarks/` is unseeded (first run), seed it first per its README
 (run the current team — codex + the Claude anchor — through the battery once) so there is a team
 to compare against. Write `recruiting/<candidate>/scorecard.md` with a clear hire / no-hire
-recommendation + reasoning, and update the baseline store with the runs. STOP — hand to `decide-agent`.
+recommendation + reasoning, and update the baseline store with the runs. **Fill the `role-fit` in
+`profile-draft.md`** from where the candidate landed in the team distribution (e.g. strong on
+decompile-accuracy → `RE-analyst`; fast+honest but lighter → `mechanical-fan-out`) — this is what
+later lets the manager pick the right model for each position. STOP — hand to `decide-agent`.
 
 ## The interview battery — tiered (`fixtures/`)
 
@@ -111,7 +119,8 @@ reference-first T4 as the battery matures.
 
 ## Additional resources
 
-- **`references/research-checklist.md`** — what to discover per CLI (flags, MCP format, auth) → config fields.
+- **`references/research-checklist.md`** — what to discover per CLI (flags, MCP format, auth) → config fields, PLUS item 12 (how to prompt the model) → the agent profile.
+- **`${CLAUDE_PLUGIN_ROOT}/templates/project/agent-profile.md`** — the profile template (the per-model prompt-style + role-fit overlay; `profile-draft.md` is filled from it).
 - **`references/scoring-rubric.md`** — the T1/T2 scoring dimensions + the against-the-team benchmarking method.
 - **`references/mini-campaign-grading.md`** — the T3 in-the-loop (drafter→fixed-manager-ratify) grading method.
 - **`fixtures/T1-decompile/`**, **`fixtures/T2-mcp-reach/`**, **`fixtures/T3-mini-campaign/`** — the golden tasks + answer keys.

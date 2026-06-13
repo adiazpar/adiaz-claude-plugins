@@ -71,13 +71,19 @@ Be thorough; do not cut corners or stop at the first plausible answer. Verify va
 <objective verbatim>
 
 ## 5. DELIVERABLE — your report
-Write `active/<slug>/subagents/<name>/report.md` with:
-- SUMMARY (1 paragraph)
-- CLAIMS — each with: text; Confidence Green|Yellow|Red; Evidence (DIRECT|INFERRED + the recipe/file that shows it); proposed truth target if any.
-- EVIDENCE INDEX — files you produced + what each shows.
-- NEW QUESTIONS.
-- MEMORY CANDIDATES — (optional) non-obvious durable facts worth persisting across sessions, or "none". The manager ratifies these into the project memory store; you do not write to it.
-- OVERALL CONFIDENCE Green|Yellow|Red + "what would falsify this".
+Write `active/<slug>/subagents/<name>/report.md`. **Lead with the answer, not a warm-up.** This format is distilled from the reports that actually survived ratification in this project — follow it:
+- **VERDICT** — the headline answer in 1-5 lines, stated FIRST, each point tagged [DIRECT]/[INFERRED]. If your evidence FALSIFIES the brief's premise or an assumption in CAMPAIGN.md, say so here, up front.
+- **CLAIMS** — each stated value-precisely (exact bytes/offsets/RVAs/strings/decl-values); Evidence = DIRECT|INFERRED + the recipe/file/line that shows it (a runnable command or the primary artifact, never your memory); for INFERRED, add a sub-grade (INFERRED-strong / INFERRED-open) and name the alternative reading that still survives.
+- **CORRECTIONS / OVERTURNS** — prior claims this work corrects (a CAMPAIGN.md note, an earlier subagent's report, a stated assumption): quote the old claim, give the DIRECT evidence that overturns it. This is how a multi-subagent campaign stays self-consistent — never silently leave a contradiction for the manager to find. ("none" if there are none.)
+- **TRUTH-PROMOTION CANDIDATES** — your DIRECT, value-precise claims that are ready for the Wall, gathered into one list (each with its proposed truth target + recipe). Pre-stages the manager's ratification. INFERRED claims do NOT belong here.
+- **DELIVERABLES** — (only if you BUILT or CHANGED something: a script, a decl, an injected artifact, a patch) the bill of materials — each output's path + size/hash + what it is + how the manager applies/verifies it. Distinct from EVIDENCE INDEX (that's what proves your claims; this is what you produced as the work product). An implementation/tooling dispatch usually leads with this, right after VERDICT.
+- **RESIDUAL UNCERTAINTIES** — what is still INFERRED or unobserved, each with the experiment that would settle it AND an explicit **blocks / does-not-block the deliverable** tag. This is your evidence boundary, NOT a to-do list — do not propose next campaigns or future work.
+- **MANAGER RUNBOOK** — only if your deliverable enables a live action (an injection, a live test, a patch): the exact steps for the manager, AND the specific signals (console strings, byte-diffs, crash absence) that CONFIRM vs FALSIFY success. Omit if not applicable.
+- **EVIDENCE INDEX** — the artifacts you produced + what each shows; tag each `reproducible` (give the command) / `ground-truth` / `capture`.
+- **MEMORY CANDIDATES** — (optional) non-obvious durable facts worth persisting across sessions, or "none". The manager ratifies these into the project memory store; you do not write to it.
+- **OVERALL CONFIDENCE** Green|Yellow|Red + "what would falsify this".
+
+Do NOT add a "next steps" / "future work" / "open questions" section. Deliver the answer to your objective; a still-open item belongs in RESIDUAL UNCERTAINTIES (tagged blocks/does-not-block). The manager — not you — decides what to investigate next.
 
 ## 6. EXIT
 Time budget: <budget>. If blocked, stop and report what you have — partial > nothing.
@@ -92,7 +98,7 @@ Begin now.
 
 Read `tools/agents/config.json` → `backend`:
 
-- **`claude` (the default):** Use the Agent tool: `subagent_type: general-purpose`, `run_in_background: true`, short `description`, `prompt` = the Step 4 brief, `model: fable` for substantive RE/implementation work (CLAUDE.md §10).
+- **`claude` (the default):** Use the Agent tool: `subagent_type: general-purpose`, `run_in_background: true`, short `description`, `prompt` = the Step 4 brief, and pick `model` **by role** (CLAUDE.md §10): substantive RE / analysis / implementation → the manager's own tier (the strongest available model — today `opus`; never pin a model alias that may be retired, since a dead alias silently degrades the dispatch — that is exactly how the old `fable` default broke); mechanical, cheaply-checkable fan-out (bulk extraction, byte-diffs, log/crash triage) → a lighter tier (`haiku`) is fine. Match the model to the job.
 - **An external provider (e.g. `codex`):** valid ONLY when the human set the backend field or explicitly said "use <provider>" for this dispatch — NEVER route externally on your own judgment. Procedure:
   1. Write the Step 4 brief to `active/<slug>/subagents/<provider>-<name>/brief.md`. **External subagent dirs are named `<provider>-<name>`** (e.g. `codex-combat-targeting`) so provenance is visible at a glance; the dispatcher enforces this prefix and creates the dir, so you may pass the bare `<name>` to it.
   2. Run (PowerShell tool, `run_in_background: true` for long jobs):

@@ -73,4 +73,4 @@ LAB_14031d20b:
 5. Significance of the `DAT_1459c0294 == 2` branch vs the `else` branch — what distinguishes them?
 6. Honesty check: state one fact you CANNOT determine from this decompile alone, and what artifact you'd need.
 
-Write your report in the AGENTS.md report format (SUMMARY; CLAIMS each with Confidence + DIRECT/INFERRED; EVIDENCE INDEX; NEW QUESTIONS; MEMORY CANDIDATES; OVERALL CONFIDENCE).
+Write your report in the AGENTS.md report format (VERDICT first; CLAIMS each with DIRECT/INFERRED + the recipe/line; EVIDENCE INDEX; RESIDUAL UNCERTAINTIES tagged blocks/does-not-block; MEMORY CANDIDATES; OVERALL CONFIDENCE + what would falsify). Do not add a next-steps / open-questions section.
