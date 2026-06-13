@@ -1,6 +1,6 @@
 {
   "name": "re-discipline",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Disciplined, evidence-based knowledge management for reverse-engineering and research projects. Core rule: where a file lives tells you how much to trust it -- provisional work in active/, facts verified by DIRECT evidence in docs/truth/ (nothing becomes 'truth' without it -- the 'Wall'), finished investigations written up as chronicles in docs/history/. You work in 'campaigns': open an investigation, optionally delegate parts to subagents, review their findings against the Wall, promote only what's proven, then close it into a chronicle. Includes an optional lifecycle for hiring external AI agents (Codex, Gemini, local models) as research drafters. Run /init-project to add the whole structure to any repo -- the generic method stays in the plugin; your project's mission and specifics live in a project profile.",
   "author": {
     "name": "Alex Diaz",
