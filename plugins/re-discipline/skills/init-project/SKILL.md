@@ -52,7 +52,7 @@ The project identity (mission, the neutral `framing` one-liner) is declared once
 `.claude/project-profile.md` frontmatter + body. Everything else must POINT or PULL, never restate:
 - **Claude-loaded docs** (CLAUDE.md, the INDEX files) → static reference (CLAUDE.md `@import`s the profile;
   INDEX mission line points at it).
-- **Generated prompts** (`tools/agents/dispatch.ps1` bootstrap, delegate/interview briefs) → runtime
+- **Generated prompts** (`agents/dispatch.ps1` bootstrap, delegate/interview briefs) → runtime
   injection: the orchestrator/tool reads `framing` from the profile frontmatter and injects the literal
   text. `dispatch.ps1` already does this — do NOT re-hardcode a project string in a generated prompt.
 

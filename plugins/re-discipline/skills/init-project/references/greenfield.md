@@ -13,7 +13,7 @@ Ask via `AskUserQuestion` (batch the related ones; don't drip). Needed to fill t
 - **Mission** — one or two sentences; the long-term deliverable.
 - **Source-of-record** — does the subject define its own authoritative data (schemas/decls/specs)? Where?
 - **Tooling** — any project tools/harnesses to register, and the sanctioned way to run each.
-- **Agent framework?** — include `tools/agents/` + `AGENTS.md` for external drafter agents, or skip.
+- **Agent framework?** — include `agents/` + `AGENTS.md` for external drafter agents, or skip.
 
 Anything the user can't answer yet → leave a clearly-marked `TODO` in the profile (do not block).
 
@@ -24,15 +24,20 @@ Anything the user can't answer yet → leave a clearly-marked `TODO` in the prof
 2. Write `.claude/CLAUDE.md` from the template, filling `{{PROJECT_NAME}}`. Keep the `@project-profile.md`
    import and the `<!-- re-discipline:laws -->` markers intact.
 3. Write `.claude/project-profile.md` from the template — fill the frontmatter (`name`/`type`/`framing`)
-   and the body sections from the answers; `TODO`-mark the rest.
+   and the body sections from the answers; `TODO`-mark the rest. Seed `{{DOMAIN_ROLES}}` from the project
+   type + tooling (RE project → scope Analyst as *RE-analyst*; a live oracle/daemon in tooling → a
+   *live-tester*; visual/rendered output → a *vision-reader*; else "none beyond the generic four"). The
+   generic roles stay in CLAUDE.md §10; only domain roles go here.
 4. Write `docs/INDEX.md`, `docs/truth/INDEX.md`, `docs/history/INDEX.md` from the templates (fill
    `{{PROJECT_NAME}}` / `{{ONE_LINE_FRAMING}}`).
-5. If the agent framework was requested, set up `tools/agents/` and write `AGENTS.md` from
+5. If the agent framework was requested, set up the top-level `agents/` dir and write `AGENTS.md` from
    `${CLAUDE_PLUGIN_ROOT}/templates/project/AGENTS.md` (the canonical shared drafter contract — fill
    `{{PROJECT_NAME}}`, `{{PROJECT_TOOLING_RULES}}`, `{{PROJECT_LIVE_SURFACES}}` from the profile; the
-   report-format section ships filled — do NOT rewrite it). Create `tools/agents/profiles/` (empty
-   until the first hire) — per-agent prompt-style + role-fit overlays live there, materialized by
-   `decide-agent` from the `agent-profile.md` template. Otherwise skip the whole framework.
+   report-format section ships filled — do NOT rewrite it). Create `agents/profiles/` (empty until the
+   first hire) — per-agent prompt-style + role-fit overlays live there, materialized by `decide-agent`
+   from the `agent-profile.md` template. (`agents/` is a first-class top-level dir, NOT under `tools/` —
+   the agent team is not "tooling code"; `tools/` exists only if the project has its own code tooling.)
+   Otherwise skip the whole framework.
 6. Note that auto-memory is harness-managed (lives outside the repo at `~/.claude/projects/<proj>/memory/`)
    — do NOT seed memory content; it is earned per-project.
 
