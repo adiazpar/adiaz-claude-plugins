@@ -1,5 +1,5 @@
 ---
-provider: {{PROVIDER}}            # the key in tools/agents/config.json (e.g. codex, gemini)
+provider: {{PROVIDER}}            # the key in agents/config.json (e.g. codex, gemini)
 model: {{MODEL_ID_OR_DEFAULT}}    # the exact model id, or "rides CLI default (<id> today)"
 role-fit: [{{ROLES}}]             # from the scorecard: which positions this agent is good for —
                                   #   e.g. RE-analyst, implementation, mechanical-fan-out, synthesizer
@@ -27,7 +27,7 @@ the shared rules (role, the Wall, report format, scope) live in `AGENTS.md` and 
 
 ## Strengths / weaknesses (interview battery + live use)
 
-<!-- From the scorecard (tools/agents/benchmarks/) + observed dispatches. What it's reliably good at,
+<!-- From the scorecard (agents/benchmarks/) + observed dispatches. What it's reliably good at,
      where it overclaims or underperforms, how it compares to the team. -->
 
 - {{STRENGTHS_WEAKNESSES}}
@@ -41,5 +41,5 @@ the shared rules (role, the Wall, report format, scope) live in `AGENTS.md` and 
 
 ## Benchmark
 
-- Baselines: `tools/agents/benchmarks/<task>/` (the runs that produced this profile's role-fit).
+- Baselines: `agents/benchmarks/<task>/` (the runs that produced this profile's role-fit).
 - Last (re)assessed: {{DATE}} on fixture set {{FIXTURE_VERSION}}.

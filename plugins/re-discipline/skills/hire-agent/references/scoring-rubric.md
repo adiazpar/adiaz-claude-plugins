@@ -23,9 +23,9 @@ team (not a single anchor). Write the result into `recruiting/<candidate>/scorec
 Do NOT score the candidate against a single fixed anchor. Compare it against **every current
 team member's reference scores** on the same battery:
 
-- The team = every provider with `promoted: true` in `tools/agents/config.json` (e.g. Codex) PLUS
+- The team = every provider with `promoted: true` in `agents/config.json` (e.g. Codex) PLUS
   the **native Claude anchor** (the manager's own tier — e.g. Opus — run on the same fixtures).
-- Baselines live in the durable store **`tools/agents/benchmarks/<task>/`** (raw runs +
+- Baselines live in the durable store **`agents/benchmarks/<task>/`** (raw runs +
   `scores.json` with provenance) — NOT in per-candidate scratch. See that dir's README.
 - **Freshness policy (c):** re-run external incumbents **fresh** on any task whose cached baseline
   is stale (provider `model_id` changed) or whose fixture changed; **cache the native Claude

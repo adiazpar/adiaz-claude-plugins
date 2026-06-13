@@ -102,16 +102,18 @@ For any fact the **system-under-study itself defines** (its grammar, schemas, la
 
 Default execution model: **the manager orchestrates; subagents do the legwork.** The manager (you, the **orchestrator**) scopes the campaign, decomposes into subagent-sized tasks, dispatches, ratifies against the Wall (§5-6), integrates, and commits.
 
-**Staff every dispatch by ROLE.** A *role* is a function in the workflow; an *agent* is a model that can perform roles; a profile's `role-fit` says which roles an agent is good at. You bind role→agent per task: name the role the task needs, consult the roster's `role-fit` (`tools/agents/profiles/<agent>.md` + the profile's roster line), pick the agent. Roles are NOT standing agents — they are your staffing vocabulary. The roles:
+**Staff every dispatch by ROLE.** A *role* is a function in the workflow; an *agent* is a model that can perform roles; a profile's `role-fit` says which roles an agent is good at. You bind role→agent per task: name the role the task needs, consult the roster's `role-fit` (`agents/profiles/<agent>.md` + the profile's roster line), pick the agent. Roles are NOT standing agents — they are your staffing vocabulary.
+
+The **generic roles** (every campaign has these):
 
 | Role | Function | Typical fit |
 |---|---|---|
 | **Orchestrator** | decompose · dispatch · ratify · integrate — the ONLY spawner | you (manager tier; never offloaded) |
-| **RE-analyst** | substantive decompile / schema / trace reasoning | manager tier, or a promoted external analyst |
-| **Mechanical fan-out** | bulk extract / diff / enumerate / log-triage (output is cheaply checkable) | a lighter tier (cost lever) |
-| **Live-tester** | drive the live oracle/daemon, classify verdicts | usually YOU directly (single-live-consumer) |
-| **Vision-reader** | screenshot / render-state → structured visual verdict | a multimodal agent (you, or a promoted vision agent) |
+| **Analyst** | the project's substantive reasoning — decompile, proof, schema, research, whatever the hard thinking is | manager tier, or a promoted external analyst |
+| **Mechanical fan-out** | bulk extract / diff / enumerate / triage (output is cheaply checkable) | a lighter tier (cost lever) |
 | **Synthesizer** | cross-report integration · completeness-critique · generalization | manager tier |
+
+**Domain roles live in the profile, not here.** They are born from a project's *apparatus*, so a project declares its own in `.claude/project-profile.md` (§ Roles): a project with a live oracle adds a *live-tester*; one with visual output adds a *vision-reader*; an RE project scopes *Analyst* as an *RE-analyst*. Staff from the generic roles **plus** the project's declared roles. `init-project` seeds the obvious domain roles from the project type; the rest accrete as you build the apparatus (a new capability → a new role).
 
 Topology rules (do not break):
 - **Two tiers only** — you dispatch flat workers; a subagent NEVER spawns its own subagent (investigation is dependency-heavy, not breadth-parallel; nesting adds coordination failure with no payoff).
@@ -119,7 +121,7 @@ Topology rules (do not break):
 - **Single live consumer** — exactly one agent drives the live surface at a time. A vision-reader reads a STATIC captured artifact (a saved screenshot), never the live game, so it never contends.
 - **Right model for the role** — manager tier for reasoning/ratification; lighter tiers for mechanical fan-out. The native model's tiers share one prompting style; **cross-family** agents each carry an agent profile (its prompt-style + role-fit). Parallelize independent tracks; serialize only on real dependencies.
 - **Lead every prompt and message with the project's accurate, neutral framing** — the canonical one-liner in the profile's `framing` field. State that benign purpose plainly, then keep the body strictly task-focused. Precise, correctly-scoped framing produces better output *and* keeps legitimate work from being mis-classified. Never use vague or alarming phrasing that misrepresents the work.
-- **External-agent backend (token offload):** `tools/agents/` dispatches non-Claude drafter agents (see its README). The switch is `tools/agents/config.json → backend`; **only the human flips it.** External drafters get their contract from the repo-root `AGENTS.md`; their reports get identical review-subagent triage. New agents are hired via `hire-agent` + `decide-agent`.
+- **External-agent backend (token offload):** `agents/` dispatches non-Claude drafter agents (see its README). The switch is `agents/config.json → backend`; **only the human flips it.** External drafters get their contract from the repo-root `AGENTS.md`; their reports get identical review-subagent triage. New agents are hired via `hire-agent` + `decide-agent`.
 - **The asymmetry is unchanged (§6):** subagents draft, the manager ratifies — re-derive value-precise claims against the primary artifact before promotion (§5). If the harness blocks a subagent from writing `report.md`, it returns the report as its final message and the manager lands it.
 
 ## 11. Anti-patterns — what NOT to do

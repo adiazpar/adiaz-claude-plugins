@@ -38,6 +38,18 @@ framing: "{{ONE_LINE_FRAMING}}"    # the accurate, neutral one-liner injected in
 <!-- The project's own tools: where they live, how to invoke them, the one sanctioned way to run each.
      e.g. analysis harnesses, daemons, oracles. -->
 
+## Roles (domain-specific)
+
+{{DOMAIN_ROLES}}
+
+<!-- The GENERIC roles (Orchestrator / Analyst / Mechanical-fan-out / Synthesizer) live in CLAUDE.md §10.
+     Declare HERE the roles born from THIS project's apparatus — each: the role, what it does, and which
+     agent/tier fits it. The orchestrator staffs from the generic roles PLUS these. Examples by apparatus:
+       - a live oracle / daemon  -> a *live-tester* role (drive it, classify verdicts; single-live-consumer)
+       - visual / rendered output -> a *vision-reader* role (read a captured screenshot -> structured verdict)
+       - reverse-engineering      -> scope *Analyst* as an *RE-analyst* (decompile / schema / trace)
+     Add a role when you build the capability that needs it; "none beyond the generic four" is a valid value. -->
+
 ## Binaries & paths
 
 {{BINARIES_AND_PATHS}}

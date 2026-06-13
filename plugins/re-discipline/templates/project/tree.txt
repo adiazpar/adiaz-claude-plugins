@@ -9,4 +9,6 @@ active
 archive
 src
 tests
-tools
+# tools/ is NOT force-created -- a project gets it only if it has its own code tooling.
+# The agent team lives in top-level agents/ (created by greenfield Step 5 when the agent
+# framework is adopted), NOT under tools/.

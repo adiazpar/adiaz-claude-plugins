@@ -39,7 +39,7 @@ non-standard dir to keep-or-fold).
 - **Claude-loaded doc** (INDEX, internal READMEs) → replace with a pointer to the profile. (Exception:
   the public/root `README.md` is the human-facing project front page — it may keep a self-contained
   mission/framing for GitHub visitors; just ensure it doesn't contradict the profile.)
-- **Generated prompt** (`tools/agents/dispatch.ps1`, brief templates) → make it read `framing` from the
+- **Generated prompt** (`agents/dispatch.ps1`, brief templates) → make it read `framing` from the
   profile frontmatter and inject it; remove the hardcoded string.
 - **External-agent contract** (`AGENTS.md`) → genericize its opening to rely on the dispatch-injected
   framing; keep only genuinely project-specific content (live surfaces), pointing at the profile.

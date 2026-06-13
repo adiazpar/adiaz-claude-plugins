@@ -53,13 +53,13 @@ The team that does the RE legwork:
 
 ```powershell
 # Promoted external agents (the team):
-(Get-Content tools/agents/config.json -Raw | ConvertFrom-Json).providers.PSObject.Properties |
+(Get-Content agents/config.json -Raw | ConvertFrom-Json).providers.PSObject.Properties |
   Where-Object { $_.Value.promoted } | Select-Object -ExpandProperty Name
 # Any candidate mid-interview:
 Get-ChildItem recruiting -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
 ```
 
-The default backend is native Claude subagents (`tools/agents/config.json → backend`); promoted external agents (e.g. codex) are dispatched via `delegate` when the user routes to them. A candidate in `recruiting/` means a hire is mid-flight (see `hire-agent`/`decide-agent`).
+The default backend is native Claude subagents (`agents/config.json → backend`); promoted external agents (e.g. codex) are dispatched via `delegate` when the user routes to them. A candidate in `recruiting/` means a hire is mid-flight (see `hire-agent`/`decide-agent`).
 
 ### Step 5: Produce the orientation summary
 

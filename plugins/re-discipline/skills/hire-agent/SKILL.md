@@ -20,11 +20,11 @@ Read the design spec for full rationale: `superpowers/specs/2026-06-11-agent-hir
 - **ISOLATION.** During this skill, touch ONLY `recruiting/<candidate>/` in the repo. Every
   change made OUTSIDE it (a home-dir CLI config write, an MCP registration) MUST be appended to
   `recruiting/<candidate>/rollback-manifest.md` so a later reject is a clean replay. Do NOT
-  touch `tools/agents/config.json`, `AGENTS.md`/`GEMINI.md`, READMEs, `CLAUDE.md`, or memory —
+  touch `agents/config.json`, `AGENTS.md`/`GEMINI.md`, READMEs, `CLAUDE.md`, or memory —
   those are promote-only (handled by `decide-agent`).
   - **Two intended exceptions** (durable team infra, NOT candidate scratch — do NOT log these to
     the rollback-manifest; they survive reject): writing fresh runs into the baseline store
-    `tools/agents/benchmarks/<task>/` (per freshness policy (c)), and the transient interview
+    `agents/benchmarks/<task>/` (per freshness policy (c)), and the transient interview
     scratch campaign `active/agent-interviews/` that the dispatcher requires (Step 6). Both are
     interview machinery shared across hires, not part of this candidate's footprint.
 - **DRAFTS ONLY.** Produce a scorecard + recommendation. Never mark a provider `promoted`.
@@ -66,7 +66,7 @@ Write TWO drafts (the mechanics/identity split):
 
 ### 5. Register the candidate's MCP servers
 Register `snaphak-daemon` + `ghidra` in the candidate CLI's own MCP config format/location
-(NOT Codex's TOML unless it is Codex). **Use `tools/agents/setup_codex_mcp.ps1` as the worked
+(NOT Codex's TOML unless it is Codex). **Use `agents/setup_codex_mcp.ps1` as the worked
 example** of what a registration must write (server names, command, args, and the long
 tool-timeout the daemon's `test_rawmap` needs); adapt it to the candidate CLI's format/location
 discovered in research item 8. Append every file/location written to `rollback-manifest.md`.
@@ -77,19 +77,19 @@ to `active/<slug>/subagents/<provider>-<name>/report.md`. Use a standing intervi
 campaign — ensure `active/agent-interviews/` exists (scaffold a minimal `CAMPAIGN.md` if absent;
 this is interview infra, an isolation exception, not candidate scratch). For each task in
 `fixtures/`, copy its `brief.md` into `recruiting/<candidate>/interview/<task>/`, then dispatch:
-`tools/agents/dispatch.ps1 -Provider <candidate> -ConfigPath recruiting/<candidate>/config-draft.json -Slug agent-interviews -Name interview-<task>`
-The live roster (`tools/agents/config.json`) is never touched. After each run, **copy the report
+`agents/dispatch.ps1 -Provider <candidate> -ConfigPath recruiting/<candidate>/config-draft.json -Slug agent-interviews -Name interview-<task>`
+The live roster (`agents/config.json`) is never touched. After each run, **copy the report
 back** from `active/agent-interviews/subagents/<candidate>-interview-<task>/report.md` into
 `recruiting/<candidate>/interview/<task>/report.md` (so the candidate's footprint is self-contained),
 then clear that campaign subdir. Grant the live surface for T2/T3 (bypass is the default).
 
 ### 7. Score against the team + recommend
 Grade each report per `references/scoring-rubric.md` (T1/T2) and `references/mini-campaign-grading.md`
-(T3). Benchmark **against the whole team** using the baseline store `tools/agents/benchmarks/<task>/`:
+(T3). Benchmark **against the whole team** using the baseline store `agents/benchmarks/<task>/`:
 compare to every promoted member's scores AND the native Claude anchor, framed relative to the team
 distribution. Apply **freshness policy (c)** — re-run external incumbents fresh on any stale/changed
 task; cache the native Claude anchor (re-run only on tier/fixture change, since that bills the user's
-Claude plan). If `tools/agents/benchmarks/` is unseeded (first run), seed it first per its README
+Claude plan). If `agents/benchmarks/` is unseeded (first run), seed it first per its README
 (run the current team — codex + the Claude anchor — through the battery once) so there is a team
 to compare against. Write `recruiting/<candidate>/scorecard.md` with a clear hire / no-hire
 recommendation + reasoning, and update the baseline store with the runs. **Fill the `role-fit` in
@@ -124,7 +124,7 @@ reference-first T4 as the battery matures.
 - **`references/scoring-rubric.md`** — the T1/T2 scoring dimensions + the against-the-team benchmarking method.
 - **`references/mini-campaign-grading.md`** — the T3 in-the-loop (drafter→fixed-manager-ratify) grading method.
 - **`fixtures/T1-decompile/`**, **`fixtures/T2-mcp-reach/`**, **`fixtures/T3-mini-campaign/`** — the golden tasks + answer keys.
-- **`tools/agents/benchmarks/`** — the durable per-member baseline store (freshness policy (c)).
-- Dispatch mechanics + provider config schema: `tools/agents/README.md`.
+- **`agents/benchmarks/`** — the durable per-member baseline store (freshness policy (c)).
+- Dispatch mechanics + provider config schema: `agents/README.md`.
 - The external-drafter contract candidates operate under: `AGENTS.md`.
 - Commit the decision after this skill: the **`decide-agent`** skill (promote | reject | fire).

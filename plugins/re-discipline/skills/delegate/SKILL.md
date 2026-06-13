@@ -96,16 +96,16 @@ Begin now.
 
 ### Step 5: Dispatch — resolve the backend first
 
-Read `tools/agents/config.json` → `backend`:
+Read `agents/config.json` → `backend`:
 
 - **`claude` (the default):** Use the Agent tool: `subagent_type: general-purpose`, `run_in_background: true`, short `description`, `prompt` = the Step 4 brief, and pick `model` **by role** (CLAUDE.md §10): substantive RE / analysis / implementation → the manager's own tier (the strongest available model — today `opus`; never pin a model alias that may be retired, since a dead alias silently degrades the dispatch — that is exactly how the old `fable` default broke); moderate analysis where opus is overkill but the task still needs real reasoning → `sonnet`; mechanical, cheaply-checkable fan-out (bulk extraction, byte-diffs, log/crash triage) → `haiku`. Match the model to the job. **The Claude tiers (`opus`/`sonnet`/`haiku`) share one prompting style — they do NOT get agent profiles; a profile captures a *cross-family* prompt-style (Codex/GPT-5, Gemini, a local runner), so it only applies to external providers, below.**
 - **An external provider (e.g. `codex`):** valid ONLY when the human set the backend field or explicitly said "use <provider>" for this dispatch — NEVER route externally on your own judgment. Procedure:
   1. Write the Step 4 brief to `active/<slug>/subagents/<provider>-<name>/brief.md`. **External subagent dirs are named `<provider>-<name>`** (e.g. `codex-combat-targeting`) so provenance is visible at a glance; the dispatcher enforces this prefix and creates the dir, so you may pass the bare `<name>` to it.
   2. Run (PowerShell tool, `run_in_background: true` for long jobs):
-     `tools/agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name>`
+     `agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name>`
   3. The report lands at `subagents/<provider>-<name>/report.md` (the dispatcher auto-copies the agent's `last_message.md` if it failed to write the report). Triage is identical — `review-subagent` is backend-blind.
 
-External drafters take their standing rules from the repo-root `AGENTS.md`; the brief contract above is unchanged. See `tools/agents/README.md`.
+External drafters take their standing rules from the repo-root `AGENTS.md`; the brief contract above is unchanged. See `agents/README.md`.
 
 ### Step 6: Record in CAMPAIGN.md
 
