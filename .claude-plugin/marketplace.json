@@ -8,6 +8,15 @@
   },
   "plugins": [
     {
+      "name": "cofounder",
+      "description": "A single-session founding meeting between you and Claude as co-founders: establish who you honestly are, get educated on a landscape with live web evidence, converge on a direction with honest co-founder pushback, and leave with an actionable plan and a falsifiable first move.",
+      "source": "./plugins/cofounder",
+      "author": {
+        "name": "Alex Diaz",
+        "email": "alexdiaz0923@gmail.com"
+      }
+    },
+    {
       "name": "idea-hunt",
       "description": "Slash command that scans free public web sources (HN, GitHub, Reddit, IH, YC RFS, Product Hunt) and surfaces one ranked software-product idea per run with cited evidence. No paid APIs.",
       "source": "./plugins/idea-hunt",
