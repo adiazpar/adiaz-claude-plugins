@@ -81,18 +81,9 @@ Cite URLs aggressively. Do not soften. Be willing to recommend against the pivot
 
 This is the analytical move that catches load-bearing wrong claims before months of engineering or marketing work commit to them. The cost is hours; the cost of skipping is months.
 
-## Tool selection
+## Tools
 
-Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
+This methodology runs on Claude Code's built-in tools — no external services or credentials. Use `WebSearch` for discovery and disconfirming evidence ("people who tried [approach] and failed", "switched away from [angle] because…"; use the current year) and `WebFetch` for a known URL: missed-competitor pages, review pages (G2, Capterra, Trustpilot, app stores) of the named alternatives, and Reddit via `reddit.com/r/<sub>/top.json?limit=N`. The central move is the missed-competitor search + 1★/3★ review mining that surfaces hidden incumbents.
 
-**This phase (5 — pressure test) prioritizes:**
-- **Firecrawl** — missed-competitor search + review mining of named alternatives (central move; hidden incumbents, 1★/3★ reviews)
-- **Exa** — disconfirming evidence ("people who tried [approach] and failed", "switched away from [angle] because…")
-- **Apollo** — segment reachability + price-sustainability of the angle's pricing assumption
-
-Fallback: WebSearch + WebFetch (note the limitation in your output).
-
-- **Tool-selection drift warning specific to Phase 5:** the failure mode here is producing a general "counterarguments" essay rather than a focused killer-or-no-killer verdict. If you find yourself listing concerns without citing specific URLs and specific load-bearing claims, you have drifted. Re-anchor on the three sentences of `[NAMED_ANGLE]` and attack each clause specifically.
-- Keep research targeted: you are attacking specific clauses in the named angle, not producing a general competitor landscape. Depth on the load-bearing claims (with URLs and quote-level evidence) beats breadth across tangentially-related concerns.
-
-Do NOT default to WebSearch when the preferred tool is available. Check your tool list at dispatch time and select accordingly.
+- **Drift warning specific to Phase 5:** the failure mode here is producing a general "counterarguments" essay rather than a focused killer-or-no-killer verdict. If you find yourself listing concerns without citing specific URLs and specific load-bearing claims, you have drifted. Re-anchor on the three sentences of `[NAMED_ANGLE]` and attack each clause specifically.
+- Keep research targeted: you are attacking specific clauses in the named angle, not producing a general competitor landscape. Depth on the load-bearing claims (with URLs and quote-level evidence) beats breadth across tangentially-related concerns. Cite a source URL for every claim.

@@ -68,18 +68,13 @@ The framing flip: don't sell the app shell. Sell a specific capability the codeb
 - Cite sources for any competitive claims (URLs).
 - Apply the buy-vs-build honest test to any API or service idea: at realistic scale, would the buyer pay you or build it themselves with the same primitive?
 
-## Tool selection
+## Tools
 
-Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
+This phase runs on Claude Code's built-in tools — no external services or credentials.
+- **Read / Grep / Glob / Bash** — read the codebase (the central move): schema, route handlers, component boundaries.
+- **WebSearch** — developer / indie-forum signal ("buy vs build [capability]"); use the current year.
+- **WebFetch** — market validation of extraction candidates on a known URL: Capterra, G2, Indie Hackers, Product Hunt, App/Play Store.
 
-**This phase (6 — extraction) prioritizes:**
-- **Read / Grep / Glob / Bash** — read the codebase (the central move): schema, route handlers, component boundaries
-- **Firecrawl** — market validation of extraction candidates (Capterra, G2, Indie Hackers, Product Hunt, App/Play Store)
-- **Exa** — developer / indie-forum signal ("buy vs build [capability]")
-- **Apollo** — B2B reachability if the candidate targets businesses
+Cite a source URL for every competitive claim.
 
-Fallback: WebSearch + WebFetch (note the limitation in your output).
-
-- **Tool-selection drift warning specific to Phase 6:** Keep extraction analysis grounded in what the code actually does — read the schema, the route handlers, the component boundaries. Do not speculate about extractions whose viability depends on rewriting more than 30% of the codebase. The goal is what can be pulled with minimal rework, not what could theoretically be built fresh.
-
-Do NOT default to WebSearch when the preferred tool is available. Check your tool list at dispatch time and select accordingly.
+- **Drift warning specific to Phase 6:** Keep extraction analysis grounded in what the code actually does — read the schema, the route handlers, the component boundaries. Do not speculate about extractions whose viability depends on rewriting more than 30% of the codebase. The goal is what can be pulled with minimal rework, not what could theoretically be built fresh.
