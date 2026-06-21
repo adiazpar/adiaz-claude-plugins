@@ -40,16 +40,13 @@ Changing files *without* bumping the version will leave installed copies stale �
 adiaz-claude-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          ← marketplace manifest (lists all plugins)
-├── plugins/
-│   ├── idea-hunt/                ← installable plugin
-│   ├── market-research/          ← installable plugin
-│   └── re-discipline/            ← installable plugin (skills + hooks + project templates)
-└── docs/                         ← dev plans, methodology essays, agent-prompt sources (not shipped)
-    ├── idea-hunt/
-    └── market-research/
+└── plugins/
+    ├── idea-hunt/                ← installable plugin
+    ├── market-research/          ← installable plugin
+    └── re-discipline/            ← installable plugin (skills + hooks + project templates)
 ```
 
-The `docs/` directory is development artifacts and is NOT part of any installed plugin. It lives here so the source-of-truth for prompts, principles, and design specs travels with the repo.
+Each plugin is fully self-documenting — design notes, principles, and prompt sources live inside the plugin itself (its `README.md`, `SKILL.md`, commands, and agents), not in a separate notebook.
 
 ## Recommended user setting: disable Claude Code auto-memory
 

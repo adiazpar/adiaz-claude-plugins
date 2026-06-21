@@ -75,11 +75,3 @@ Add to `<your-project>/.claude/settings.json`:
 ## Configuration
 
 Scoring rubric, formula, and hard gates live in `skills/idea-hunt-scoring/SKILL.md`. Edit that file to tune scoring without touching the command logic.
-
-## Design spec
-
-`docs/superpowers/specs/2026-05-19-idea-hunt-design.md`
-
-## Implementation plan
-
-`docs/superpowers/plans/2026-05-19-idea-hunt.md`
