@@ -56,13 +56,8 @@ Critical constraints:
 - The founder-constraint list is hard. If a market requires capabilities the founder doesn't have (Spanish, in-market presence, BD muscle), say so and downgrade accordingly.
 - Cite sources with URLs.
 
-## Tool selection
+## Tools
 
-Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
+This methodology runs on Claude Code's built-in tools — no external services or credentials. Use `WebSearch` for discovery and time-sensitive queries (use the current year) and `WebFetch` for a known URL: trade publications and category roundups, app-store and G2/Capterra review pages, census/BLS/trade-association data, and Reddit via `reddit.com/r/<sub>/top.json?limit=N`.
 
-**This phase (2c — adjacent market scan) prioritizes:**
-- **Apollo** — firmographic exploration of adjacent segments (density, reachability; enrich finalists only)
-- **Firecrawl** — trade-publication / category-roundup / app-store / G2 / Capterra scraping
-- **Exa** — semantic adjacent-segment pain ("what tool do [segment] businesses use")
-
-Fallback: WebSearch + WebFetch (note the limitation in your output).
+Cite a source URL for every claim. Where you couldn't retrieve a source or the evidence is thin, say so in the output.

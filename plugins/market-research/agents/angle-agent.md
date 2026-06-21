@@ -104,15 +104,8 @@ The calling command must supply three inputs when dispatching this agent:
 
 This is the analytical move that produces something worth pressure-testing. Without it, the adversarial pass kills feature descriptions and produces low-information verdicts.
 
-## Tool selection
+## Tools
 
-Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
+This methodology runs on Claude Code's built-in tools — no external services or credentials. Use `WebSearch` for discovery and varied phrasings of pain ("users switched from X because…", "wish [alternative] could do Y"; use the current year) and `WebFetch` for a known URL: competitor reviews (G2, Capterra, Trustpilot, app stores), the named alternatives' own pages, and Reddit via `reddit.com/r/<sub>/top.json?limit=N`. The central move is mining 1★/3★ complaints on EACH named alternative for unmet-need signal.
 
-**This phase (4 — differentiated angle) prioritizes:**
-- **Firecrawl** — competitor review mining of the named alternatives (central move; mine 1★/3★ complaints on EACH alternative for unmet-need signal)
-- **Exa** — varied phrasings of pain ("users switched from X because…", "wish [alternative] could do Y")
-- **Apollo** — verify the target segment is reachable (the angle is moot if it isn't)
-
-Fallback: WebSearch + WebFetch (note the limitation in your output).
-
-Keep research targeted: mine for complaint patterns the candidate specifically addresses, not a general competitor landscape. Depth per named alternative (3-5 complaints with URLs) beats breadth.
+Cite a source URL for every claim. Keep research targeted: mine for complaint patterns the candidate specifically addresses, not a general competitor landscape. Depth per named alternative (3-5 complaints with URLs) beats breadth.

@@ -1,8 +1,8 @@
 {
   "name": "market-research",
   "displayName": "Market Research Methodology",
-  "version": "0.1.1",
-  "description": "Six-phase methodology for evaluating commercial viability of digital products. Calibrated for solo founder context. Seven slash commands for phase invocation, seven subagents for adapted prompt execution. Persists multi-candidate state as JSONL files under the project's .claude/market-research/ directory. References Firecrawl, Exa, and Apollo marketplace plugins when installed; falls back to general-purpose tools when absent.",
+  "version": "0.2.0",
+  "description": "Six-phase methodology for evaluating commercial viability of digital products. Calibrated for solo founder context. Seven slash commands for phase invocation, seven subagents for adapted prompt execution. Persists multi-candidate state as JSONL files under the project's .claude/market-research/ directory. Runs entirely on Claude Code's built-in tools — no external services or credentials required.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"

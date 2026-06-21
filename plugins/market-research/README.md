@@ -2,7 +2,7 @@
 
 > A six-phase methodology for evaluating commercial viability of digital products. Built for solo founders; adaptable to other founder profiles.
 
-This plugin packages the market-research methodology as installable Claude Code components: one umbrella skill, seven slash commands (Phase 0 demand-discovery plus the six structured agent passes), and seven matching subagents that execute each phase with adapted prompt templates. Multi-candidate state persists as JSONL files in the project's `.claude/market-research/` directory — no external service required. Designed to work alongside (not bundle) marketplace plugins for Firecrawl, Exa, and Apollo — falls back to general-purpose tools when those are absent.
+This plugin packages the market-research methodology as installable Claude Code components: one umbrella skill, seven slash commands (Phase 0 demand-discovery plus the six structured agent passes), and seven matching subagents that execute each phase with adapted prompt templates. Multi-candidate state persists as JSONL files in the project's `.claude/market-research/` directory — no external service required. The methodology runs entirely on Claude Code's built-in tools (`WebSearch`, `WebFetch`, and the code-reading tools for the codebase phases) — no external plugins, credentials, or credits.
 
 ## Install
 
@@ -18,17 +18,15 @@ claude --plugin-dir /path/to/market-research-methodology/plugin
 
 After install, reload plugins with `/reload-plugins` and verify the six commands appear in `/help`.
 
-## External dependencies
+## Tools
 
-The plugin works without these — agents fall back to WebSearch + WebFetch — but the methodology's research quality degrades meaningfully without Tier 1 tooling. Install in priority order:
+The methodology runs entirely on Claude Code's built-in tools — no external services, credentials, or credits:
 
-- **Firecrawl** (CLI + skill bundle, NOT MCP) — `/plugin install firecrawl@claude-plugins-official` then `npx -y firecrawl-cli@1.16.2 init -y --browser`
-- **Exa MCP** — `/plugin install exa@claude-plugins-official` then authenticate
-- **Apollo MCP** — `/plugin install apollo@claude-plugins-official` then authenticate
+- **`WebSearch`** — discovery and time-sensitive queries (complaint / willingness-to-pay phrasings, firmographic and segment data, trend triangulation, missed-competitor and disconfirming-evidence searches).
+- **`WebFetch`** — a known URL: competitor reviews (G2, Capterra, Trustpilot, app stores), incumbent pricing pages, sold-business listings, trade publications, and free Reddit via `reddit.com/r/<sub>/top.json?limit=N`.
+- **`Read` / `Grep` / `Glob` / `Bash`** — reading the codebase in the Phase 2 audit and Phase 6 extraction passes.
 
-**Credit awareness:** Firecrawl (~1500 cycle credits), Apollo (lead credits limited on free tier — ~95, reserve enrich for Phase 4 reachability checks), Exa (per-search).
-
-For the full tool list, per-task routing, invocations, and fallbacks, see the **Tool Registry** in SKILL.md — the single canonical source. Agents reference tools by name and defer there.
+Every research pass cites a source URL for each claim and flags where a source was unreachable or the evidence was thin. See the **Research tools** section in SKILL.md for the canonical per-phase reference.
 
 ## Persistence (project-local JSONL)
 
@@ -163,4 +161,4 @@ MIT.
 
 Alex Diaz (<alexdiaz0923@gmail.com>)
 
-Built on top of a personal market-research methodology repository. Plugin v0.1.1.
+Built on top of a personal market-research methodology repository. Plugin v0.2.0.

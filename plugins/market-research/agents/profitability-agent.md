@@ -59,13 +59,8 @@ Critical constraints:
 - Cite sources with URLs. Where data is missing, say so explicitly.
 - If a [FOUNDER_PROFILE] founder cannot credibly access this market, say so clearly.
 
-## Tool selection
+## Tools
 
-Canonical source: the `market-research` skill's **Tool Registry** — names below; invocation, credit, and fallback detail live there. Check your tool list at dispatch; prefer specialized tools over WebSearch/WebFetch; note which tool retrieved each source; fall back cleanly if a tool is absent.
+This methodology runs on Claude Code's built-in tools — no external services or credentials. Use `WebSearch` for discovery and time-sensitive queries (use the current year) and `WebFetch` for a known URL: competitor reviews (G2, Capterra, Trustpilot, app stores), incumbent pricing pages, payment-rail and development-bank reports, and Reddit via `reddit.com/r/<sub>/top.json?limit=N`.
 
-**This phase (2b — profitability) prioritizes:**
-- **Apollo** — ICP density + decision-maker reachability (reserve enrich for finalists)
-- **Firecrawl** — willingness-to-pay signals from competitor reviews
-- **Exa** — pricing-complaint phrasings
-
-Fallback: WebSearch + WebFetch (note the limitation in your output).
+Cite a source URL for every claim. Where data is missing or you couldn't retrieve a source, say so explicitly in the output.

@@ -49,6 +49,6 @@ What you're producing — a written report (~1500 words) that answers:
 
 Tone: honest, specific, no hedging. Cite file paths and tables. The founder needs to know what they actually built, not a flattering interpretation.
 
-## Tool selection
+## Tools
 
-Use Read, Grep, Glob, Bash. This phase uses code-reading tools only and does not draw on the skill's **Tool Registry** — the source code is the only input. If you find yourself wanting WebFetch or WebSearch to validate the implicit ICP, stop — that is the next phase's job (`/research-profitability` or `/research-adjacent-scan`), not this one.
+Use Read, Grep, Glob, Bash. This phase uses code-reading tools only — the source code is the only input. If you find yourself wanting WebFetch or WebSearch to validate the implicit ICP, stop — that is the next phase's job (`/research-profitability` or `/research-adjacent-scan`), not this one.
