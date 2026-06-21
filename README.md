@@ -6,6 +6,7 @@ A Claude Code plugin marketplace. Two plugins for solo-founder product discovery
 
 | Plugin | What it does | Slash commands |
 |---|---|---|
+| [**cofounder**](./plugins/cofounder/) | A single-session founding meeting between you and Claude — establish who you honestly are, get educated on a landscape with live evidence, converge on a direction, and leave with an actionable plan and a falsifiable first move. | `/cofounder` |
 | [**idea-hunt**](./plugins/idea-hunt/) | Scans free public web sources (HN, GitHub, Reddit, IH, YC RFS, Product Hunt) and surfaces one ranked software-product idea per run with cited evidence. No paid APIs. | `/idea-hunt` |
 | [**market-research**](./plugins/market-research/) | Six-phase methodology for evaluating commercial viability of a digital product. Each phase has its own slash command and subagent. | `/research-demand-discovery`, `/research-icp-audit`, `/research-profitability`, `/research-adjacent-scan`, `/research-angle`, `/research-pressure-test`, `/research-extraction` |
 | [**re-discipline**](./plugins/re-discipline/) | Evidence-based knowledge management for reverse-engineering & research projects: where a file lives encodes its trust level (provisional / verified / historical), nothing becomes "truth" without DIRECT evidence (the "Wall"), work happens in "campaigns", and external AI agents can be hired as research drafters. `/init-project` drops the structure into any repo. | `/init-project`, `/onboard`, `/open-campaign`, `/delegate`, `/review-subagent`, `/promote-truth`, `/overturn`, `/close-campaign`, `/checkpoint-campaign`, `/hire-agent`, `/decide-agent` |
@@ -16,6 +17,7 @@ A Claude Code plugin marketplace. Two plugins for solo-founder product discovery
 
 ```
 /plugin marketplace add adiazpar/adiaz-claude-plugins
+/plugin install cofounder@adiaz-claude-plugins
 /plugin install idea-hunt@adiaz-claude-plugins
 /plugin install market-research@adiaz-claude-plugins
 /plugin install re-discipline@adiaz-claude-plugins
@@ -41,6 +43,7 @@ adiaz-claude-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          ← marketplace manifest (lists all plugins)
 └── plugins/
+    ├── cofounder/                ← installable plugin
     ├── idea-hunt/                ← installable plugin
     ├── market-research/          ← installable plugin
     └── re-discipline/            ← installable plugin (skills + hooks + project templates)
