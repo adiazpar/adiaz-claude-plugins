@@ -1,14 +1,14 @@
 # The Four Lenses
 
-These are the axes that decide whether a *beginner* founder wins. Score every candidate direction against all four, out loud, together with the user. They're deliberately few — a beginner drowns in a hundred considerations; these four carry most of the signal.
+These are the axes that decide whether *a founder* wins. Score every candidate direction against all four, out loud, together with the user. They're deliberately few — anyone drowns in a hundred considerations; these four carry most of the signal.
 
 ## 1. Reachability — can you actually get to the customer?
 
-The most common reason a beginner's product dies isn't the product — it's that they can't find anyone to sell it to. Ask first: where do these customers cluster, and can *this* founder plausibly reach them at near-zero cost?
+The most common reason an early founder's product dies isn't the product — it's that they can't find anyone to sell it to. Ask first: where do these customers cluster, and can *this* founder plausibly reach them at near-zero cost?
 
 - **Strong:** one subreddit + one Discord + one newsletter ≈ most of the audience, and the founder can show up there credibly.
 - **Weak:** customers are diffuse, offline, gatekept behind relationships the founder doesn't have, or only reachable via paid ads they can't afford.
-- For a beginner with ~$0 acquisition budget, reachability often matters **more than market size**. A reachable small market beats an unreachable large one.
+- For a founder bootstrapping with little acquisition budget, reachability often matters **more than market size**. A reachable small market beats an unreachable large one. (Calibrate the budget to the founder's actual runway — don't assume zero, but most early bets are made on a shoestring.)
 
 ## 2. Learnability / shippability — can you build a first version fast enough?
 
@@ -28,7 +28,7 @@ Is there evidence people *pay* for solutions in this space? Not "would this be c
 
 ## 4. Durable interest — will you still care in 12 months?
 
-Grit is the scarce resource. A beginner will hit months of no traction; the survivors are the ones who'd do the work anyway because they care about it (not just the payoff).
+Grit is the scarce resource. A founder will hit months of no traction; the survivors are the ones who'd do the work anyway because they care about it (not just the payoff).
 
 - This is what makes it "a project of essence." It's a real selection criterion, not a soft one.
 - Distinguish interest in the **work** from interest in the **idea of** the work (being "a founder"). The first sustains; the second evaporates by month three.
@@ -37,5 +37,5 @@ Grit is the scarce resource. A beginner will hit months of no traction; the surv
 ## Using the lenses
 
 - Score each candidate 1–5 on each lens, out loud, with the evidence behind the score.
-- There's no magic formula — but **reachability** and **durable interest** are the two beginners most often get wrong (they over-index on market size and a clever idea). When in doubt, weight those.
+- There's no magic formula — but **reachability** and **durable interest** are the two founders most often get wrong (they over-index on market size and a clever idea). When in doubt, weight those.
 - A direction that scores a 2 on any lens needs an honest answer for how it climbs to a 3+, or it isn't the one.

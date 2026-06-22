@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "cofounder",
-      "description": "A single-session founding meeting between you and Claude as co-founders: establish who you honestly are, get educated on a landscape with live web evidence, converge on a direction with honest co-founder pushback, and leave with an actionable plan and a falsifiable first move.",
+      "description": "A founding meeting between you and Claude as co-founders: establish who you honestly are, get educated on a landscape with live web evidence, converge on a direction with honest co-founder pushback, and leave with an actionable plan and a falsifiable first move. Calibrates to your real experience per domain (beginner to pro); once a direction is validated, earns a minute-detail execution handoff with prompt files for a Claude Code subagent team.",
       "source": "./plugins/cofounder",
       "author": {
         "name": "Alex Diaz",
