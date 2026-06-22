@@ -31,7 +31,7 @@ Move through the stages below in order. Narrate transitions lightly ("okay — l
 
 ## Stage 0 — Setup
 
-Resolve where the session's files live. Run `git rev-parse --show-toplevel` to get the repository root; if it errors (not a git repo), use the current working directory. Call that absolute path `<root>`. The session store is:
+Resolve where the session's files live. `<root>` is the directory Claude Code is operating in — get it from `${CLAUDE_PROJECT_DIR:-$(pwd)}` (prefer the project-dir env var if it's set; otherwise the current working directory). **Do not use `git rev-parse --show-toplevel`** — it walks *up* the tree to a parent repo's root (and to your home directory if that ever happens to be a git repo), which silently drops the store somewhere above where you actually are. Anchoring to `pwd` keeps it pinned to the project you're sitting in. Call that absolute path `<root>`. The session store is:
 
 ```
 <root>/.claude/cofounder/

@@ -30,7 +30,7 @@ The explicit condition under which they stop and reassess — a pre-committed ki
 
 ## Persistence schemas
 
-The store lives at `<root>/.claude/cofounder/`, where `<root>` is the repository root (`git rev-parse --show-toplevel`, falling back to the current working directory). Address files by their absolute path with `Read`/`Write` — `Write` creates parent directories as needed, and don't rely on a shell variable persisting between stages.
+The store lives at `<root>/.claude/cofounder/`, where `<root>` is the project directory Claude Code is operating in (`${CLAUDE_PROJECT_DIR:-$(pwd)}` — never `git rev-parse --show-toplevel`, which walks up to a parent repo or home). Address files by their absolute path with `Read`/`Write` — `Write` creates parent directories as needed, and don't rely on a shell variable persisting between stages.
 
 ### `profile.json` (latest-wins — overwrite each session)
 ```json
