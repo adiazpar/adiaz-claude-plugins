@@ -43,7 +43,7 @@ The *meeting* is one sitting, but the artifacts persist (below), so the natural 
 
 ## Persistence (project-local JSONL)
 
-State lives under `<your-project>/.claude/cofounder/`, resolved via `git rev-parse --show-toplevel` (with a `pwd` fallback):
+State lives under `<your-project>/.claude/cofounder/`, where `<your-project>` is the directory you launched Claude Code in (`${CLAUDE_PROJECT_DIR:-$(pwd)}`) — pinned to where you are, never resolved upward to a parent repo:
 
 ```
 <your-project>/.claude/cofounder/
