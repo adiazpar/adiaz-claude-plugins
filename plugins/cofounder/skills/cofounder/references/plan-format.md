@@ -2,7 +2,7 @@
 
 ## The plan format (Stage 5)
 
-The plan must be specific enough to act on Monday morning. Vague plans ("build an MVP, find customers") are where beginners stall. Produce these sections:
+The plan must be specific enough to act on Monday morning. Vague plans ("build an MVP, find customers") are where founders stall — at any experience level. Produce these sections:
 
 ### 1. Smallest sellable thing
 The concrete v0 that someone would actually pay for — 2–3 sentences. Not the full vision; the smallest slice that delivers real value and can ship in ~8 weeks.
@@ -47,8 +47,12 @@ The store lives at `<root>/.claude/cofounder/`, where `<root>` is the repository
 
 ### `sessions.jsonl` (one line appended per session)
 ```json
-{"date": "2026-06-21", "direction": "session-package add-on for climbing gyms", "brief_path": "briefs/2026-06-21-climbing-gym-packages.md", "next_move": "5 cold DMs to gym owners in r/climbing", "status": "experiment-pending"}
+{"date": "2026-06-21", "direction": "session-package add-on for climbing gyms", "brief_path": "briefs/2026-06-21-climbing-gym-packages.md", "next_move": "5 cold DMs to gym owners in r/climbing", "status": "experiment-pending", "signal": "pending", "execution_path": null}
 ```
+`signal` is `pending` on a fresh session and becomes `green` / `yellow` / `red` after a `resume` execution review (see `execution.md`). `execution_path` stays `null` until a green signal unlocks Stage 7, then holds the `execution/<slug>/` directory.
+
+### `execution/<direction-slug>/` (Stage 7 — written only on a green-signal resume)
+The earned handoff artifacts: `operating-plan.md` (the minute-detail plan), `build-prompt.md` (the Claude Code build prompt for v1), and one `<role>.md` per active role. On the opt-in install, the same role prompts are also written as agent definitions to `<root>/.claude/agents/cofounder-<role>.md`. Full spec in `execution.md`.
 
 ### `briefs/<YYYY-MM-DD>-<slug>.md`
 The full written brief: the chosen direction, the three-sentence wedge, the strategy (distribution, first-dollar path, moat), and the complete Stage 5 plan. This is the durable artifact `/cofounder resume` reads to run an execution review.
