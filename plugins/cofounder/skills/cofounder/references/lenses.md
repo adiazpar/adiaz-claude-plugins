@@ -39,3 +39,4 @@ Grit is the scarce resource. A founder will hit months of no traction; the survi
 - Score each candidate 1–5 on each lens, out loud, with the evidence behind the score.
 - There's no magic formula — but **reachability** and **durable interest** are the two founders most often get wrong (they over-index on market size and a clever idea). When in doubt, weight those.
 - A direction that scores a 2 on any lens needs an honest answer for how it climbs to a 3+, or it isn't the one.
+- **Timing** — the dated *why-now* behind a direction — is evidence that *sharpens* these scores, not a fifth lens. A fresh regulation, cost-curve drop, platform shift, or incumbent stumble can raise reachability, shippability, or money-moves-here; it never originates or overrides a direction, and its absence is never a strike. See `timing.md`.

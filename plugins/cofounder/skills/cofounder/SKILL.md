@@ -46,7 +46,7 @@ On a green-signal `resume`, Stage 7 may also write opt-in agent files to `<root>
 Use this **absolute path as a literal** in every file operation below — do not rely on a shell variable surviving between stages, because it won't. The `Write` tool creates parent directories as needed, so no separate `mkdir` is required (create the directory explicitly only if a tool reports it missing). The file schemas are in `references/plan-format.md`.
 
 - If `profile.json` exists, load it with `Read` — this is a returning founder; greet them as one and confirm what's still true rather than re-asking everything.
-- **If `$ARGUMENTS` is `resume`:** load the most recent brief from `briefs/` and the latest `sessions.jsonl` line, summarize where you left off and the agreed next move, and run an **execution review** ("how did the experiment go?") instead of a fresh session. Classify the result against the brief's pre-committed kill criterion and fork:
+- **If `$ARGUMENTS` is `resume`:** load the most recent brief from `briefs/` and the latest `sessions.jsonl` line, summarize where you left off and the agreed next move, and run an **execution review** ("how did the experiment go?") instead of a fresh session. Re-check the brief's *why-now* as part of the review — is the dated window still open, has it widened, or has it closed? — letting it inform but never override the call. Then classify the result against the brief's pre-committed kill criterion and fork:
   - **Green** (real positive signal — the market said yes): go to **Stage 7 — Execute**. Read `references/execution.md` first.
   - **Yellow** (ambiguous, nothing conclusive): don't scale — iterate the experiment and name the result that would turn it green.
   - **Red** (hit the walk-away line): return to **Stage 2** to re-orient, reusing the loaded profile unless the founder's situation has changed.
@@ -77,13 +77,14 @@ Persist the portrait to `<root>/.claude/cofounder/profile.json` (latest-wins; ov
 
 First, **state your read of the founder and let them correct it.** Out loud, once: where you'll engage as a peer versus where you'll teach plainly, per domain — *"You ship fast, so I'll skip the build basics; go-to-market is new ground, so I'll teach that plainly. Tell me where I've got that wrong."* This assumes competence where they've shown it and hands them the wheel. Then calibrate everything that follows to that read: skip the 101 on axes they own, teach on the ones they don't, and never talk down globally. See `references/facilitation.md`.
 
-Then **teach the four lenses** that decide whether *a founder* wins — at the depth their read implies. Read `references/lenses.md` and explain them in plain language: **(1) reachability** — can you actually get to the customer; **(2) learnability/shippability** — can you build a first version fast enough; **(3) money-moves-here** — does cash demonstrably change hands; **(4) durable interest** — will you still care in 12 months. These are the axes you'll score directions against, together.
+Then **teach the four lenses** that decide whether *a founder* wins — at the depth their read implies. Read `references/lenses.md` — and `references/timing.md`, which you'll use during the survey to sharpen these scores with dated *why-now* evidence — then explain the lenses in plain language: **(1) reachability** — can you actually get to the customer; **(2) learnability/shippability** — can you build a first version fast enough; **(3) money-moves-here** — does cash demonstrably change hands; **(4) durable interest** — will you still care in 12 months. These are the axes you'll score directions against, together.
 
 Then **survey 2–4 candidate directions with live research.** Bias the survey toward the user's stated interests and the optional `$ARGUMENTS` domain. For each candidate, use `WebSearch`/`WebFetch` to gather real signal:
 
 - Who has the pain, and how loudly (forums, reviews, complaint threads).
 - Whether money moves — what people already pay, who's already selling, at what price.
 - How reachable that customer is for *this* founder.
+- **Why now** — what changed recently (a regulation, a cost-curve drop, a platform shift, an incumbent stumble) that moves one of the lenses for this direction. Read it through `references/timing.md`: date and source every signal, separate a durable shift from a fad, let it *sharpen* the lens scores rather than originate or override a direction — and remember a missing *why-now* is never a strike against an otherwise-sound direction.
 
 **Teach as you go.** Explain what each piece of evidence shows and why it matters through the lenses — the user should come out of this stage genuinely smarter about the landscape, able to reason about it themselves. Cite your sources; label anything that's your inference rather than a sourced fact. Counter the loud-market trap: the easiest sources to scrape (Reddit, HN, indie forums) over-represent dev tools, AI, and crypto — deliberately look wider if the user's interests point elsewhere.
 
@@ -93,7 +94,7 @@ Then **survey 2–4 candidate directions with live research.** Bias the survey t
 
 Run the converge format from `references/facilitation.md` exactly:
 
-1. Present an **honest shortlist** — each direction with its real case **and** its single strongest objection. Don't cheerlead all of them; if only one clears the bar, say so and show why the others don't.
+1. Present an **honest shortlist** — each direction with its real case **and** its single strongest objection. Don't cheerlead all of them; if only one clears the bar, say so and show why the others don't. Carry each direction's dated *why-now* into its case (or state plainly "no strong timing signal — not a mark against it"), so the founder weighs fresh evidence before seeing your lean.
 2. **At the bottom**, give your recommendation, your reasoning, and the one thing that would change your mind. Recommendation goes last so the user reasons from the evidence before they see your lean.
 3. The user chooses (`AskUserQuestion`).
 4. **If they choose against your recommendation:** voice your single biggest worry *once*, ask them to articulate what makes them confident, then — whatever they answer — **commit fully** and build the best version of their choice. If their reason is genuine conviction/interest, update toward it; that's exactly the private information you can't see in the data.

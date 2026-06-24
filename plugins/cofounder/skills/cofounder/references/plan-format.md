@@ -55,4 +55,6 @@ The store lives at `<root>/.claude/cofounder/`, where `<root>` is the project di
 The earned handoff artifacts: `operating-plan.md` (the minute-detail plan), `build-prompt.md` (the Claude Code build prompt for v1), and one `<role>.md` per active role. On the opt-in install, the same role prompts are also written as agent definitions to `<root>/.claude/agents/cofounder-<role>.md`. Full spec in `execution.md`.
 
 ### `briefs/<YYYY-MM-DD>-<slug>.md`
-The full written brief: the chosen direction, the three-sentence wedge, the strategy (distribution, first-dollar path, moat), and the complete Stage 5 plan. This is the durable artifact `/cofounder resume` reads to run an execution review.
+The full written brief: the chosen direction, the three-sentence wedge, the **why-now (timing read)**, the strategy (distribution, first-dollar path, moat), and the complete Stage 5 plan. This is the durable artifact `/cofounder resume` reads to run an execution review.
+
+The **why-now (timing read)** is the 1–2 sentence dated signal from `timing.md` — the event, which lens(es) it moves, and durable-shift-or-fad — or an explicit "no strong timing signal" when the direction has none (which is not a mark against it). `/cofounder resume` re-reads this to ask whether the window still holds.
