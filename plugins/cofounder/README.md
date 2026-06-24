@@ -13,7 +13,7 @@ It is **not an idea oracle and not a judge.** It's a thinking partner whose job 
 A `/cofounder` session moves through six stages in one sitting:
 
 1. **Open** — establish who you honestly are: skills (per domain — build, sell, distribute, operate), time, runway, risk tolerance, what you're optimizing for, and what pulls you. For calibration, not for filtering. Claude states its read of your level out loud and lets you correct it.
-2. **Orient** — Claude teaches the four lenses that decide whether a founder wins, then surveys candidate directions with *live web evidence*, not vibes.
+2. **Orient** — Claude teaches the four lenses that decide whether a founder wins, then surveys candidate directions with *live web evidence*, not vibes — including a dated *why-now* read (a new regulation, a cost-curve drop, a platform shift, an incumbent stumble) that sharpens the lens scores without ever chasing hype.
 3. **Converge** — an honest shortlist (each option with its case *and* its strongest objection), Claude's recommendation and reasoning at the bottom, your choice, one honest challenge, then **disagree-and-commit**.
 4. **Strategy** — the wedge, the distribution you can actually reach, the first-dollar path, and the moat over time.
 5. **Plan** — a Monday-morning-specific plan: smallest sellable thing, first ten customers, the cheapest falsifiable experiment, 2-week and 8-week milestones, a skills-gap roadmap, and an explicit walk-away line.
@@ -29,7 +29,7 @@ So the detailed execution layer is **earned, not given.** When you `/cofounder r
 - **handoff prompt files** — one per role the strategy actually needs *at this stage* (not a generic org chart), each self-contained enough to hand to a Claude Code subagent **or** a human professional, plus a `build-prompt.md` Claude Code can build v1 from cold;
 - on an explicit yes, those role prompts **installed as runnable agents** under `.claude/agents/cofounder-<role>.md`.
 
-A yellow result means iterate the experiment; a red result means re-orient. Only green earns the build-out.
+A yellow result means iterate the experiment; a red result means re-orient. Only green earns the build-out. Either way, the resume review also re-checks the brief's *why-now* — whether the timing window has widened or closed since you wrote it — as context for the call (never a substitute for your pre-committed kill criterion).
 
 ## Usage
 

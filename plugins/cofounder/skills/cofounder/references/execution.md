@@ -10,6 +10,8 @@ A `resume` opens with the execution review ("how did the experiment go?"). Class
 - **Yellow** — ambiguous: some interest, nothing conclusive. → don't scale. Iterate the experiment — sharpen the offer, the audience, or the channel — and re-test. Name out loud the specific result that would turn it green.
 - **Red** — it hit the walk-away line. → don't soften it. Return to Stage 2 and re-orient, reusing the loaded profile. A red result honored cheaply is the tool working, not failing.
 
+Alongside the signal, **re-check the brief's why-now** (`timing.md`): is the dated window still open, has it widened, or has it closed? Timing is context for the call, not the call — a closed window tempers a marginal green and argues for iterating over scaling; a widened one strengthens a yellow's case to push harder. It never overrides the pre-committed kill criterion: the criterion is the gate.
+
 Only green unlocks what follows.
 
 ## The operating plan (minute-detail)
