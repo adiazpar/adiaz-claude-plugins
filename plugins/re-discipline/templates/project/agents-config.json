@@ -1,0 +1,5 @@
+{
+  "_comment": "External-provider switch for delegate. Keep backend=native unless the user explicitly selects a promoted provider.",
+  "backend": "native",
+  "providers": {}
+}

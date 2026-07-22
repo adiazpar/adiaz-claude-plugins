@@ -17,7 +17,7 @@
       }
     },
     {
-      "description": "Disciplined, evidence-based knowledge management for reverse-engineering and research projects. Where a file lives tells you how much to trust it: provisional work in active/, facts verified by DIRECT evidence in docs/truth/ (the 'Wall'), finished investigations as chronicles in docs/history/. You work in 'campaigns' (open -> investigate -> delegate to subagents -> review against the Wall -> promote what's proven -> close into a chronicle), with an optional lifecycle for hiring external AI agents as research drafters. /init-project drops the structure into any repo.",
+      "description": "Dual-compatible campaign and knowledge management for Claude Code and Codex. Initializes one canonical project profile, host-specific manager overlays, evidence-gated truth, retrospective chronicles, native subagent adapters, and optional external drafter evaluation.",
       "name": "re-discipline",
       "source": "./plugins/re-discipline",
       "author": {

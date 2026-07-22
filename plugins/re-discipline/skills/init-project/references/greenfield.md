@@ -1,48 +1,55 @@
-# Greenfield mode — ask, then seed
+# Greenfield Initialization
 
-A fresh repo with no re-discipline structure. There is nothing to infer from, so gather the identity
-up front, then seed everything from templates.
+Use this mode only when there is no meaningful existing project guidance to
+reconcile.
 
-## 1. Clarifying questions (a short batch, up front)
+## Gather The Project Facts
 
-Ask via `AskUserQuestion` (batch the related ones; don't drip). Needed to fill the profile:
-- **Project name** (the `name`).
-- **Project type** (`type`: reverse-engineering | research | library | app | …).
-- **One-line framing** (`framing`) — the accurate, neutral description injected into every agent prompt.
-  Get this right; it's the §10 framing and the single source for it.
-- **Mission** — one or two sentences; the long-term deliverable.
-- **Source-of-record** — does the subject define its own authoritative data (schemas/decls/specs)? Where?
-- **Tooling** — any project tools/harnesses to register, and the sanctioned way to run each.
-- **Agent framework?** — include `agents/` + `AGENTS.md` for external drafter agents, or skip.
+Ask one compact batch for:
 
-Anything the user can't answer yet → leave a clearly-marked `TODO` in the profile (do not block).
+- Project name and type.
+- Accurate neutral one-line framing.
+- Mission and long-term deliverable.
+- Domain or subject under study.
+- Authoritative source-of-record data, if any.
+- Portable project tools and sanctioned invocations.
+- Domain-specific roles created by those tools or live surfaces.
+- Path/artifact schema and environment/build/test rules.
 
-## 2. Seed the structure
+Do not ask the user to translate those answers into Claude or Codex settings.
+Inspect existing `.claude/`, `.codex/`, MCP, and shell configuration and derive
+the overlays. Ask only when a host-specific choice cannot be discovered safely.
 
-1. Create the dir tree from `${CLAUDE_PLUGIN_ROOT}/templates/project/tree.txt` (one dir per line; add a
-   `.gitkeep` to empty dirs so they're tracked).
-2. Write `.claude/CLAUDE.md` from the template, filling `{{PROJECT_NAME}}`. Keep the `@project-profile.md`
-   import and the `<!-- re-discipline:laws -->` markers intact.
-3. Write `.claude/project-profile.md` from the template — fill the frontmatter (`name`/`type`/`framing`)
-   and the body sections from the answers; `TODO`-mark the rest. Seed `{{DOMAIN_ROLES}}` from the project
-   type + tooling (RE project → scope Analyst as *RE-analyst*; a live oracle/daemon in tooling → a
-   *live-tester*; visual/rendered output → a *vision-reader*; else "none beyond the generic four"). The
-   generic roles stay in CLAUDE.md §10; only domain roles go here.
-4. Write `docs/INDEX.md`, `docs/truth/INDEX.md`, `docs/history/INDEX.md` from the templates (fill
-   `{{PROJECT_NAME}}` / `{{ONE_LINE_FRAMING}}`).
-5. If the agent framework was requested, set up the top-level `agents/` dir and write `AGENTS.md` from
-   `${CLAUDE_PLUGIN_ROOT}/templates/project/AGENTS.md` (the canonical shared drafter contract — fill
-   `{{PROJECT_NAME}}`, `{{PROJECT_TOOLING_RULES}}`, `{{PROJECT_LIVE_SURFACES}}` from the profile; the
-   report-format section ships filled — do NOT rewrite it). Create `agents/profiles/` (empty until the
-   first hire) — per-agent prompt-style + role-fit overlays live there, materialized by `decide-agent`
-   from the `agent-profile.md` template. (`agents/` is a first-class top-level dir, NOT under `tools/` —
-   the agent team is not "tooling code"; `tools/` exists only if the project has its own code tooling.)
-   Otherwise skip the whole framework.
-6. Note that auto-memory is harness-managed (lives outside the repo at `~/.claude/projects/<proj>/memory/`)
-   — do NOT seed memory content; it is earned per-project.
+## Seed The Structure
 
-## 3. Verify + report
+1. Create the directories listed in `templates/project/tree.txt`; add
+   `.gitkeep` only where an empty tracked directory is required.
+2. Render `templates/project/project-profile.md` to
+   `.re-discipline/project-profile.md` using the gathered facts.
+3. Render `CLAUDE.md` and `claude-project-profile.md` into `.claude/`.
+4. Render `codex-AGENTS.md` and `codex-project-profile.md` into `.codex/`.
+5. Render `external-drafter-contract.md` to
+   `.codex/external-drafter-contract.md`.
+6. Render root `AGENTS.md` as the role router. Always create the router even
+   when the optional external-agent CLI framework is not requested; Codex
+   needs the direct-manager route.
+7. Render the three index templates under `docs/`.
+8. If the user wants external-provider dispatch, render `agents-config.json`,
+   `agents-README.md`, and `dispatch.ps1` into `agents/`, then create
+   `agents/profiles/`, `agents/roster/`, and `agents/benchmarks/`. Keep
+   `backend` set to `native` until a provider passes `hire-agent` and the user
+   promotes it.
 
-Confirm CLAUDE.md imports the profile, the tree + INDEX files exist, and the framing lives only in the
-profile (referenced elsewhere, never restated). Report what was created and the `TODO`s the user should
-fill. Re-running is safe (Step 0 detects the profile and stops).
+Use `none` or `not configured` for legitimately empty overlay sections. Do not
+copy canonical mission or domain prose into an overlay just to make it longer.
+
+## Verify
+
+- The canonical profile is the only file declaring `framing`.
+- Claude imports the canonical profile and Claude overlay.
+- The root router and Codex manager chain resolve.
+- Both overlays contain only harness-specific guidance.
+- All indexes and epistemic-status directories exist.
+
+Report generated files and any user-confirmed unknowns. Do not commit unless
+the user asks.

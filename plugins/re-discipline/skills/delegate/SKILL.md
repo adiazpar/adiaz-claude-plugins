@@ -1,129 +1,153 @@
 ---
 name: delegate
-description: This skill should be used when invoked as /delegate <slug> <name> "<objective>" or when asked to "delegate to a subagent", "dispatch a subagent for <investigation>", "spawn a research subagent", "send a Ghidra subagent into the campaign". Dispatches a subagent INTO a campaign workspace (active/<slug>/) with the project's protocol enforced: it reads CAMPAIGN.md first, writes outputs to the subdirs, and its report to subagents/<name>/report.md. Subagents draft; the manager ratifies via review-subagent.
-argument-hint: <slug> <subagent-name> "<objective>"
-allowed-tools: Read, Write, Bash, Agent, AskUserQuestion
+description: >-
+  Delegate a focused investigation into an active re-discipline campaign.
+  Creates an isolated drafter workspace and brief, uses the active host's
+  native Claude Code or Codex adapter unless an external provider was
+  explicitly selected, and requires a report for manager review.
 ---
 
-# Delegate — dispatch a subagent into a campaign workspace
+# Delegate Campaign Work
 
-**Subagents draft, the manager ratifies.** This is the project-wide asymmetry. A subagent does the RE legwork inside a campaign's workspace; you (manager) review its report against the Wall before anything is promoted. Never dispatch raw `Agent()` calls for RE work — they bypass this protocol and produce inconsistent, un-triageable reports.
+Subagents draft; the manager ratifies. Every adapter must produce the same
+reviewable report and must keep the drafter away from durable truth.
 
-## Procedure
+## Step 1: Validate And Select The Route
 
-### Step 1: Validate inputs
+Require:
 
-- `<slug>` is an existing campaign dir under `active/`.
-- `<subagent-name>` is kebab-case (3-30 chars) and not already `active/<slug>/subagents/<name>/`.
-- `<objective>` is concrete (≥50 chars); a vague objective produces a vague report.
+- an existing `active/<slug>/CAMPAIGN.md`;
+- a unique lowercase kebab-case `<name>`;
+- a concrete objective with an observable deliverable or answer.
 
-If invalid, ask the user to correct.
+Select the route before naming the workspace:
 
-### Step 2: Create the subagent's self-contained scratch
+1. An external provider explicitly named by the user wins.
+2. An explicit non-`native` backend in `agents/config.json` is a project-level
+   user selection.
+3. Otherwise use the current host's native adapter.
 
-```powershell
-$slug="<slug>"; $name="<name>"
-"scripts","artifacts","evidence" |
-  ForEach-Object { New-Item -ItemType Directory -Force -Path "active/$slug/subagents/$name/$_" | Out-Null }
-```
+For a legacy `backend: claude`, treat it as native only in Claude Code. From
+Codex, ask before interpreting it as an external Claude CLI route. Never move
+work between providers solely to save tokens or because one appears stronger.
 
-### Step 3: Gather context pointers (manager-selected; ask only when genuinely uncertain)
+Use `<name>` for native work and `<provider>-<name>` for external work. The
+resulting workspace is `active/<slug>/subagents/<dispatch-name>/`.
 
-You are the manager and you just read `CAMPAIGN.md` and the truth INDEX — select these yourself:
+## Step 2: Create The Drafter Workspace
 
-1. Truth files the subagent should read first → relevant `docs/truth/` paths (from the campaign's subsystems + the INDEX).
-2. Chronicles whose dead-ends it must NOT retry → relevant `docs/history/chronicles/` paths (the chronicles hold the refuted hypotheses; CAMPAIGN.md's "Dead ends so far" covers the in-flight ones).
-3. Relevant **memory** facts → scan `MEMORY.md` and quote the few entries that bear on this task verbatim into the brief (the subagent — Claude or external — has no access to the memory store; the brief IS its recall channel).
-4. Time budget (default 30-90 min).
+Create `scripts/`, `analysis/`, `artifacts/`, and `evidence/` under the
+workspace. Render
+`<plugin-root>/templates/project/drafter-AGENTS-override.md` to
+`AGENTS.override.md`. This gives external Codex-compatible CLIs a closer
+drafter contract when they run with this directory as their working directory.
 
-Use AskUserQuestion only when a choice is genuinely the user's to make (e.g. two plausible scopes with different costs) — not as a ritual. Three serial questions per dispatch is friction that discourages delegation.
+Do not overwrite an existing workspace.
 
-### Step 4: Build the dispatch brief
+Do not commit unless the user explicitly asks.
 
-The brief establishes the workspace (there is no literal `cwd` param — the prompt does it). Compose:
+## Step 3: Gather Only Relevant Context
 
-```
-You are a subagent for the <PROJECT_NAME> project: <lead with the project's accurate, neutral framing — the `framing` one-liner from `.claude/project-profile.md` (CLAUDE.md §10)>. Read this fully before starting.
+Read the campaign and choose:
 
-## 1. YOUR WORKSPACE
-Your root is the campaign workspace `active/<slug>/`. **Read `active/<slug>/CAMPAIGN.md` FIRST** — it holds the objective, current state, open questions, and dead-ends-so-far. Then read:
-- `docs/INDEX.md` (project map) and `docs/truth/INDEX.md` (what's known now)
-- Relevant truth files: <list from Step 3>
-- Dead-ends NOT to retry (from these chronicles): <list from Step 3>
-- Relevant memory facts (your only recall channel — you cannot read the memory store): <verbatim entries from Step 3, or "none">
+- truth files the drafter needs;
+- chronicles containing dead ends it must not retry;
+- primary artifacts and sanctioned tools;
+- a time or effort budget;
+- any relevant memory facts that are not already in checked-in guidance.
 
-## 2. THE EPISTEMIC RULE (how to label your evidence)
-Tag every piece of evidence DIRECT or INFERRED:
-- DIRECT = observed; impossible if the claim were false (a decompiled instruction you can read; an oracle byte-diff; a live A/B test where the variable under test is the ONLY change; a value read from the game's own decl/schema in reference/).
-- INFERRED = best-explanation; other readings survive (a thread passed through a function containing string X, so X "fired"; behavior changed when I changed Y among other things; elimination "it's not Z so it's W").
-Only DIRECT findings can ever become truth. Be honest — labeling an inference as DIRECT is the cardinal sin here. For any GAME-DEFINED fact (wiring grammar, schemas, ref counts, layouts, enums), check `reference/` FIRST — a value read there is DIRECT/authoritative; a corpus-mined pattern is INFERRED.
+Memory is recall, not authority. Quote only the few useful facts in the brief;
+do not assume a subagent can access the manager's memory store.
 
-## 2b. WORK STANDARD (be thorough; honesty over confidence)
-Be thorough; do not cut corners or stop at the first plausible answer. Verify value-precise claims against the primary artifact, not memory. If you are unsure or cannot determine something, SAY SO and return it as feedback — never present a guess as fact. An honestly-flagged "could not determine X (would need Y)" is a success; a confident fabrication is a failure that wastes a verification cycle.
+## Step 4: Write `brief.md`
 
-## 3. SCOPE — where to write
-- Write outputs into the campaign subdirs: `active/<slug>/scripts/`, `decomps/`, `artifacts/`, `evidence/` (or your own `subagents/<name>/{scripts,artifacts,evidence}/` for self-contained work).
-- Tag each artifact you produce as `reproducible` / `ground-truth` / `capture` (close-campaign uses this).
-- You MUST NOT edit `docs/truth/**`, `docs/history/**`, or another subagent's dir. You do not promote anything — you draft.
-- Run experiments via daemon / Ghidra (`tools/re/run.ps1`) / oracle as needed.
+Lead with the canonical `framing` value from
+`.re-discipline/project-profile.md`, then include:
 
-## 4. OBJECTIVE
+```text
+# Dispatch Brief - <dispatch-name>
+
+Project: <name and neutral framing>
+Workspace: active/<slug>/subagents/<dispatch-name>/
+Report: active/<slug>/subagents/<dispatch-name>/report.md
+
+## Required Reads
+- .re-discipline/project-profile.md
+- .codex/external-drafter-contract.md
+- active/<slug>/CAMPAIGN.md
+- docs/INDEX.md and docs/truth/INDEX.md
+- <selected truth, history, and artifact paths>
+
+## Objective
 <objective verbatim>
 
-## 5. DELIVERABLE — your report
-Write `active/<slug>/subagents/<name>/report.md`. **Lead with the answer, not a warm-up.** This format is distilled from the reports that actually survived ratification in this project — follow it:
-- **VERDICT** — the headline answer in 1-5 lines, stated FIRST, each point tagged [DIRECT]/[INFERRED]. If your evidence FALSIFIES the brief's premise or an assumption in CAMPAIGN.md, say so here, up front.
-- **CLAIMS** — each stated value-precisely (exact bytes/offsets/RVAs/strings/decl-values); Evidence = DIRECT|INFERRED + the recipe/file/line that shows it (a runnable command or the primary artifact, never your memory); for INFERRED, add a sub-grade (INFERRED-strong / INFERRED-open) and name the alternative reading that still survives.
-- **CORRECTIONS / OVERTURNS** — prior claims this work corrects (a CAMPAIGN.md note, an earlier subagent's report, a stated assumption): quote the old claim, give the DIRECT evidence that overturns it. This is how a multi-subagent campaign stays self-consistent — never silently leave a contradiction for the manager to find. ("none" if there are none.)
-- **TRUTH-PROMOTION CANDIDATES** — your DIRECT, value-precise claims that are ready for the Wall, gathered into one list (each with its proposed truth target + recipe). Pre-stages the manager's ratification. INFERRED claims do NOT belong here.
-- **DELIVERABLES** — (only if you BUILT or CHANGED something: a script, a decl, an injected artifact, a patch) the bill of materials — each output's path + size/hash + what it is + how the manager applies/verifies it. Distinct from EVIDENCE INDEX (that's what proves your claims; this is what you produced as the work product). An implementation/tooling dispatch usually leads with this, right after VERDICT.
-- **RESIDUAL UNCERTAINTIES** — what is still INFERRED or unobserved, each with the experiment that would settle it AND an explicit **blocks / does-not-block the deliverable** tag. This is your evidence boundary, NOT a to-do list — do not propose next campaigns or future work.
-- **MANAGER RUNBOOK** — only if your deliverable enables a live action (an injection, a live test, a patch): the exact steps for the manager, AND the specific signals (console strings, byte-diffs, crash absence) that CONFIRM vs FALSIFY success. Omit if not applicable.
-- **EVIDENCE INDEX** — the artifacts you produced + what each shows; tag each `reproducible` (give the command) / `ground-truth` / `capture`.
-- **MEMORY CANDIDATES** — (optional) non-obvious durable facts worth persisting across sessions, or "none". The manager ratifies these into the project memory store; you do not write to it.
-- **OVERALL CONFIDENCE** Green|Yellow|Red + "what would falsify this".
+## Evidence Standard
+Tag every claim DIRECT or INFERRED. Verify value-precise claims from the
+primary artifact. For subject-defined facts, check the canonical source of
+record before empirical inference.
 
-Do NOT add a "next steps" / "future work" / "open questions" section. Deliver the answer to your objective; a still-open item belongs in RESIDUAL UNCERTAINTIES (tagged blocks/does-not-block). The manager — not you — decides what to investigate next.
+## Scope
+Write only in the assigned workspace unless this brief grants another exact
+campaign path. Do not edit truth, history, governance, or another drafter's
+work. Do not commit, push, close the campaign, promote truth, or spawn agents.
 
-## 6. EXIT
-Time budget: <budget>. If blocked, stop and report what you have — partial > nothing.
+## Deliverable
+Write report.md and lead with VERDICT. Include CLAIMS, CORRECTIONS / OVERTURNS,
+TRUTH-PROMOTION CANDIDATES, DELIVERABLES when applicable, RESIDUAL
+UNCERTAINTIES, MANAGER RUNBOOK when applicable, EVIDENCE INDEX, MEMORY
+CANDIDATES, and OVERALL CONFIDENCE. Every promoted candidate needs a surviving
+recipe or preserved artifact. Do not add a next-steps section.
 
-## 7. POST-RETURN
-The manager will triage your report against the Wall (review-subagent). You will NOT be re-invoked; state isn't preserved. A follow-up gets a fresh subagent with your report as context.
-
-Begin now.
+## Exit
+Budget: <budget>. If blocked, return a partial report with the evidence boundary
+and the missing observation stated plainly.
 ```
 
-### Step 5: Dispatch — resolve the backend first
+## Step 5: Dispatch Through The Active Adapter
 
-Read `agents/config.json` → `backend`:
+### Claude Code
 
-- **`claude` (the default):** Use the Agent tool: `subagent_type: general-purpose`, `run_in_background: true`, short `description`, `prompt` = the Step 4 brief, and pick `model` **by role** (CLAUDE.md §10): substantive RE / analysis / implementation → the manager's own tier (the strongest available model — today `opus`; never pin a model alias that may be retired, since a dead alias silently degrades the dispatch — that is exactly how the old `fable` default broke); moderate analysis where opus is overkill but the task still needs real reasoning → `sonnet`; mechanical, cheaply-checkable fan-out (bulk extraction, byte-diffs, log/crash triage) → `haiku`. Match the model to the job. **The Claude tiers (`opus`/`sonnet`/`haiku`) share one prompting style — they do NOT get agent profiles; a profile captures a *cross-family* prompt-style (Codex/GPT-5, Gemini, a local runner), so it only applies to external providers, below.**
-- **An external provider (e.g. `codex`):** valid ONLY when the human set the backend field or explicitly said "use <provider>" for this dispatch — NEVER route externally on your own judgment. Procedure:
-  1. Write the Step 4 brief to `active/<slug>/subagents/<provider>-<name>/brief.md`. **External subagent dirs are named `<provider>-<name>`** (e.g. `codex-combat-targeting`) so provenance is visible at a glance; the dispatcher enforces this prefix and creates the dir, so you may pass the bare `<name>` to it.
-  2. Run (PowerShell tool, `run_in_background: true` for long jobs):
-     `agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name>`
-  3. The report lands at `subagents/<provider>-<name>/report.md` (the dispatcher auto-copies the agent's `last_message.md` if it failed to write the report). Triage is identical — `review-subagent` is backend-blind.
+When running in Claude Code, use its native subagent tool if available. Supply
+the exact `brief.md` path and require `report.md`. Choose capability by role and
+current availability; do not hardcode model aliases in this skill. If the
+subagent can only return a final message, land that message in `report.md`
+without changing its claims.
 
-External drafters take their standing rules from the repo-root `AGENTS.md`; the brief contract above is unchanged. See `agents/README.md`.
+### Codex
 
-### Step 6: Record in CAMPAIGN.md
+When running in Codex and collaboration is allowed, call `spawn_agent` with a
+bounded task. The message must instruct the worker to read `brief.md` and
+`.codex/external-drafter-contract.md`, stay inside the assigned workspace, and
+write `report.md`. Retain the returned agent id. Use `send_message`,
+`followup_task`, `wait_agent`, or `interrupt_agent` only to manage that task.
+If the worker returns the report only in its final response, write it to the
+required path verbatim before review.
 
-Append under "Current state" (or a "Subagents in flight" note):
+### Explicit External Provider
 
+Require a configured provider and dispatcher. Invoke the project's documented
+external command, normally:
+
+```powershell
+agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name>
 ```
-- `<name>` (dispatched <today>) — <one-line objective>; report → subagents/<name>/report.md
-```
 
-### Step 7: Confirm
+Run it with the drafter workspace as the effective working directory when the
+provider supports that option, so `AGENTS.override.md` is discovered. Do not
+install, authenticate, or bypass a provider's sandbox without the user's
+approval.
 
-```
-Subagent <name> dispatched into active/<slug>/.
-Report will land at active/<slug>/subagents/<name>/report.md.
-When it returns, triage it with `review-subagent` — do NOT promote anything before that.
-```
+If the selected adapter is unavailable, leave the brief and workspace intact,
+report the exact blocker, and do not pretend the dispatch occurred.
+
+## Step 6: Record And Review
+
+Add one current-state line to `CAMPAIGN.md` with provider, date, objective, and
+report path. When the task completes, invoke `review-subagent`. Nothing in the
+report crosses into `docs/truth/` before manager ratification.
 
 ## Reference
 
-- Triage on return: `review-subagent` skill.
-- The Wall + DIRECT/INFERRED: `.claude/CLAUDE.md` §5 + `promote-truth` skill.
+- Runtime mapping: `<plugin-root>/references/runtime-adapters.md`.
+- Drafter law: `.codex/external-drafter-contract.md`.
+- Return triage: `review-subagent`.

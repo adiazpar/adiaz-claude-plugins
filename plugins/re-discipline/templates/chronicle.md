@@ -1,37 +1,39 @@
-# Campaign chronicle: <topic>
+# Campaign Chronicle: <topic>
 
-**Status:** CLOSED — <solved | substantially complete; residual deferred>.
-**Span:** <YYYY-MM-DD> → <YYYY-MM-DD>.
-**Outcome:** <one or two lines: what the campaign delivered>.
+**Status:** CLOSED - <solved or substantially complete with residual deferred>
+**Span:** <YYYY-MM-DD> to <YYYY-MM-DD>
+**Outcome:** <one or two lines>
 
-> Retrospective record. For *current* facts, see `docs/truth/INDEX.md` — this chronicle describes what was done and learned at the time, including paths since reorganized. It is never normative.
+> Retrospective record. Current facts live in `docs/truth/INDEX.md`; this file
+> describes what was attempted and learned at the time.
 
-## The question
+## The Question
 
-<What the campaign set out to solve.>
+<What the campaign set out to resolve.>
 
-## The journey
+## The Journey
 
-1. <The arc, in past tense — the wrong frames, the pivots, the breakthrough, the validation. Number the steps.>
+1. <Past-tense sequence of frames, attempts, pivots, and validation.>
 
-## Dead ends — do NOT retry
+## Dead Ends - Do Not Retry
 
-- **<hypothesis>** — <one line on why it was wrong>. <DIRECT|INFERRED>
+- **<hypothesis>** - <why it failed>. <DIRECT|INFERRED>
 
-## Truths produced
+## Truths Produced
 
-- `docs/truth/<subsystem>/<file>.md` — <one line>.
+- `docs/truth/<subsystem>/<file>.md` - <one line>
 
-## Reproduction recipes
+## Reproduction Recipes
 
-- <How to regenerate the evidence: `tools/re/run.ps1 decompile_fn.py 0xRVA`; a test file; an oracle call; an `archive/` pointer for irreproducible captures.>
+- `<command or permanent test>` - <what it reproduces>
+- `archive/<path>` - <what irreproducible evidence it preserves>
 
-## Leads for future campaigns
+## Leads For Future Campaigns
 
-- <What's left; pointers to `docs/backlog/<item>.md`.>
+- `docs/backlog/<item>.md` - <deferred direction>
 
 ## Provenance
 
-- **Commits:** <key SHAs>.
-- **Irreproducible artifacts:** `archive/...`.
-- **Folded from (deleted on close):** <session/scratch sources whose content now lives here>.
+- **Relevant commits:** <SHAs or none>
+- **Irreproducible artifacts:** `archive/...` or none
+- **Folded from deleted scratch:** <campaign paths summarized here>

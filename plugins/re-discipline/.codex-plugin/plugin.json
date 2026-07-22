@@ -1,0 +1,33 @@
+{
+  "name": "re-discipline",
+  "version": "0.2.0",
+  "description": "Evidence-based campaign and knowledge management for long-running reverse-engineering and research projects, with native Claude Code and Codex manager contracts.",
+  "author": {
+    "name": "Alex Diaz",
+    "email": "alexdiaz0923@gmail.com"
+  },
+  "keywords": [
+    "reverse-engineering",
+    "research",
+    "knowledge-management",
+    "discipline",
+    "workflow"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Re-Discipline",
+    "shortDescription": "Evidence-based research campaign workflow",
+    "longDescription": "Run durable research campaigns, separate provisional work from verified truth, delegate draft investigations, and preserve reproducible findings across Claude Code and Codex.",
+    "developerName": "Alex Diaz",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Initialize this project with re-discipline.",
+      "Orient me to the current campaign state.",
+      "Open a focused research campaign."
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "adiaz-claude-plugins",
+  "interface": {
+    "displayName": "Alex Diaz Plugins"
+  },
+  "plugins": [
+    {
+      "name": "re-discipline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/re-discipline"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
