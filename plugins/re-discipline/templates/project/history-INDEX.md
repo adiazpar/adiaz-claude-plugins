@@ -1,18 +1,17 @@
-# History INDEX — what has been explored
+# History Index - What Has Been Explored
 
-This is a retrospective index of finished campaigns + the leads they left behind.
-It is NEVER current state — for what's true now, defer to [`../truth/INDEX.md`](../truth/INDEX.md).
+This is a retrospective index of closed campaigns and their leads. It is never
+current authority; use [`../truth/INDEX.md`](../truth/INDEX.md) for current
+facts.
 
-## Chronicles (finished campaigns)
+## Chronicles
 
-<!-- One line per chronicle, linking to chronicles/<date>-<topic>.md. Added by close-campaign. -->
-_(none yet — newly initialized)_
+_(none yet - newly initialized)_
 
-## Cross-cutting leads
+## Cross-Cutting Leads
 
-<!-- Leads-for-future-campaigns collected from across the chronicles. -->
 _(none yet)_
 
-## Forward backlog
+## Forward Backlog
 
-The forward-work queue lives in [`../backlog/`](../backlog/).
+Deferred briefs live in [`../backlog/`](../backlog/).

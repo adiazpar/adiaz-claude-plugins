@@ -1,3 +1,5 @@
 .DS_Store
+__pycache__/
+*.py[cod]
 .claude/settings.local.json
 .claude/idea-hunt-history.jsonl

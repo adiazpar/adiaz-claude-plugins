@@ -1,51 +1,51 @@
 # Campaign: <slug>
 
-**Status:** OPEN — <one line: what's being investigated right now>
+**Status:** OPEN - <what is being investigated now>
 **Opened:** <YYYY-MM-DD>
-**Owner:** Claude Code (manager) + delegated subagents
+**Owner:** re-discipline manager + delegated drafters
 
-> This is **provisional, in-flight** work (`active/`). Nothing here is truth until it crosses the DIRECT-evidence Wall into `docs/truth/`. A fresh agent or subagent reads this file first to orient.
+> This is provisional work. Nothing here is durable truth until it crosses the
+> DIRECT-evidence Wall into `docs/truth/`.
 
 ## Objective
 
-<What question does this campaign answer? What does "solved" look like (the closure bar)?>
+<The question and an observable definition of solved.>
 
-## Current state
+## Current State
 
-<Where we are now. Rewrite at the end of every session / on PreCompact (the `checkpoint-campaign` skill) so the next agent picks up cold. **Hard cap: ~30 lines, newest first.** Must answer: what just happened, what is proven (pointers), the next move, what's blocked on what. Older material moves to `## Historical log` at the bottom or into `evidence/` — "Current state" is for resuming, history is for the chronicle.>
+<At most about 30 lines, newest first. State what happened, what is proven and
+where, what remains provisional, the next action, and blockers.>
 
-## Dir map
+## Directory Map
 
-- `scripts/` — one-off python (reproducible → deleted at close)
-- `ghidra/` — one-off Ghidra scripts (reproducible → deleted; reusable → promote to `tools/re/`)
-- `decomps/` — decompile / trace logs (reproducible → deleted; the RECIPE goes in the truth)
-- `artifacts/` — data: test rawmaps, generated maps, captured crash/freeze/watch JSON, ground-truth
-- `evidence/` — `.md` reasoning notes (→ folded into the chronicle at close)
-- `subagents/<name>/` — per-subagent scratch (`scripts/ artifacts/ evidence/ report.md`)
+- `scripts/` - one-off reproducible automation
+- `analysis/` - decompiles, traces, raw calculations, and tool output
+- `artifacts/` - inputs, generated outputs, captures, and ground-truth data
+- `evidence/` - reasoning notes that will be folded into the chronicle
+- `subagents/<name>/` - isolated drafter briefs, artifacts, and reports
 
-## Open questions
+## Open Questions
 
-- <the unknowns gating closure>
+- <unknown that gates closure>
 
-## Dead ends so far (don't retry within this campaign)
+## Dead Ends - Do Not Retry
 
-- <hypothesis> — <why it was ruled out> <DIRECT|INFERRED>
+- <hypothesis> - <why it failed> <DIRECT|INFERRED>
 
 ## Leads
 
-- <threads worth pulling; pointers to truth/chronicles/backlog that seeded this>
+- <truth, history, backlog, or source pointer that seeded the work>
 
-## Disposition manifest
+## Disposition Manifest
 
-As artifacts are produced, tag each so **close-campaign** is mechanical:
-
-| artifact | tag | destination at close |
+| Artifact | Tag | Destination At Close |
 |---|---|---|
-| <e.g. engine_ref.json> | ground-truth | `archive/ground-truth-maps/` |
-| <e.g. freeze_snapshot.json> | capture | `archive/evidence/` (if truth-cited) else delete |
-| <e.g. decomp_x.log> | reproducible | delete; recipe → truth |
-| <e.g. event_tracer.py> | keeper-tool | promote to `tools/` (generalized) |
+| <path> | ground-truth | `archive/<appropriate-area>/` |
+| <path> | capture | archive if truth-cited, otherwise remove |
+| <path> | reproducible | preserve recipe or test, then remove output |
+| <path> | expensive-reproducible | preserve recipe and useful output |
+| <path> | keeper-tool | move to maintained project tooling |
 
-## Historical log
+## Historical Log
 
-<Optional. Superseded "Current state" sections move here verbatim at each checkpoint (newest first). Feeds the chronicle at close; never read for current state.>
+<Superseded Current State entries, newest first. Retrospective only.>

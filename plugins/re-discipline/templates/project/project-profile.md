@@ -1,72 +1,63 @@
 ---
-# Machine-readable identity (tools parse this frontmatter; e.g. dispatch.ps1 reads `framing`).
-# This is the SINGLE SOURCE for the project's identity — everything else points/pulls from here.
+# Machine-readable project identity. Dispatchers read `framing` from here.
+# This is the single source for project facts; harness overlays must not repeat it.
 name: "{{PROJECT_NAME}}"
-type: "{{PROJECT_TYPE}}"            # e.g. reverse-engineering | research | library | app
-framing: "{{ONE_LINE_FRAMING}}"    # the accurate, neutral one-liner injected into EVERY agent prompt
+type: "{{PROJECT_TYPE}}"
+framing: "{{ONE_LINE_FRAMING}}"
 ---
 
-# {{PROJECT_NAME}} — Project Profile (the domain single-source)
+# {{PROJECT_NAME}} - Canonical Project Profile
 
-> Imported by `.claude/CLAUDE.md` (always loaded). The generic *laws* live in CLAUDE.md; everything
-> **specific to this project** lives here. Change the project → change this file; nothing else restates it.
+Both `.claude/CLAUDE.md` and `.codex/AGENTS.md` load this profile. It contains
+project facts only. Claude- or Codex-specific settings belong in their
+respective `project-profile.md` overlays.
 
 ## Mission
 
 {{MISSION}}
 
-<!-- One or two sentences: what this project is and its long-term deliverable. -->
-
-## Domain / what's under study
+## Domain
 
 {{DOMAIN_DESCRIPTION}}
 
-<!-- What system/codebase/subject is being investigated; the key subsystems; anything an agent needs to
-     orient. Keep it factual and neutral. -->
-
-## Source-of-record (check FIRST for source-defined facts — CLAUDE.md §9)
+## Source Of Record
 
 {{SOURCE_OF_RECORD}}
 
-<!-- The authoritative declared-data set for this project (schemas, decls, specs the subject itself
-     defines). Path(s) + what each contains. This is the §9 "first stop". -->
+<!-- Name authoritative schemas, declarations, specifications, or primary
+     artifacts and state exactly what each can prove. Use "none identified"
+     when the subject defines no authoritative data set. -->
 
 ## Tooling
 
 {{TOOLING}}
 
-<!-- The project's own tools: where they live, how to invoke them, the one sanctioned way to run each.
-     e.g. analysis harnesses, daemons, oracles. -->
+<!-- Record portable tool locations and sanctioned invocations. Host-specific
+     MCP names or permission settings belong in the harness overlays. -->
 
-## Roles (domain-specific)
+## Roles
 
 {{DOMAIN_ROLES}}
 
-<!-- The GENERIC roles (Orchestrator / Analyst / Mechanical-fan-out / Synthesizer) live in CLAUDE.md §10.
-     Declare HERE the roles born from THIS project's apparatus — each: the role, what it does, and which
-     agent/tier fits it. The orchestrator staffs from the generic roles PLUS these. Examples by apparatus:
-       - a live oracle / daemon  -> a *live-tester* role (drive it, classify verdicts; single-live-consumer)
-       - visual / rendered output -> a *vision-reader* role (read a captured screenshot -> structured verdict)
-       - reverse-engineering      -> scope *Analyst* as an *RE-analyst* (decompile / schema / trace)
-     Add a role when you build the capability that needs it; "none beyond the generic four" is a valid value. -->
+<!-- Generic roles are Orchestrator, Analyst, Mechanical fan-out, and
+     Synthesizer. Add only roles created by this project's actual apparatus. -->
 
-## Binaries & paths
+## Paths And Artifacts
 
 {{BINARIES_AND_PATHS}}
 
-<!-- Path SCHEMA location; path VALUES live in .claude/local-paths.md (gitignored). Build-state notes,
-     re-verification triggers, the "never hardcode paths" reminder's project specifics. -->
+<!-- Record path schema, tracked artifact locations, and re-verification
+     triggers. Machine-local values stay in harness-local untracked files. -->
 
-## Environment (shell, commit mechanics)
+## Environment
 
 {{ENVIRONMENT}}
 
-<!-- Project-machine specifics: shell (PowerShell/bash quirks), the multi-line commit workflow, any
-     environment gotchas. These are environment-specific, not generic laws. -->
+<!-- Shell, test, build, and commit mechanics that are true for the project,
+     independent of which agent harness is active. -->
 
-## Worked example — the Wall, by provenance
+## Wall Example
 
 {{WALL_EXAMPLE}}
 
-<!-- A concrete past instance where DIRECT-vs-DIRECT provenance mattered (illustrates CLAUDE.md §5).
-     Optional but valuable; keep one good example. -->
+<!-- Optional concrete example showing what two evidence sources each attest. -->

@@ -1,84 +1,70 @@
 ---
 name: open-campaign
-description: This skill should be used when invoked as /open-campaign <slug> or when asked to "open a campaign", "start a new RE investigation", "scaffold a campaign workspace", "begin investigation on <topic>". Scaffolds active/<slug>/ with a CAMPAIGN.md masterfile (from the campaign-masterfile template) and the standard subdirs, then commits the scaffold. Slug-only naming.
-argument-hint: <slug>
-allowed-tools: Read, Write, Bash, AskUserQuestion
+description: >-
+  Open a re-discipline campaign when asked to start an investigation, scaffold
+  a campaign workspace, or begin focused research. Creates an active campaign directory,
+  CAMPAIGN.md, and standard evidence subdirectories with an explicit closure
+  bar. Uses lowercase kebab-case slugs.
 ---
 
-# Open-campaign — scaffold a new campaign workspace
+# Open A Campaign
 
-A **campaign** is the unit of RE work. It is self-contained: everything it produces lives under `active/<slug>/`, so a subagent can treat it as its workspace and `close-campaign` can process it as one unit. You scaffold it here; you fill `CAMPAIGN.md`'s Objective so the closure bar is explicit from day one.
+A campaign is the unit of substantial investigation. Its contents remain
+provisional until DIRECT evidence is promoted through the Wall.
 
-Open a campaign for: any investigation >30 min, anything with live tests / Ghidra / oracle runs, anything that will delegate to subagents. When in doubt, scaffold.
+## Step 1: Validate The Request
 
-## Procedure
+Require a unique lowercase kebab-case slug of 3-50 characters. Open a campaign
+for work likely to span a session, use live or expensive tools, or require
+delegation. Do not scaffold one for a one-line correction or ordinary code
+change with no knowledge claim.
 
-### Step 1: Validate the slug
+## Step 2: Create The Workspace
 
-The slug is the campaign's only name (no date prefix). It must be:
-- lowercase kebab-case (hyphens; no spaces/underscores), 3-50 chars
-- not already a directory under `active/`
+Create:
 
-If invalid or taken, ask the user for a different slug.
-
-### Step 2: Create the workspace + subdirs
-
-```powershell
-$slug = "<slug>"
-"scripts","ghidra","decomps","artifacts","evidence","subagents" |
-  ForEach-Object { New-Item -ItemType Directory -Force -Path "active/$slug/$_" | Out-Null }
+```text
+active/<slug>/
+  scripts/
+  analysis/
+  artifacts/
+  evidence/
+  subagents/
 ```
 
-This is the canonical layout (each subdir's close-disposition is documented in the template's dir-map):
-- `scripts/` — one-off python (reproducible → deleted at close)
-- `ghidra/` — one-off Ghidra scripts (reproducible → deleted; reusable → promote to `tools/re/`)
-- `decomps/` — decompile / trace logs (reproducible → deleted; the RECIPE goes in the truth)
-- `artifacts/` — data (test rawmaps, generated maps, captured crash/freeze/watch JSON, ground-truth)
-- `evidence/` — `.md` reasoning notes (folded into the chronicle at close)
-- `subagents/<name>/` — per-subagent scratch (created by `delegate`)
+Resolve the plugin root from this skill's path. Render
+`<plugin-root>/templates/campaign-masterfile.md` to
+`active/<slug>/CAMPAIGN.md`.
 
-### Step 3: Write CAMPAIGN.md from the template
+## Step 3: Establish The Closure Bar
 
-Read `${CLAUDE_PLUGIN_ROOT}/templates/campaign-masterfile.md` and write it to `active/<slug>/CAMPAIGN.md`, filling the header + Objective.
+Derive discoverable values from the user's request and current docs. Ask one
+compact follow-up only for unresolved choices. Fill:
 
-Use AskUserQuestion (one field at a time) to fill:
-1. **Status line** — one line of what's being investigated right now.
-2. **Objective** — the question this campaign answers, AND what "solved" looks like (the **closure bar** — `close-campaign` checks against it).
-3. **Open questions** — the unknowns gating closure (seed with at least one).
-4. **Leads** — threads worth pulling; pointers to the truth/chronicle/backlog item that seeded this (if any).
+- status line;
+- objective and observable definition of solved;
+- open questions that gate closure;
+- leads and links to truth, history, or backlog sources;
+- today's opened date.
 
-Set `Opened:` to today. Leave Dead-ends and the Disposition manifest as empty scaffolds — they fill as the campaign runs.
+Leave dead ends and disposition rows as empty scaffolds. If the campaign came
+from `docs/backlog/<slug>.md`, preserve that provenance.
 
-If this campaign came from a `docs/backlog/<slug>.md` brief, pull the Objective from there and note it under Leads.
+## Step 4: Update The Front Door
 
-### Step 4: Update the front door
+Add a relative link and one-line objective under Active campaigns in
+`docs/INDEX.md`. Preserve unrelated content and ordering conventions.
 
-Add the campaign to the "Active campaigns" list in `docs/INDEX.md`:
+## Step 5: Verify And Report
 
-```
-- [<slug>](../active/<slug>/CAMPAIGN.md) — <one-line objective>
-```
+Confirm the masterfile and all subdirectories exist, the closure bar is
+testable, and the index link resolves. Report the path and the first unresolved
+question.
 
-(Use the relative path that resolves from `docs/INDEX.md`.)
-
-### Step 5: Commit the scaffold
-
-```powershell
-git add active/<slug> docs/INDEX.md
-git commit -m "campaign: open <slug> -- <one-line objective>"
-```
-
-### Step 6: Confirm
-
-```
-Campaign opened: active/<slug>/.
-CAMPAIGN.md holds the objective + closure bar; it's the first read for you and every subagent.
-Subdirs ready: scripts/ ghidra/ decomps/ artifacts/ evidence/ subagents/.
-Ready to work — what's the first move?
-```
+Do not commit unless the user explicitly asks.
 
 ## Reference
 
-- Masterfile template: `${CLAUDE_PLUGIN_ROOT}/templates/campaign-masterfile.md`.
-- The lifecycle + the Wall: `.claude/CLAUDE.md` §4-5.
-- Dispatch RE into this workspace via the `delegate` skill.
+- Campaign template: `<plugin-root>/templates/campaign-masterfile.md`.
+- Delegation: `delegate`.
+- Closure: `close-campaign`.

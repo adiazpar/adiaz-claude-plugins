@@ -1,62 +1,42 @@
-# Research checklist — what to discover before drafting a provider config
+# External CLI Research Checklist
 
-Discover each item below for the candidate CLI. WebSearch the official docs for current syntax,
-then VERIFY from `<cli> --help` / `<cli> <subcommand> --help` after install. Never trust training
-data for flag names — CLIs churn. Record findings in `CANDIDATE.md`; map them into
-`config-draft.json` per the field map at the bottom.
+Use current official provider documentation, then verify behavior against the
+installed CLI's help and a harmless dry run. Record exact version and date.
 
-## Items to discover
+## Mechanics
 
-1. **Non-interactive / exec entry point** — the subcommand or flag that runs one prompt and exits
-   (Codex: `codex exec "<prompt>"`; Gemini: `gemini -p "<prompt>"`). The whole framework assumes
-   a one-shot batch invocation, not an interactive REPL.
-2. **Prompt delivery + stdin behavior** — is the prompt an argument, or stdin? Does the CLI block
-   reading stdin when it is a non-TTY pipe? (Codex does — the dispatcher pipes `$null` to force
-   EOF. Check whether the candidate needs the same.)
-3. **Working-directory flag** — the equivalent of Codex's `-C <dir>` (run with the repo as root).
-4. **Skip-permissions / skip-sandbox flag** — the flag that lets the agent run tools/commands
-   without per-action approval AND (where applicable) enables MCP tool calls non-interactively.
-   This becomes `bypass_args`. (Codex: `--dangerously-bypass-approvals-and-sandbox`; Gemini's
-   likely `--yolo` — VERIFY.) Many CLIs auto-cancel MCP calls without this; test it.
-5. **Sandbox mode flags** — the safe fallback (`sandbox_args`) for a `-Sandboxed` static run, if
-   the CLI offers one.
-6. **Model selection flag** — the `-m`/`--model` equivalent (`model_flag`).
-7. **Last-message capture** — a flag to write the final message to a file (Codex: `-o <file>`),
-   used as the report fallback when the agent doesn't write `report.md` itself.
-8. **MCP config format + location** — where the CLI reads MCP servers (Codex: `~/.codex/config.toml`
-   `[mcp_servers.*]` TOML; Gemini: `.gemini/settings.json` JSON — VERIFY). Note timeout fields
-   (the daemon's `test_rawmap` needs a long tool timeout). Local runners may not support MCP at all.
-9. **Instructions-file name** — the CLI's CLAUDE.md-equivalent that it auto-reads (Codex: `AGENTS.md`;
-   Gemini: `GEMINI.md`). This is `instructions_file`. Promote materializes the shared contract there.
-10. **Auth method** — login command or env var. A USER step — never automate; pause and instruct.
-11. **Local-runner specifics** (Qwen/Ollama/LM Studio/llama.cpp) — the `command` is the local
-    runner or an OpenAI-compatible endpoint shim; confirm it accepts the same exec/prompt shape.
-    Capability is the real risk here — the interview is what catches a too-small model.
-12. **How this model prefers to be prompted** (the prompt-style — feeds the agent PROFILE, not the
-    config). WebSearch the provider's *current* prompting guide for THIS model — never rely on
-    training data; models churn their prompting advice as fast as their flags. Capture the
-    model-true specifics: prompt STRUCTURE (XML-tagged spec blocks vs markdown vs plain prose);
-    instruction-following literalness (and whether contradictory instructions are especially
-    harmful — they are for some models); autonomy posture ("propose and proceed" vs "ask"; whether
-    it wants explicit stop-conditions / tool-call budgets); context ordering (context-first vs
-    instructions-first); and any reasoning/effort knob + the right default for substantive RE work.
-    These become the profile's **How to prompt this model** section, which the dispatcher prepends
-    to every brief. Distinct from items 1-11 (how to *drive* the CLI) — this is how to *talk to* the
-    model. Record in `CANDIDATE.md`; draft into `profile-draft.md` (Step 4).
+1. Non-interactive entry point and prompt delivery.
+2. Standard-input behavior for a non-TTY process.
+3. Working-directory option; prefer the drafter workspace so nested
+   `AGENTS.override.md` is discovered.
+4. Sandbox and approval controls. Record the safest autonomous mode that still
+   supports the required tools.
+5. Any explicit sandbox-bypass flag. Store it as `bypass_args`, but never make
+   bypass the default.
+6. Model-selection flag and how the CLI handles an unknown model id.
+7. Final-message or structured-output capture.
+8. MCP/tool configuration format, scope, and timeout controls.
+9. Automatically discovered instruction filenames and precedence.
+10. Authentication method. Authentication is always a user action.
+11. Exit codes, timeout behavior, output truncation, and logging.
+12. Current provider guidance for prompting the exact model being evaluated.
 
-## Field map → config-draft.json
+## Config Field Map
 
-| Discovery | config field |
+| Discovery | Provider field |
 |---|---|
-| exec entry + prompt + working-dir + capture | `command` + `args` template (tokens `{model_args} {root} {policy_args} {lastmsg} {prompt}`) |
-| model selection flag | `model_flag` (+ leave `model_preference: []`, `default_model: null` to ride the CLI default) |
-| skip-permissions flag | `bypass_args` (array) + `bypass_default: true` |
-| sandbox fallback flags | `sandbox_args` (array; may be `[]` if none) + `sandbox` / `approval_policy` if templated |
-| instructions-file name | `instructions_file` |
+| executable | `command` |
+| invocation template | `args` |
+| model flag | `model_flag` |
+| preferred/current model | `model_preference`, `default_model` |
+| safe policy | `sandbox_args` |
+| explicit unsafe policy | `bypass_args` |
+| drafter law | `instructions_file` |
+| provider prompt overlay | `profile` |
 
-Leave `promoted` absent/false in the draft — only `decide-agent promote` sets it.
+The dispatcher supports `{model_args}`, `{policy_args}`, `{root}`,
+`{workspace}`, `{brief}`, `{report}`, `{lastmsg}`, and `{prompt}` tokens.
 
-Item 12 does NOT map into `config.json` — it maps into the **agent profile** (`profile-draft.md`,
-from the `agent-profile.md` template): its `role-fit` is filled after the interview, its "How to
-prompt this model" from item-12 research. `config.json` only gains a `profile` POINTER to that file
-(set at promote). Mechanics → config; prompt-style + role-fit → profile.
+Do not add credentials, access tokens, local secrets, or unverified flags to a
+draft config. Keep `promoted: false` until `decide-agent` applies the user's
+decision.

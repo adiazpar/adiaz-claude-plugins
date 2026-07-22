@@ -1,5 +1,9 @@
 # Directory skeleton created by init-project (one dir per line, repo-relative).
-# Each is the home of one epistemic status (CLAUDE.md s1). Empty dirs get a .gitkeep.
+# Each is the home of one epistemic status. Empty dirs get a .gitkeep.
+.re-discipline
+.claude
+.codex
+# `delegate` renders drafter-AGENTS-override.md inside each subagent workspace.
 docs
 docs/truth
 docs/history
@@ -10,5 +14,5 @@ archive
 src
 tests
 # tools/ is NOT force-created -- a project gets it only if it has its own code tooling.
-# The agent team lives in top-level agents/ (created by greenfield Step 5 when the agent
+# The agent team lives in top-level agents/ (created when the optional external-agent
 # framework is adopted), NOT under tools/.
