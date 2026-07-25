@@ -62,6 +62,13 @@ user-authorized candidate config. Live provider prompting guidance is at
 `.re-discipline/agents/providers/<provider>/profile.md`; candidate guidance is
 adjacent to its candidate config.
 
-All adapters produce
-`active/<slug>/subagents/<name>/report.md`. Review it with `review-subagent`
-before promoting any claim.
+The manager creates one completed chronological workspace ID before invoking an
+external adapter. Campaign dispatch passes that exact ID with `-Slug` and
+`-DispatchId`; recruiting dispatch passes it with `-RecruitingCandidate` and
+`-DispatchId`. The dispatcher never prepends a provider.
+
+All campaign adapters produce
+`active/<slug>/subagents/<workspace-id>/report.md`. Recruiting adapters produce
+`.re-discipline/agents/recruiting/<candidate>/runs/<workspace-id>/report.md`.
+Treat directory IDs as opaque. Legacy task-only and provider-prefixed campaign
+paths remain valid inputs to review and lifecycle workflows.

@@ -58,10 +58,12 @@ Candidate state is transient:
   scorecard.md
   teardown.md
   runs/
+    <created-utc>-<executor>-<task>/
 ```
 
-Candidate configuration is passed with `-ConfigPath`. Candidate `runs/` and
-the entire candidate directory are deleted after promotion or rejection.
+Each run directory is the actual isolated evaluation workspace. Candidate
+`runs/` and the entire candidate directory are deleted after promotion or
+rejection.
 
 ## Lifecycle
 
@@ -80,13 +82,35 @@ The manager creates the workspace and brief through `delegate`. The dispatcher
 uses sandbox arguments by default. `-Bypass` is valid only for a user-approved
 dispatch and requires configured `bypass_args`.
 
-The external drafter runs in
-`active/<slug>/subagents/<provider>-<name>/`, follows the fixed
-`.codex/external-drafter-contract.md`, and writes `report.md`.
-`last_message.md` is copied there only as a fallback.
+Every new campaign workspace uses:
+
+```text
+active/<slug>/subagents/YYYY-MM-DDTHH-mm-ssZ-<executor>-<task>/
+```
+
+The executor is the worker family or selected provider, not the manager or an
+exact model. The manager captures UTC once after route selection and reserves
+collisions atomically with `-02` through `-99`. Existing task-only or
+provider-prefixed directories remain valid legacy workspaces and are never
+renamed.
+
+The dispatcher receives the completed opaque ID through `-DispatchId`; it
+never prepends the provider. The drafter follows
+`.codex/external-drafter-contract.md` and writes `report.md`.
+`last_message.md` is copied only as a fallback.
 
 Check a live provider configuration before executing it:
 
 ```powershell
-.re-discipline/agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name> -DryRun
+.re-discipline/agents/dispatch.ps1 -Provider <provider> -Slug <slug> -DispatchId <dispatch-id> -DryRun
 ```
+
+Run an isolated candidate evaluation without changing live configuration:
+
+```powershell
+.re-discipline/agents/dispatch.ps1 -Provider <candidate> -RecruitingCandidate <candidate> -DispatchId <dispatch-id> -DryRun
+```
+
+`-Name` is a compatibility alias for `-DispatchId`; its value must still be
+the complete chronological ID. `-ConfigPath` remains available only for an
+explicitly authorized one-off provider in campaign mode.

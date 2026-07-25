@@ -22,7 +22,9 @@ where, what remains provisional, the next action, and blockers.>
 - `analysis/` - decompiles, traces, raw calculations, and tool output
 - `artifacts/` - inputs, generated outputs, captures, and ground-truth data
 - `evidence/` - reasoning notes that will be folded into the chronicle
-- `subagents/<name>/` - isolated drafter briefs, artifacts, and reports
+- `subagents/<created-utc>-<executor>-<task>/` - isolated drafter briefs,
+  artifacts, and reports; legacy task-only/provider-prefixed names remain
+  valid opaque workspace keys
 
 ## Open Questions
 

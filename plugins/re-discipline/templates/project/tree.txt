@@ -7,7 +7,8 @@
 .re-discipline/agents/recruiting
 .claude
 .codex
-# `delegate` renders drafter-AGENTS-override.md inside each subagent workspace.
+# `delegate` renders drafter-AGENTS-override.md inside campaign workspaces.
+# `hire-agent` renders recruiting-AGENTS-override.md inside candidate runs.
 docs
 docs/truth
 docs/history

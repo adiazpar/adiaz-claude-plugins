@@ -44,6 +44,11 @@ Complete the campaign manifest, then handle each artifact:
 Do not delete an unclassified artifact. Preserve licenses and source
 restrictions when moving material into the repository.
 
+Treat each `subagents/` child name as an opaque workspace key while recording
+provenance. New chronological IDs and legacy task-only or provider-prefixed
+names are equally valid inputs. Do not normalize or rename either form before
+the campaign's final disposition removes the whole campaign.
+
 ## Step 4: Write The Chronicle
 
 Resolve the plugin root from this skill's path and render

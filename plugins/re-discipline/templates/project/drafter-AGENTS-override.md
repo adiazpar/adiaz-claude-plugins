@@ -1,6 +1,8 @@
 # AGENTS.override.md - Campaign Drafter
 
 This subtree is a drafter workspace, not a manager session.
+Its directory name is the opaque campaign workspace ID; do not parse or rename
+it.
 
 Read these files before acting:
 

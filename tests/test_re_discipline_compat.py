@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.4.1")
+        self.assertEqual(manifest["version"], "0.4.2")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -134,6 +134,52 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertIn("Claude Code", body)
         self.assertIn("Codex", body)
         self.assertIn(".codex/external-drafter-contract.md", body)
+
+    def test_delegate_owns_chronological_workspace_identity(self) -> None:
+        body = read(PLUGIN / "skills" / "delegate" / "SKILL.md")
+
+        self.assertIn("YYYY-MM-DDTHH-mm-ssZ-<executor>-<task>", body)
+        self.assertIn("fail-if-exists", body)
+        self.assertIn("-02", body)
+        self.assertIn("-99", body)
+        self.assertIn("-DispatchId <dispatch-id>", body)
+        self.assertIn("worker", body.lower())
+        self.assertIn("not the manager", body.lower())
+        self.assertIn("reroute", body.lower())
+        self.assertIn("leave", body.lower())
+        self.assertNotIn("<provider>-<name>", body)
+        for field in (
+            "Workspace:",
+            "Created UTC:",
+            "Manager host:",
+            "Executor:",
+            "Execution route:",
+            "Provider/model:",
+            "Task:",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, body)
+
+    def test_hire_agent_uses_real_chronological_run_workspaces(self) -> None:
+        body = read(PLUGIN / "skills" / "hire-agent" / "SKILL.md")
+
+        self.assertIn("runs/<dispatch-id>/", body)
+        self.assertIn("-RecruitingCandidate <candidate>", body)
+        self.assertIn("-DispatchId <dispatch-id>", body)
+        self.assertIn("recruiting-AGENTS-override.md", body)
+        self.assertIn("stable executor", body.lower())
+
+    def test_lifecycle_accepts_legacy_opaque_workspace_keys(self) -> None:
+        for name in (
+            "review-subagent",
+            "checkpoint-campaign",
+            "close-campaign",
+            "onboard",
+        ):
+            with self.subTest(skill=name):
+                body = read(PLUGIN / "skills" / name / "SKILL.md").lower()
+                self.assertIn("legacy", body)
+                self.assertIn("opaque", body)
 
     def test_lifecycle_skills_do_not_require_claude_only_tools(self) -> None:
         for skill_path in sorted((PLUGIN / "skills").glob("*/SKILL.md")):
@@ -275,6 +321,7 @@ class ProjectTemplateTests(unittest.TestCase):
             "external-drafter-contract.md",
             "local-paths.md",
             "project-profile.md",
+            "recruiting-AGENTS-override.md",
         }
 
         self.assertTrue(expected.issubset({path.name for path in self.templates.iterdir()}))
@@ -405,6 +452,30 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertIn("drafter, not ratifier", drafter.lower())
         self.assertIn("report.md", drafter)
 
+    def test_external_contract_supports_campaign_and_recruiting_workspaces(
+        self,
+    ) -> None:
+        contract = read(self.templates / "external-drafter-contract.md")
+        recruiting_override = read(
+            self.templates / "recruiting-AGENTS-override.md"
+        )
+
+        self.assertIn("active/<slug>/subagents/<workspace-id>/", contract)
+        self.assertIn(
+            ".re-discipline/agents/recruiting/<candidate>/runs/<workspace-id>/",
+            contract,
+        )
+        for relative in (
+            "../../../../../project-profile.md",
+            "../../../../../../.codex/external-drafter-contract.md",
+            "../../candidate.md",
+            "../../profile.md",
+            "brief.md",
+        ):
+            with self.subTest(relative=relative):
+                self.assertIn(relative, recruiting_override)
+        self.assertNotIn("CAMPAIGN.md", recruiting_override)
+
     def test_campaign_template_is_host_neutral(self) -> None:
         body = read(PLUGIN / "templates" / "campaign-masterfile.md")
 
@@ -439,6 +510,8 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("one canonical project profile", body.lower())
         self.assertNotIn("Yes, a new project gets `.codex/project-profile.md`", body)
         self.assertIn("/hooks", body)
+        self.assertIn(".agents/plugins/marketplace.json", body)
+        self.assertIn("not re-discipline scratch", body.lower())
 
     def test_repository_readme_identifies_the_codex_marketplace(self) -> None:
         body = read(ROOT / "README.md")
@@ -448,6 +521,9 @@ class DocumentationTests(unittest.TestCase):
 
 
 class ExternalDispatcherTests(unittest.TestCase):
+    DISPATCH_ID = "2026-07-25T21-45-03Z-demo-resource-scan"
+    RECRUITING_ID = "2026-07-25T21-45-03Z-demo-static-fixture"
+
     def setUp(self) -> None:
         self.powershell = shutil.which("powershell.exe") or shutil.which("powershell")
         if not self.powershell:
@@ -459,6 +535,8 @@ class ExternalDispatcherTests(unittest.TestCase):
         config: dict,
         *,
         candidate: str | None = None,
+        recruiting: bool = False,
+        dispatch_id: str | None = None,
     ) -> tuple[Path, Path]:
         templates = PLUGIN / "templates" / "project"
         agents = root / ".re-discipline" / "agents"
@@ -469,49 +547,91 @@ class ExternalDispatcherTests(unittest.TestCase):
         profile.parent.mkdir(parents=True, exist_ok=True)
         profile.write_text("---\nname: sample\n---\n", encoding="utf-8")
 
-        if candidate is None:
+        candidate_name = candidate or "demo"
+        if candidate is None and not recruiting:
             config_path = agents / "config.json"
-            provider_profile = agents / "providers" / "demo" / "profile.md"
+            for provider_name in config.get("providers", {}):
+                provider_profile = (
+                    agents / "providers" / provider_name / "profile.md"
+                )
+                provider_profile.parent.mkdir(parents=True, exist_ok=True)
+                provider_profile.write_text(
+                    f"# {provider_name} provider\n",
+                    encoding="utf-8",
+                )
         else:
-            candidate_dir = agents / "recruiting" / candidate
+            candidate_dir = agents / "recruiting" / candidate_name
             candidate_dir.mkdir(parents=True)
             config_path = candidate_dir / "config.json"
             provider_profile = candidate_dir / "profile.md"
+            provider_profile.write_text("# Demo provider\n", encoding="utf-8")
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(config), encoding="utf-8")
-        provider_profile.parent.mkdir(parents=True, exist_ok=True)
-        provider_profile.write_text("# Demo provider\n", encoding="utf-8")
 
-        campaign = root / "active" / "sample"
-        workspace = campaign / "subagents" / "demo-task"
-        workspace.mkdir(parents=True)
-        (campaign / "CAMPAIGN.md").write_text("# Campaign\n", encoding="utf-8")
+        contract = root / ".codex" / "external-drafter-contract.md"
+        contract.parent.mkdir(parents=True, exist_ok=True)
+        contract.write_text("# External drafter\n", encoding="utf-8")
+
+        if recruiting:
+            (candidate_dir / "candidate.md").write_text(
+                "# Candidate\n",
+                encoding="utf-8",
+            )
+            workspace = (
+                candidate_dir
+                / "runs"
+                / (dispatch_id or self.RECRUITING_ID)
+            )
+            workspace.mkdir(parents=True)
+            shutil.copy2(
+                templates / "recruiting-AGENTS-override.md",
+                workspace / "AGENTS.override.md",
+            )
+        else:
+            campaign = root / "active" / "sample"
+            workspace = (
+                campaign / "subagents" / (dispatch_id or self.DISPATCH_ID)
+            )
+            workspace.mkdir(parents=True)
+            (campaign / "CAMPAIGN.md").write_text(
+                "# Campaign\n",
+                encoding="utf-8",
+            )
+            (workspace / "AGENTS.override.md").write_text(
+                "# Drafter\n",
+                encoding="utf-8",
+            )
+
         (workspace / "brief.md").write_text("# Brief\n", encoding="utf-8")
-        (workspace / "AGENTS.override.md").write_text(
-            "# Drafter\n", encoding="utf-8"
-        )
         return agents / "dispatch.ps1", config_path
 
     def dispatch(
         self,
         dispatcher: Path,
         *extra: str,
+        provider: str = "demo",
+        mode_args: list[str] | None = None,
+        dispatch_id: str | None = None,
+        id_parameter: str = "-DispatchId",
     ) -> subprocess.CompletedProcess[str]:
+        selected_mode = (
+            ["-Slug", "sample"] if mode_args is None else mode_args
+        )
         return subprocess.run(
             [
                 self.powershell,
                 "-NoProfile",
+                "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
                 str(dispatcher),
                 "-Provider",
-                "demo",
-                "-Slug",
-                "sample",
-                "-Name",
-                "task",
+                provider,
+                *selected_mode,
+                id_parameter,
+                dispatch_id or self.DISPATCH_ID,
                 *extra,
                 "-DryRun",
             ],
@@ -540,12 +660,231 @@ class ExternalDispatcherTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("provider=demo", result.stdout)
+        self.assertIn(f"workspace={self.DISPATCH_ID}", result.stdout)
+        self.assertNotIn(
+            f"workspace=demo-{self.DISPATCH_ID}",
+            result.stdout,
+        )
         self.assertIn("SANDBOXED", result.stdout)
         self.assertIn("<CLI default>", result.stdout)
         self.assertIn(
             ".re-discipline\\agents\\providers\\demo\\profile.md",
             result.stdout.replace("/", "\\"),
         )
+
+    def test_dispatcher_prompt_uses_absolute_external_contract(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dispatcher, _ = self.make_dispatch_project(root, config)
+            result = self.dispatch(dispatcher)
+            expected = str(
+                root / ".codex" / "external-drafter-contract.md"
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            expected.replace("/", "\\"),
+            result.stdout.replace("/", "\\"),
+        )
+
+    def test_dispatcher_name_alias_uses_the_exact_completed_id(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(Path(directory), config)
+            result = self.dispatch(
+                dispatcher,
+                id_parameter="-Name",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"workspace={self.DISPATCH_ID}", result.stdout)
+
+    def test_dispatcher_rejects_provider_executor_mismatch(self) -> None:
+        provider = {
+            "command": "powershell.exe",
+            "args": ["{prompt}"],
+            "sandbox_args": ["-NoProfile"],
+            "bypass_args": ["-NoProfile"],
+        }
+        config = {
+            "backend": "native",
+            "providers": {"demo": provider, "other": provider},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(Path(directory), config)
+            result = self.dispatch(dispatcher, provider="other")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("executor", result.stderr.lower())
+
+    def test_dispatcher_rejects_malformed_completed_ids(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        invalid_ids = (
+            "2026-13-40T25-99-99Z-demo-task",
+            "2026-07-25T21-45-03Z-demo-bad--task",
+        )
+        for dispatch_id in invalid_ids:
+            with self.subTest(dispatch_id=dispatch_id):
+                with tempfile.TemporaryDirectory() as directory:
+                    dispatcher, _ = self.make_dispatch_project(
+                        Path(directory),
+                        config,
+                        dispatch_id=dispatch_id,
+                    )
+                    result = self.dispatch(
+                        dispatcher,
+                        dispatch_id=dispatch_id,
+                    )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("dispatch id", result.stderr.lower())
+
+    def test_dispatcher_rejects_malformed_provider_slugs(self) -> None:
+        for provider_name in ("bad--provider", "bad-"):
+            with self.subTest(provider=provider_name):
+                config = {
+                    "backend": "native",
+                    "providers": {
+                        provider_name: {
+                            "command": "powershell.exe",
+                            "args": ["{prompt}"],
+                            "sandbox_args": ["-NoProfile"],
+                            "bypass_args": ["-NoProfile"],
+                        }
+                    },
+                }
+                dispatch_id = (
+                    f"2026-07-25T21-45-03Z-{provider_name}-task"
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    dispatcher, _ = self.make_dispatch_project(
+                        Path(directory),
+                        config,
+                        dispatch_id=dispatch_id,
+                    )
+                    result = self.dispatch(
+                        dispatcher,
+                        provider=provider_name,
+                        dispatch_id=dispatch_id,
+                    )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("provider", result.stderr.lower())
+
+    def test_dispatcher_rejects_brief_outside_workspace(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dispatcher, _ = self.make_dispatch_project(root, config)
+            outside = root / "outside-brief.md"
+            outside.write_text("# Outside\n", encoding="utf-8")
+            result = self.dispatch(
+                dispatcher,
+                "-BriefPath",
+                str(outside),
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("brief", result.stderr.lower())
+        self.assertIn("workspace", result.stderr.lower())
+
+    def test_dispatcher_requires_workspace_override(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dispatcher, _ = self.make_dispatch_project(root, config)
+            override = (
+                root
+                / "active"
+                / "sample"
+                / "subagents"
+                / self.DISPATCH_ID
+                / "AGENTS.override.md"
+            )
+            override.unlink()
+            result = self.dispatch(dispatcher)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AGENTS.override.md", result.stderr)
+
+    def test_dispatcher_requires_exactly_one_workspace_mode(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(Path(directory), config)
+            neither = self.dispatch(dispatcher, mode_args=[])
+            both = self.dispatch(
+                dispatcher,
+                mode_args=[
+                    "-Slug",
+                    "sample",
+                    "-RecruitingCandidate",
+                    "demo",
+                ],
+            )
+
+        self.assertNotEqual(neither.returncode, 0)
+        self.assertNotEqual(both.returncode, 0)
 
     def test_dispatcher_model_precedence(self) -> None:
         config = {
@@ -629,6 +968,213 @@ class ExternalDispatcherTests(unittest.TestCase):
             ".re-discipline\\agents\\recruiting\\demo\\profile.md",
             result.stdout.replace("/", "\\"),
         )
+
+    def test_dispatcher_uses_recruiting_run_workspace(self) -> None:
+        config = {
+            "backend": "demo",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dispatcher, _ = self.make_dispatch_project(
+                root,
+                config,
+                candidate="demo",
+                recruiting=True,
+            )
+            result = self.dispatch(
+                dispatcher,
+                mode_args=["-RecruitingCandidate", "demo"],
+                dispatch_id=self.RECRUITING_ID,
+            )
+            self.assertFalse((root / "active").exists())
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"workspace={self.RECRUITING_ID}", result.stdout)
+        self.assertIn(
+            ".re-discipline\\agents\\recruiting\\demo\\profile.md",
+            result.stdout.replace("/", "\\"),
+        )
+
+    def test_dispatcher_rejects_recruiting_provider_mismatch(self) -> None:
+        provider = {
+            "command": "powershell.exe",
+            "args": ["{prompt}"],
+            "sandbox_args": ["-NoProfile"],
+            "bypass_args": ["-NoProfile"],
+        }
+        config = {
+            "backend": "demo",
+            "providers": {"demo": provider, "other": provider},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(
+                Path(directory),
+                config,
+                candidate="demo",
+                recruiting=True,
+            )
+            result = self.dispatch(
+                dispatcher,
+                provider="other",
+                mode_args=["-RecruitingCandidate", "demo"],
+                dispatch_id=self.RECRUITING_ID,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("candidate", result.stderr.lower())
+        self.assertIn("provider", result.stderr.lower())
+
+    def test_dispatcher_rejects_malformed_candidate_slugs(self) -> None:
+        for candidate in ("bad--candidate", "bad-"):
+            with self.subTest(candidate=candidate):
+                provider = {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+                config = {
+                    "backend": "demo",
+                    "providers": {"demo": provider},
+                }
+                with tempfile.TemporaryDirectory() as directory:
+                    dispatcher, _ = self.make_dispatch_project(
+                        Path(directory),
+                        config,
+                        candidate=candidate,
+                        recruiting=True,
+                        dispatch_id=self.RECRUITING_ID,
+                    )
+                    result = self.dispatch(
+                        dispatcher,
+                        mode_args=["-RecruitingCandidate", candidate],
+                        dispatch_id=self.RECRUITING_ID,
+                    )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("candidate", result.stderr.lower())
+
+    def test_dispatcher_rejects_config_path_in_recruiting_mode(self) -> None:
+        config = {
+            "backend": "demo",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, config_path = self.make_dispatch_project(
+                Path(directory),
+                config,
+                candidate="demo",
+                recruiting=True,
+            )
+            result = self.dispatch(
+                dispatcher,
+                "-ConfigPath",
+                str(config_path),
+                mode_args=["-RecruitingCandidate", "demo"],
+                dispatch_id=self.RECRUITING_ID,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Parameter set", result.stderr)
+
+    def test_dispatcher_requires_complete_recruiting_workspace(self) -> None:
+        config = {
+            "backend": "demo",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        relative_targets = (
+            Path("candidate.md"),
+            Path("config.json"),
+            Path("profile.md"),
+            Path("runs") / self.RECRUITING_ID / "brief.md",
+            Path("runs") / self.RECRUITING_ID / "AGENTS.override.md",
+        )
+        for relative_target in relative_targets:
+            with self.subTest(missing=str(relative_target)):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    dispatcher, _ = self.make_dispatch_project(
+                        root,
+                        config,
+                        candidate="demo",
+                        recruiting=True,
+                    )
+                    candidate_dir = (
+                        root
+                        / ".re-discipline"
+                        / "agents"
+                        / "recruiting"
+                        / "demo"
+                    )
+                    (candidate_dir / relative_target).unlink()
+                    result = self.dispatch(
+                        dispatcher,
+                        mode_args=["-RecruitingCandidate", "demo"],
+                        dispatch_id=self.RECRUITING_ID,
+                    )
+
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_recruiting_override_paths_resolve(self) -> None:
+        config = {
+            "backend": "demo",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_dispatch_project(
+                root,
+                config,
+                candidate="demo",
+                recruiting=True,
+            )
+            workspace = (
+                root
+                / ".re-discipline"
+                / "agents"
+                / "recruiting"
+                / "demo"
+                / "runs"
+                / self.RECRUITING_ID
+            )
+            for relative in (
+                "../../../../../project-profile.md",
+                "../../../../../../.codex/external-drafter-contract.md",
+                "../../candidate.md",
+                "../../profile.md",
+                "brief.md",
+            ):
+                with self.subTest(relative=relative):
+                    self.assertTrue((workspace / relative).resolve().is_file())
 
     def test_dispatcher_rejects_legacy_provider_keys(self) -> None:
         config = {

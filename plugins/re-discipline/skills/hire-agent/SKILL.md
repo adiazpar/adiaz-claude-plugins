@@ -23,6 +23,10 @@ Require the normalized files created by `init-project`:
 - `.re-discipline/agents/recruiting/`
 
 If any are missing or malformed, use `init-project` repair before recruiting.
+Use a 2-50-character lowercase kebab `<candidate>` slug matching
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`. It names the stable executor family, not an
+exact model or release; record exact versions in candidate and run metadata.
+
 Create `.re-discipline/agents/recruiting/<candidate>/` with:
 
 ```text
@@ -85,14 +89,37 @@ Use cheap static tasks first, then tool-reach and production-loop tasks only if
 the candidate passes the gate. Each task needs a versioned brief, manager-only
 answer key or observable oracle, write-scope check, and cost/latency capture.
 
-Store each run under `runs/` and dispatch with:
+For each task, capture UTC once after selecting the candidate and form:
 
-```powershell
-.re-discipline/agents/dispatch.ps1 -Provider <candidate> -Slug <slug> -Name <name> -ConfigPath <candidate-config>
+```text
+<dispatch-id> = YYYY-MM-DDTHH-mm-ssZ-<candidate>-<task>
 ```
 
-Do not add the candidate to live config. Bundled fixtures are examples only;
-use a project-specific equivalent when their subject or tools do not exist.
+Validate `<task>` with the same 2-50-character lowercase kebab rule. Reserve
+`runs/<dispatch-id>/` with atomic fail-if-exists directory creation. On a
+same-second collision, try `-02`, then `-03`, through `-99`; never use a
+check-then-create sequence.
+
+The run directory is the actual isolated drafter workspace. Create
+`scripts/`, `analysis/`, `artifacts/`, and `evidence/`; write `brief.md`; and
+render `<plugin-root>/templates/project/recruiting-AGENTS-override.md` as
+`AGENTS.override.md`. The brief records Workspace, Created UTC, Manager host,
+Executor, Execution route, Provider/model, Task, and report path.
+
+Dispatch with:
+
+```powershell
+.re-discipline/agents/dispatch.ps1 -Provider <candidate> -RecruitingCandidate <candidate> -DispatchId <dispatch-id>
+```
+
+The dispatcher reads the candidate's own `config.json` and `profile.md`; do not
+pass `-ConfigPath`, require a campaign, or add the candidate to live config.
+The drafter writes `report.md` inside the run workspace. Leave blocked or
+failed runs intact for scoring and teardown. A reroute or distinct attempt
+gets a new dispatch ID.
+
+Bundled fixtures are examples only; use a project-specific equivalent when
+their subject or tools do not exist.
 
 ## Step 7: Score And Recommend
 

@@ -90,8 +90,11 @@ codex plugin add re-discipline@adiaz-claude-plugins
 ```
 
 In the ChatGPT desktop app, the repo marketplace is
-`.agents/plugins/marketplace.json`. Restart the app, select the marketplace in
-the Plugins Directory, and install `re-discipline`.
+`.agents/plugins/marketplace.json`. That `.agents/` path is Codex plugin
+marketplace metadata, not re-discipline scratch. Re-discipline campaign
+workspaces remain under `active/`, and hiring state remains under
+`.re-discipline/agents/`. Restart the app, select the marketplace in the
+Plugins Directory, and install `re-discipline`.
 
 Codex requires review of non-managed hooks. Open `/hooks`, review the plugin's
 `SessionStart` and `PreCompact` commands, and trust the current definitions.
@@ -120,6 +123,13 @@ Native delegation is the default:
 
 - Claude Code uses its native subagent tool.
 - Codex uses `spawn_agent` when collaboration is available and allowed.
+
+Every new campaign workspace is named
+`YYYY-MM-DDTHH-mm-ssZ-<executor>-<task>`, where executor identifies the worker
+rather than the manager or exact model. Candidate evaluations use the same
+signature under `.re-discipline/agents/recruiting/<candidate>/runs/`. Existing
+task-only and provider-prefixed campaign directories remain valid and are not
+renamed.
 
 The external-provider core is always initialized at `.re-discipline/agents/`
 with `backend: native` and no configured providers. `hire-agent` evaluates a

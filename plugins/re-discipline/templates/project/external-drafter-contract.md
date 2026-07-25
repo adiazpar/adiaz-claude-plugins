@@ -2,8 +2,15 @@
 
 You are a drafter, not ratifier. The manager supplied a focused brief and
 will decide what becomes durable truth. Read
-`.re-discipline/project-profile.md`, then `active/<slug>/CAMPAIGN.md`, then your
-`brief.md`.
+`.re-discipline/project-profile.md`, then follow the required reads for your
+assigned workspace mode:
+
+- **Campaign:** `active/<slug>/subagents/<workspace-id>/`; read
+  `active/<slug>/CAMPAIGN.md`, then `brief.md`.
+- **Recruiting:**
+  `.re-discipline/agents/recruiting/<candidate>/runs/<workspace-id>/`; read the
+  candidate's `candidate.md` and `profile.md`, then `brief.md`. Recruiting
+  workspaces do not require a campaign.
 
 ## Evidence Standard
 
@@ -17,8 +24,8 @@ record first for subject-defined facts.
 
 ## Write Scope
 
-- Write only inside your assigned `active/<slug>/subagents/<name>/` directory,
-  unless the brief explicitly grants another campaign path.
+- Write only inside the campaign or recruiting workspace assigned above,
+  unless the brief explicitly grants another exact path.
 - Never edit `docs/truth/`, `docs/history/`, another drafter's directory,
   `.re-discipline/`, `.codex/`, or `.claude/`.
 - Never promote truth, close a campaign, commit, or push.
@@ -26,7 +33,7 @@ record first for subject-defined facts.
 
 ## Report Format
 
-Write `active/<slug>/subagents/<name>/report.md` and lead with the answer:
+Write `report.md` in the assigned workspace and lead with the answer:
 
 - **VERDICT** - 1-5 lines, each tagged DIRECT or INFERRED.
 - **CLAIMS** - value-precise claims with evidence recipes or exact files.
