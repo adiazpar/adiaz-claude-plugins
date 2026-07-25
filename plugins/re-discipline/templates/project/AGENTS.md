@@ -1,4 +1,4 @@
-<!-- re-discipline:router v0.4.1 -->
+<!-- re-discipline:router v0.4.2 -->
 # AGENTS.md - {{PROJECT_NAME}} entrypoint
 
 This root file is a compatibility entrypoint for agents that discover
@@ -6,9 +6,10 @@ This root file is a compatibility entrypoint for agents that discover
 
 Direct Codex manager sessions must read and follow `.codex/AGENTS.md`.
 
-Dispatched drafting agents given a `brief.md` under
-`active/<slug>/subagents/<name>/` must read and follow
-`.codex/external-drafter-contract.md`.
+Dispatched drafting agents given a `brief.md` under either
+`active/<slug>/subagents/<workspace-id>/` or
+`.re-discipline/agents/recruiting/<candidate>/runs/<workspace-id>/` must read
+and follow `.codex/external-drafter-contract.md`.
 
 Both roles must read `.re-discipline/project-profile.md` for the canonical
 shared laws, project identity, and domain facts. Project-owned host notes live

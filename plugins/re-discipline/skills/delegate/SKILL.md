@@ -17,7 +17,8 @@ same reviewable report and keep the drafter away from durable truth.
 Require:
 
 - an existing `active/<slug>/CAMPAIGN.md`;
-- a unique lowercase kebab-case `<name>`;
+- a lowercase kebab-case `<task>` of 2-50 characters matching
+  `^[a-z0-9]+(?:-[a-z0-9]+)*$`;
 - a concrete objective with an observable deliverable or answer.
 
 Select the route before naming the workspace:
@@ -28,15 +29,40 @@ Select the route before naming the workspace:
 3. Otherwise use the current host's native adapter.
 
 Never change the backend or move work between providers without the user.
-Use `<name>` for native work and `<provider>-<name>` for external work. The
-workspace is `active/<slug>/subagents/<dispatch-name>/`.
 
-## Step 2: Create The Drafter Workspace
+Determine `<executor>` from the worker that will actually perform the task,
+not the manager:
+
+- native work uses the active host's worker family, such as `codex` or
+  `claude`;
+- external work uses the selected provider's stable lowercase kebab slug.
+
+The executor is not an exact model, role, or persona. Record those details in
+the brief instead. Validate the executor with the same 2-50-character
+lowercase kebab rule as the task.
+
+## Step 2: Reserve The Drafter Workspace
+
+Immediately after route selection, capture the current UTC time once as
+`YYYY-MM-DDTHH-mm-ssZ`. Build:
+
+```text
+<dispatch-id> = YYYY-MM-DDTHH-mm-ssZ-<executor>-<task>
+```
+
+Reserve `active/<slug>/subagents/<dispatch-id>/` by attempting directory
+creation with fail-if-exists semantics. Do not check existence separately
+before creation. If the base ID collides, atomically try `-02`, then `-03`,
+through `-99`. The first workspace has no `-01`. Stop with an explicit error
+if `-99` is exhausted.
+
+The selected ID is immutable. Reuse it in the brief, dispatch command,
+campaign record, and report path; never recompute the timestamp.
 
 Create `scripts/`, `analysis/`, `artifacts/`, and `evidence/` under the
-workspace. Render
+reserved workspace. Render
 `<plugin-root>/templates/project/drafter-AGENTS-override.md` to
-`AGENTS.override.md`. Do not overwrite an existing workspace.
+`AGENTS.override.md`.
 
 Do not commit unless the user explicitly asks.
 
@@ -60,11 +86,17 @@ Lead with the canonical `framing` value from
 `.re-discipline/project-profile.md`, then include:
 
 ```text
-# Dispatch Brief - <dispatch-name>
+# Dispatch Brief - <dispatch-id>
 
 Project: <name and neutral framing>
-Workspace: active/<slug>/subagents/<dispatch-name>/
-Report: active/<slug>/subagents/<dispatch-name>/report.md
+Workspace: active/<slug>/subagents/<dispatch-id>/
+Created UTC: <YYYY-MM-DDTHH:MM:SSZ>
+Manager host: <claude|codex|other>
+Executor: <executor>
+Execution route: <native|external>
+Provider/model: <provider and exact model when known, otherwise unknown>
+Task: <task>
+Report: active/<slug>/subagents/<dispatch-id>/report.md
 
 ## Required Reads
 - .re-discipline/project-profile.md
@@ -126,7 +158,7 @@ Require a live configured provider, or a candidate config explicitly
 authorized by the user. Invoke:
 
 ```powershell
-.re-discipline/agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name>
+.re-discipline/agents/dispatch.ps1 -Provider <provider> -Slug <slug> -DispatchId <dispatch-id>
 ```
 
 For a candidate or one-off provider, also pass its exact `-ConfigPath`. The
@@ -139,6 +171,11 @@ user's approval.
 
 If the selected adapter is unavailable, leave the brief and workspace intact,
 report the exact blocker, and do not pretend the dispatch occurred.
+
+Retry an interrupted launch in the same workspace only when it continues that
+exact dispatch. A reroute to another executor is new work: leave the prior
+workspace intact and reserve a new timestamped dispatch ID. Never rename or
+recycle a workspace to hide a blocked or failed route.
 
 ## Step 6: Record And Review
 

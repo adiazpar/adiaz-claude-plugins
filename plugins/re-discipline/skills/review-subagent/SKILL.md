@@ -13,9 +13,14 @@ rederive every claim that could affect durable truth.
 
 ## Step 1: Read Report And Primary Artifacts
 
-Read `active/<slug>/subagents/<name>/report.md` in full. Its confidence color
-is a prior, not a verdict. Follow every value-precise claim to the cited output,
-source file, capture, or primary artifact and read the value yourself.
+Read `active/<slug>/subagents/<workspace-id>/report.md` in full. Treat the
+directory segment as an opaque workspace key. New keys carry timestamp,
+executor, and task text; legacy task-only or provider-prefixed keys remain
+valid. Never parse, normalize, or rename either form during review.
+
+The report's confidence color is a prior, not a verdict. Follow every
+value-precise claim to the cited output, source file, capture, or primary
+artifact and read the value yourself.
 
 Different DIRECT sources may attest different facts. Source code can show what
 a system implements; an exported artifact can show what a particular tool

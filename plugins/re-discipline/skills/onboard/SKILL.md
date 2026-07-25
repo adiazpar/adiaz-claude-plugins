@@ -54,6 +54,10 @@ List directories directly under `active/`. For each campaign, read
 `active/<slug>/CAMPAIGN.md`, focusing on Objective, Current state, Open
 questions, Dead ends, and the disposition manifest.
 
+Treat names below each campaign's `subagents/` directory as opaque workspace
+keys. New chronological IDs and legacy task-only or provider-prefixed names
+remain valid history. Onboarding never parses, normalizes, or renames them.
+
 When no campaign is active, call the state a cold start and await direction.
 Do not open a campaign merely because none exists.
 

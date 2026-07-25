@@ -5,21 +5,44 @@ The delegate skill owns policy and creates the workspace. This script expands
 a configured provider's command template and ensures the standard report
 lands.
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Campaign')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[a-z0-9][a-z0-9-]{1,49}$')]
+    [ValidateScript({
+        if (
+            $_.Length -ge 2 -and
+            $_.Length -le 50 -and
+            $_ -match '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        ) {
+            return $true
+        }
+        throw 'Provider must be 2-50 characters of lowercase kebab case.'
+    })]
     [string]$Provider,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'Campaign')]
     [ValidatePattern('^[a-z0-9][a-z0-9-]{2,49}$')]
     [string]$Slug,
 
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[a-z0-9][a-z0-9-]{1,49}$')]
-    [string]$Name,
+    [Alias('Name')]
+    [string]$DispatchId,
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'Recruiting')]
+    [ValidateScript({
+        if (
+            $_.Length -ge 2 -and
+            $_.Length -le 50 -and
+            $_ -match '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        ) {
+            return $true
+        }
+        throw 'RecruitingCandidate must be 2-50 characters of lowercase kebab case.'
+    })]
+    [string]$RecruitingCandidate,
 
     [string]$BriefPath,
+    [Parameter(ParameterSetName = 'Campaign')]
     [string]$ConfigPath,
     [string]$Model,
     [switch]$Bypass,
@@ -40,6 +63,57 @@ function Resolve-FromRoot {
         return [System.IO.Path]::GetFullPath($Path)
     }
     return [System.IO.Path]::GetFullPath((Join-Path $script:root $Path))
+}
+
+function Assert-DispatchId {
+    param(
+        [Parameter(Mandatory = $true)][string]$Id,
+        [Parameter(Mandatory = $true)][string]$ExpectedProvider
+    )
+
+    if ($Id.Length -gt 125 -or $Id.Length -lt 26) {
+        throw 'Dispatch ID must be 26-125 characters.'
+    }
+
+    $timestampText = $Id.Substring(0, 20)
+    [datetime]$parsedTimestamp = [datetime]::MinValue
+    $styles = (
+        [Globalization.DateTimeStyles]::AssumeUniversal -bor
+        [Globalization.DateTimeStyles]::AdjustToUniversal
+    )
+    $validTimestamp = [datetime]::TryParseExact(
+        $timestampText,
+        "yyyy-MM-dd'T'HH-mm-ss'Z'",
+        [Globalization.CultureInfo]::InvariantCulture,
+        $styles,
+        [ref]$parsedTimestamp
+    )
+    if (-not $validTimestamp) {
+        throw "Dispatch ID has an invalid UTC timestamp: $timestampText"
+    }
+    if ($Id[20] -ne '-') {
+        throw 'Dispatch ID must place a hyphen after the UTC timestamp.'
+    }
+
+    $remainder = $Id.Substring(21)
+    $providerPrefix = "$ExpectedProvider-"
+    if (-not $remainder.StartsWith(
+        $providerPrefix,
+        [System.StringComparison]::Ordinal
+    )) {
+        throw (
+            "Dispatch ID executor does not match provider '$ExpectedProvider'."
+        )
+    }
+
+    $opaqueTail = $remainder.Substring($providerPrefix.Length)
+    if (
+        $opaqueTail.Length -lt 2 -or
+        $opaqueTail.Length -gt 53 -or
+        $opaqueTail -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+    ) {
+        throw 'Dispatch ID task/collision tail is not valid lowercase kebab case.'
+    }
 }
 
 function Assert-AllowedProperties {
@@ -68,11 +142,52 @@ function Get-OptionalArray {
     return @($Object.$Name)
 }
 
-$configFile = if ($ConfigPath) {
-    Resolve-FromRoot $ConfigPath
+$isRecruiting = $PSCmdlet.ParameterSetName -eq 'Recruiting'
+if ($isRecruiting -and $Provider -ne $RecruitingCandidate) {
+    throw (
+        "Recruiting candidate '$RecruitingCandidate' must match provider " +
+        "'$Provider'."
+    )
+}
+
+Assert-DispatchId -Id $DispatchId -ExpectedProvider $Provider
+
+if ($isRecruiting) {
+    $candidateRoot = Resolve-FromRoot (
+        ".re-discipline/agents/recruiting/$RecruitingCandidate"
+    )
+    foreach ($requiredName in @('candidate.md', 'config.json', 'profile.md')) {
+        $requiredPath = Join-Path $candidateRoot $requiredName
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Recruiting candidate file not found: $requiredPath"
+        }
+    }
+
+    $configFile = Join-Path $candidateRoot 'config.json'
+    $providerProfile = Join-Path $candidateRoot 'profile.md'
+    $workspaceRoot = Join-Path $candidateRoot 'runs'
 }
 else {
-    Join-Path $PSScriptRoot 'config.json'
+    $campaign = Resolve-FromRoot "active/$Slug"
+    if (-not (
+        Test-Path -LiteralPath (Join-Path $campaign 'CAMPAIGN.md') -PathType Leaf
+    )) {
+        throw "Campaign not found or missing CAMPAIGN.md: active/$Slug"
+    }
+
+    $configFile = if ($ConfigPath) {
+        Resolve-FromRoot $ConfigPath
+    }
+    else {
+        Join-Path $PSScriptRoot 'config.json'
+    }
+    $providerProfile = if ($ConfigPath) {
+        Join-Path (Split-Path -Parent $configFile) 'profile.md'
+    }
+    else {
+        Join-Path $PSScriptRoot "providers\$Provider\profile.md"
+    }
+    $workspaceRoot = Join-Path $campaign 'subagents'
 }
 
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) {
@@ -117,36 +232,45 @@ if ($null -eq $providerConfig.PSObject.Properties['args']) {
 if (@($providerConfig.args).Count -eq 0) {
     throw "Provider '$Provider' requires at least one argument template."
 }
-if ($null -eq (Get-Command $providerConfig.command -ErrorAction SilentlyContinue)) {
+if ($null -eq (
+    Get-Command $providerConfig.command -ErrorAction SilentlyContinue
+)) {
     throw "CLI '$($providerConfig.command)' was not found on PATH."
 }
 
-$providerProfile = if ($ConfigPath) {
-    Join-Path (Split-Path -Parent $configFile) 'profile.md'
-}
-else {
-    Join-Path $PSScriptRoot "providers\$Provider\profile.md"
-}
 if (-not (Test-Path -LiteralPath $providerProfile -PathType Leaf)) {
     throw "Provider profile not found: $providerProfile"
 }
 
-$campaign = Resolve-FromRoot "active/$Slug"
-if (-not (Test-Path -LiteralPath (Join-Path $campaign 'CAMPAIGN.md') -PathType Leaf)) {
-    throw "Campaign not found or missing CAMPAIGN.md: active/$Slug"
-}
-
-$dispatchName = if ($Name.StartsWith("$Provider-")) { $Name } else { "$Provider-$Name" }
-$workspace = Resolve-FromRoot "active/$Slug/subagents/$dispatchName"
-$campaignPrefix = $campaign.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-if (-not $workspace.StartsWith($campaignPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Resolved workspace escaped the selected campaign.'
+$resolvedWorkspaceRoot = [System.IO.Path]::GetFullPath($workspaceRoot)
+$workspace = [System.IO.Path]::GetFullPath((
+    Join-Path $resolvedWorkspaceRoot $DispatchId
+))
+$workspaceRootPrefix = (
+    $resolvedWorkspaceRoot.TrimEnd('\', '/') +
+    [System.IO.Path]::DirectorySeparatorChar
+)
+if (-not $workspace.StartsWith(
+    $workspaceRootPrefix,
+    [System.StringComparison]::OrdinalIgnoreCase
+)) {
+    throw 'Resolved workspace escaped the selected workspace root.'
 }
 if (-not (Test-Path -LiteralPath $workspace -PathType Container)) {
     throw "Drafter workspace not found: $workspace"
 }
 
 $brief = if ($BriefPath) { Resolve-FromRoot $BriefPath } else { Join-Path $workspace 'brief.md' }
+$workspacePrefix = (
+    $workspace.TrimEnd('\', '/') +
+    [System.IO.Path]::DirectorySeparatorChar
+)
+if ($BriefPath -and -not $brief.StartsWith(
+    $workspacePrefix,
+    [System.StringComparison]::OrdinalIgnoreCase
+)) {
+    throw "Brief path must stay inside the selected workspace: $brief"
+}
 $override = Join-Path $workspace 'AGENTS.override.md'
 if (-not (Test-Path -LiteralPath $brief -PathType Leaf)) {
     throw "Brief not found: $brief"
@@ -158,7 +282,10 @@ if (-not (Test-Path -LiteralPath $override -PathType Leaf)) {
 $report = Join-Path $workspace 'report.md'
 $lastMessage = Join-Path $workspace 'last_message.md'
 $log = Join-Path $workspace 'dispatch.log'
-$instructionsFile = '.codex/external-drafter-contract.md'
+$instructionsFile = Join-Path $root '.codex\external-drafter-contract.md'
+if (-not (Test-Path -LiteralPath $instructionsFile -PathType Leaf)) {
+    throw "External drafter contract not found: $instructionsFile"
+}
 $prompt = "You are an external drafter. Start in '$workspace'. Read AGENTS.override.md, " +
     "$instructionsFile, '$canonicalProfile', '$providerProfile', and '$brief'. " +
     "Carry out only the brief and write the full report to '$report'."
@@ -215,7 +342,7 @@ foreach ($argument in @($providerConfig.args)) {
 }
 
 $modelLabel = if ($resolvedModel) { $resolvedModel } else { '<CLI default>' }
-Write-Output "[dispatch] provider=$Provider workspace=$dispatchName model=$modelLabel policy=$policyLabel"
+Write-Output "[dispatch] provider=$Provider workspace=$DispatchId model=$modelLabel policy=$policyLabel"
 Write-Output "[dispatch] command=$($providerConfig.command) $($arguments -join ' ')"
 if ($DryRun) {
     Write-Output '[dispatch] DRY RUN - command not executed.'

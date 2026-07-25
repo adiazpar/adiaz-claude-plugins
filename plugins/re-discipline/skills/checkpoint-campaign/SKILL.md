@@ -39,6 +39,10 @@ or log:
 Do not delete ambiguous or user-owned artifacts. Do not touch another active
 campaign.
 
+Treat every `subagents/` child name as an opaque workspace key. Preserve both
+new chronological IDs and legacy task-only or provider-prefixed names exactly
+as they are. Checkpointing never parses, normalizes, or renames them.
+
 ## Step 3: Verify Cold Resume
 
 Read the rewritten masterfile as if the session had no prior context. Confirm
