@@ -23,23 +23,24 @@ Run the initializer once in each project. It creates or reconciles:
 
 | Path | Ownership |
 |---|---|
-| `.re-discipline/project-profile.md` | Single source for project identity, framing, mission, source of record, portable tooling, roles, paths, and environment. |
-| `.claude/CLAUDE.md` | Claude Code manager laws, loaded automatically by Claude Code. |
-| `.claude/project-profile.md` | Claude Code-only configuration, MCP, memory, and local-path overlay. |
+| `.re-discipline/project-profile.md` | Single source for shared re-discipline laws plus project identity, framing, source of record, tooling, roles, paths, and environment. |
+| `.claude/CLAUDE.md` | Thin Claude Code adapter with one native import of the canonical profile and preserved Claude-specific notes. |
 | `AGENTS.md` | Root role router for direct Codex managers versus briefed drafters. |
-| `.codex/AGENTS.md` | Codex manager laws. |
-| `.codex/project-profile.md` | Codex-only configuration, MCP, memory, sandbox, and local-path overlay. |
+| `.codex/AGENTS.md` | Thin Codex adapter with the canonical-profile fallback and preserved Codex-specific notes. |
 | `.codex/external-drafter-contract.md` | Restricted drafter role and report format. |
 
-Yes, a new project gets `.codex/project-profile.md`. It is not a second copy of
-the Claude profile and it is not where shared project facts live. It is an
-overlay optimized for Codex-specific operation. Both hosts read the canonical
-`.re-discipline/project-profile.md`, which prevents the two profiles from
-drifting into conflicting descriptions of the project.
+Every initialized project has one canonical project profile:
+`.re-discipline/project-profile.md`. Claude loads it through its native `@`
+import. A trusted Codex `SessionStart` hook injects the complete profile, while
+root and nested `AGENTS.md` instructions provide an explicit-read fallback.
+Host-specific configuration stays in project-owned sections of the applicable
+manager adapter. Shared laws never fork by host.
 
 The initializer is migration-aware. It preserves unrelated existing
 instructions, moves old root drafter rules into the dedicated contract, and
-asks before resolving contradictory Claude and Codex profile facts.
+asks before resolving contradictory legacy profile facts. Legacy
+`.claude/project-profile.md` and `.codex/project-profile.md` files are recovery
+inputs only and are removed after the meaning-preservation gate succeeds.
 
 ## Install In Claude Code
 
@@ -89,13 +90,14 @@ New or changed plugin skills and hooks are picked up at a new-thread boundary.
 
 ## Hooks
 
-- `SessionStart` conditionally reminds an initialized project to run `onboard`.
+- `SessionStart` reminds Claude to run `onboard` and injects the complete
+  canonical profile into trusted Codex sessions.
 - `PreCompact` conditionally reminds an active campaign to checkpoint or close.
 
 The hooks stay silent outside a project containing the neutral profile, a
-legacy Claude profile, or `docs/INDEX.md`. The package ships a POSIX helper and
-a PowerShell 5.1 Windows override, so Codex does not send shell-test syntax to
-PowerShell.
+legacy host profile, or `docs/INDEX.md`. Legacy-only projects receive a
+migration/recovery reminder. The package ships a POSIX helper and a PowerShell
+5.1 Windows override, so Codex does not send shell-test syntax to PowerShell.
 
 ## Delegation
 

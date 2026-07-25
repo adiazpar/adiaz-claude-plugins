@@ -24,7 +24,9 @@ replace a surviving file before showing what recovery found.
 If Claude and Codex profiles both survive but the canonical profile does not,
 compare them. Matching domain facts can seed the canonical profile. Conflicting
 facts require current source evidence or user confirmation. Preserve
-host-specific sections in their overlays.
+host-specific sections as project-owned notes outside the managed block in the
+matching manager adapter. Recreate generic laws only in the canonical
+shared-law block.
 
 ## Reconstruct Only As A Fallback
 
@@ -37,7 +39,9 @@ Never silently invent those fields.
 ## Verify
 
 - The canonical profile exists and contains confirmed identity frontmatter.
-- Both manager contracts resolve it.
+- Both manager adapters resolve it.
+- Shared laws exist once in the canonical profile and not in either adapter.
 - Dispatch framing comes from the canonical file.
-- Recovered host-specific instructions live only in their overlays.
+- Recovered host-specific instructions live in project-owned manager sections.
+- Legacy host profiles are deleted only after meaning preservation succeeds.
 - The report states whether recovery was exact, reconciled, or reconstructed.

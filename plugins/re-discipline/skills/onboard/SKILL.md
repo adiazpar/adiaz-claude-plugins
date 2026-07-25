@@ -3,7 +3,7 @@ name: onboard
 description: >-
   Orient a re-discipline project at session start or when asked to get caught
   up, show current project state, or resume an active campaign. Reads the
-  canonical profile, active harness contract and overlay, truth and history
+  canonical profile, active manager adapter, truth and history
   indexes, and active campaign masterfiles, then returns a compact orientation.
 ---
 
@@ -24,15 +24,14 @@ Determine the active host from the tools exposed by the session and the
 instructions that loaded. Do not infer it merely because `.claude/` or
 `.codex/` exists; a dual-compatible project contains both.
 
-- **Claude Code:** read `.claude/CLAUDE.md` and
-  `.claude/project-profile.md`.
-- **Codex:** read `.codex/AGENTS.md` and `.codex/project-profile.md`.
-- **Unknown host:** read both manager contracts, identify the applicable tool
+- **Claude Code:** read `.claude/CLAUDE.md`.
+- **Codex:** read `.codex/AGENTS.md`.
+- **Unknown host:** read both manager adapters, identify the applicable tool
   adapter, and state the uncertainty instead of silently choosing one.
 
 Always read `.re-discipline/project-profile.md` first. It is the single source
-for name, framing, mission, source of record, portable tooling, and domain
-roles.
+for shared re-discipline laws, name, framing, mission, source of record,
+portable tooling, and domain roles.
 
 If the canonical profile is missing, stop substantive work and invoke
 `init-project` in migration or recovery mode. A legacy
@@ -93,4 +92,4 @@ directs it.
 ## Reference
 
 - Host mapping: `<plugin-root>/references/runtime-adapters.md`.
-- Canonical project facts: `.re-discipline/project-profile.md`.
+- Canonical laws and project facts: `.re-discipline/project-profile.md`.

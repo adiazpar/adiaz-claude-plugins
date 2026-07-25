@@ -53,5 +53,5 @@ Do not commit unless the user explicitly asks.
 
 ## Reference
 
-- Active manager contract: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.
+- Active manager adapter: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.
 - Closure: `close-campaign`.

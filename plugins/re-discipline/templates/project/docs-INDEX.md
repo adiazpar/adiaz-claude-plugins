@@ -24,5 +24,7 @@ _(none)_
 
 ## Contracts
 
-`.claude/CLAUDE.md` and `.codex/AGENTS.md` are host-specific manager
-contracts. Both defer project facts to `.re-discipline/project-profile.md`.
+`.claude/CLAUDE.md` and `.codex/AGENTS.md` are thin host-specific manager
+adapters. Shared laws live only in `.re-discipline/project-profile.md`. Claude
+imports it natively; Codex uses the trusted re-discipline SessionStart hook
+plus an explicit-read fallback.
