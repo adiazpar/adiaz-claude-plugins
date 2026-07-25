@@ -7,17 +7,20 @@ initialized before the neutral 0.2 profile topology.
 
 Read root and nested `AGENTS.md` files, `.codex/AGENTS.md`,
 `.codex/project-profile.md`, `.claude/CLAUDE.md`,
-`.claude/project-profile.md`, docs indexes, README files, dispatch scripts, and
-git history. Classify every relevant instruction as:
+`.claude/project-profile.md`, `.codex/local-paths.md`,
+`.claude/local-paths.md`, `.gitignore`, docs indexes, README files, dispatch
+scripts, and git history. Classify every relevant instruction as:
 
 - **Project fact:** identity, mission, domain, source of record, portable
   tooling, paths, or environment.
 - **Generic re-discipline law:** Wall, directory trust, campaign lifecycle, or
   manager/drafter asymmetry; preserve once in the canonical shared-law block.
-- **Claude manager note:** Claude settings, tools, memory, delegation behavior,
-  or local paths.
+- **Claude manager note:** Claude settings, tools, memory, or delegation
+  behavior.
 - **Codex manager note:** Codex settings, tools, memory, sandbox, shell
-  behavior, or local paths.
+  behavior, or recovery policy.
+- **Machine-local value:** a host-neutral assignment for the untracked
+  `.re-discipline/local-paths.md`.
 - **Unrelated project guidance:** preserve in place.
 
 ## Reconcile Duplicated Profiles
@@ -37,6 +40,29 @@ When copies conflict:
 This step is essential for hand-built pairs such as a Claude profile and a
 Codex profile that were maintained separately.
 
+## Reconcile Legacy Local Paths
+
+Treat `.claude/local-paths.md` and `.codex/local-paths.md` as private migration
+inputs, not manager profiles.
+
+1. Parse their assignment names and compare values without printing values in
+   the migration report.
+2. Merge matching and unique assignments into one union.
+3. Resolve conflicts from current source, configuration, and durable path
+   contracts. Ask the user when direct evidence cannot select a value.
+4. Move host-specific operational prose into the matching manager adapter
+   rather than the neutral value file.
+5. Add `.re-discipline/local-paths.md` to `.gitignore` before rendering the
+   merged union from `templates/project/local-paths.md`. Retain
+   `.claude/local-paths.md` and `.codex/local-paths.md` as defense-only
+   secret-path ignore patterns even after deleting those legacy files.
+6. Update maintained readers, currently executable campaign helpers, and
+   current documentation to the neutral path. Leave reports and historical
+   evidence unchanged when they accurately describe the old layout.
+7. Verify assignment-key coverage and required values, then delete both legacy
+   files. If either file was tracked, remove it from current tracking without
+   rewriting history.
+
 ## Present The Planned Split
 
 Before destructive refactoring, show:
@@ -48,6 +74,8 @@ Before destructive refactoring, show:
 - The root `AGENTS.md` routing block.
 - Any old external-drafter content moving to the dedicated contract.
 - Any legacy external-provider state moving under `.re-discipline/agents/`.
+- Legacy local-path assignments merging into the untracked neutral signature,
+  including conflict names but not private values.
 - Unrelated instructions that will remain unchanged.
 
 Ask only about genuine ambiguity. An explicit user request to apply an already
@@ -59,18 +87,20 @@ reviewed reconciliation is sufficient approval to continue.
    index without approval.
 2. Write `.re-discipline/project-profile.md` with one shared-law block and
    reconciled project facts.
-3. Write or update the Claude managed-adapter block and preserve or append
+3. Reconcile legacy local paths through the procedure above. Create the
+   neutral signature even when no legacy file exists.
+4. Write or update the Claude managed-adapter block and preserve or append
    project-owned Claude notes outside it.
-4. Write or update the Codex managed-adapter block and preserve or append
+5. Write or update the Codex managed-adapter block and preserve or append
    project-owned Codex notes outside it.
-5. Move the old root drafter role to
+6. Move the old root drafter role to
    `.codex/external-drafter-contract.md` and install the root router, preserving
    unrelated root guidance outside managed markers.
-6. Always render the normalized agent core under `.re-discipline/agents/`.
+7. Always render the normalized agent core under `.re-discipline/agents/`.
    Migrate only real configured providers; do not promote disabled,
    placeholder, or unevaluated entries. Preserve each real provider as one
    config entry and exactly `profile.md`, `scorecard.md`, and `teardown.md`.
-7. Preserve each in-flight candidate under
+8. Preserve each in-flight candidate under
    `.re-discipline/agents/recruiting/<candidate>/`, using this mechanical
    mapping when the legacy names exist:
    - `CANDIDATE.md` -> `candidate.md`
@@ -80,24 +110,28 @@ reviewed reconciliation is sufficient approval to continue.
    - `interview/` -> `runs/`
    Keep an existing `scorecard.md`. Validate candidate config without adding
    it to live config.
-8. Update dispatchers to read canonical `framing`. Retain legacy host paths
+9. Update dispatchers to read canonical `framing`. Retain legacy host paths
    only in explicitly labeled migration or recovery code.
-9. Replace duplicate identity prose in internal agent-loaded docs with links to
+10. Replace duplicate identity prose in internal agent-loaded docs with links to
    the canonical profile. Human-facing README files may remain self-contained
    when they do not contradict it.
-10. Compare the post-migration union against both legacy profiles. Delete
+11. Compare the post-migration union against both legacy profiles. Delete
    `.claude/project-profile.md` and `.codex/project-profile.md` only after every
    meaningful instruction has a surviving destination.
-11. Delete old root agent and recruiting directories only after their
-    normalized state and meaning are verified.
-12. Count canonical-profile lines and UTF-8 bytes. Warn above 240 lines or
+12. Delete old root agent and recruiting directories only after their
+   normalized state and meaning are verified.
+13. Count canonical-profile lines and UTF-8 bytes. Warn above 240 lines or
    16 KiB; never truncate it.
 
-Never normalize provisional `active/` scratch as part of migration.
+Do not restructure, promote, or otherwise normalize provisional `active/`
+scratch as part of migration. Limit active-tree edits to executable path
+readers that would otherwise break after the legacy files are removed.
 
 ## Meaning-Preserving Gate
 
 Verify that the union of the canonical profile, project-owned manager notes,
 managed adapters, drafter contract, and preserved unrelated guidance contains
 every meaningful instruction from the originals. Report moved, deduplicated,
-and unchanged sections. Do not commit unless the user asks.
+and unchanged sections. Separately verify that the neutral local-path file
+covers every legacy assignment key, remains untracked, and is the only current
+local-path signature. Do not commit unless the user asks.

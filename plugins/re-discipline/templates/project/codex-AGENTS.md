@@ -1,4 +1,4 @@
-<!-- re-discipline:codex-adapter v0.4.0 -->
+<!-- re-discipline:codex-adapter v0.4.1 -->
 # AGENTS.md - Codex Manager Adapter for {{PROJECT_NAME}}
 
 Codex loads this host adapter. The canonical

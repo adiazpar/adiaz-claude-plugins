@@ -8,6 +8,8 @@ adapter.
 ## Shared Rules
 
 - Read `.re-discipline/project-profile.md` for shared laws and project facts.
+- Read machine-local values only from the untracked
+  `.re-discipline/local-paths.md` when the task requires them.
 - Read the active manager adapter for host-specific tools and configuration.
 - Read `.re-discipline/agents/config.json`; `native` means the active host.
 - Use an external provider only when the user explicitly selected it or live
