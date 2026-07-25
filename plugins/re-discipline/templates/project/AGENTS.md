@@ -1,4 +1,4 @@
-<!-- re-discipline:router v0.2.0 -->
+<!-- re-discipline:router v0.3.0 -->
 # AGENTS.md - {{PROJECT_NAME}} entrypoint
 
 This root file is a compatibility entrypoint for agents that discover
@@ -11,8 +11,8 @@ Dispatched drafting agents given a `brief.md` under
 `.codex/external-drafter-contract.md`.
 
 Both roles must read `.re-discipline/project-profile.md` for the canonical
-project identity and domain facts. Harness-specific operating notes live in
-`.codex/project-profile.md` or `.claude/project-profile.md`.
+shared laws, project identity, and domain facts. Project-owned host notes live
+outside the managed block in the applicable manager adapter.
 
 Do not merge these roles. The manager scopes, delegates, ratifies, promotes
 truth, and closes campaigns. Drafters investigate only their brief and report

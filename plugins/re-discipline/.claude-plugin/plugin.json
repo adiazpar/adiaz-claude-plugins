@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
-  "version": "0.2.0",
-  "description": "Evidence-based campaign and knowledge management for long-running reverse-engineering and research projects, with native Claude Code and Codex manager contracts.",
+  "version": "0.3.0",
+  "description": "Evidence-based campaign and knowledge management for long-running reverse-engineering and research projects, with one shared-law profile and thin Claude Code and Codex manager adapters.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"

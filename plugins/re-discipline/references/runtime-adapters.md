@@ -3,12 +3,12 @@
 Re-discipline defines one workflow and maps it onto the active host. Skills
 must not assume a host from a directory name, provider name, or stale project
 configuration. Detect it from the tools available in the current session and
-the manager contract that loaded.
+the manager adapter that loaded.
 
 ## Shared Rules
 
-- Read `.re-discipline/project-profile.md` for project facts.
-- Read the active host overlay for host-specific tools and configuration.
+- Read `.re-discipline/project-profile.md` for shared laws and project facts.
+- Read the active manager adapter for host-specific tools and configuration.
 - Treat an absent or `native` delegation backend as the current host.
 - Use an external provider only when the user explicitly selected it or a
   project setting records that selection.
@@ -31,8 +31,8 @@ Choose capability by role and current availability; do not pin model aliases in
 the reusable skill. Use the host's normal background and result controls.
 
 Claude Code automatically loads `.claude/CLAUDE.md`. The project profile it
-imports is a Claude-only overlay; canonical facts remain in
-`.re-discipline/project-profile.md`.
+imports with `@../.re-discipline/project-profile.md` is canonical. Claude-only
+project notes live outside the managed adapter block in the same file.
 
 ## Codex
 
@@ -47,6 +47,13 @@ Codex loads root and nested `AGENTS.md` instructions. Put an
 CLI with the workspace as its working directory. Native `spawn_agent` workers
 may share the manager's working directory, so their task message must also tell
 them to read `.codex/external-drafter-contract.md` and their `brief.md`.
+
+Codex has no native `AGENTS.md` include syntax. When the plugin hook is enabled
+and trusted, its `SessionStart` handler injects the complete canonical profile
+for `startup`, `resume`, `clear`, and `compact`. Root `AGENTS.md` and
+`.codex/AGENTS.md` still require an explicit canonical-profile read as the
+fallback when hooks are disabled, untrusted, or unavailable. Codex-only
+project notes live outside the managed adapter block in `.codex/AGENTS.md`.
 
 ## External Providers
 

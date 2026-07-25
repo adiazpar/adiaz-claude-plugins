@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.2.0")
+        self.assertEqual(manifest["version"], "0.3.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -64,11 +64,17 @@ class SkillMetadataTests(unittest.TestCase):
 
     def test_init_project_describes_dual_harness_topology(self) -> None:
         body = read(PLUGIN / "skills" / "init-project" / "SKILL.md")
+        topology = body.split("## Target Topology", 1)[1].split(
+            "The `framing` field",
+            1,
+        )[0]
 
         self.assertIn(".re-discipline/project-profile.md", body)
         self.assertIn(".codex/AGENTS.md", body)
-        self.assertIn(".codex/project-profile.md", body)
         self.assertIn(".claude/CLAUDE.md", body)
+        self.assertNotIn(".codex/project-profile.md", topology)
+        self.assertNotIn(".claude/project-profile.md", topology)
+        self.assertIn("project-owned", body.lower())
         self.assertIn("legacy", body.lower())
 
     def test_delegate_has_native_claude_and_codex_adapters(self) -> None:
@@ -134,15 +140,19 @@ class ProjectTemplateTests(unittest.TestCase):
             "agents-config.json",
             "agents-README.md",
             "dispatch.ps1",
-            "claude-project-profile.md",
             "codex-AGENTS.md",
-            "codex-project-profile.md",
             "drafter-AGENTS-override.md",
             "external-drafter-contract.md",
             "project-profile.md",
         }
 
         self.assertTrue(expected.issubset({path.name for path in self.templates.iterdir()}))
+        self.assertFalse((self.templates / "claude-project-profile.md").exists())
+        self.assertFalse((self.templates / "codex-project-profile.md").exists())
+        self.assertEqual(
+            [path.name for path in self.templates.glob("*project-profile.md")],
+            ["project-profile.md"],
+        )
 
     def test_external_dispatch_defaults_to_native_and_sandboxed(self) -> None:
         config = json.loads(read(self.templates / "agents-config.json"))
@@ -166,15 +176,58 @@ class ProjectTemplateTests(unittest.TestCase):
         canonical = read(self.templates / "project-profile.md")
         claude = read(self.templates / "CLAUDE.md")
         codex = read(self.templates / "codex-AGENTS.md")
-        claude_overlay = read(self.templates / "claude-project-profile.md")
-        codex_overlay = read(self.templates / "codex-project-profile.md")
+        root = read(self.templates / "AGENTS.md")
 
         self.assertIn("single source", canonical.lower())
-        self.assertIn("@../.re-discipline/project-profile.md", claude)
-        self.assertIn("@project-profile.md", claude)
+        self.assertEqual(
+            claude.count("@../.re-discipline/project-profile.md"),
+            1,
+        )
+        self.assertNotIn("@project-profile.md", claude)
         self.assertIn(".re-discipline/project-profile.md", codex)
-        self.assertIn(".re-discipline/project-profile.md", claude_overlay)
-        self.assertIn(".re-discipline/project-profile.md", codex_overlay)
+        self.assertIn(".re-discipline/project-profile.md", root)
+        self.assertNotIn(".codex/project-profile.md", codex)
+        self.assertNotIn(".codex/project-profile.md", root)
+        self.assertNotIn(".claude/project-profile.md", root)
+
+    def test_shared_laws_exist_only_in_the_canonical_profile(self) -> None:
+        canonical = read(self.templates / "project-profile.md")
+        adapters = {
+            "Claude": read(self.templates / "CLAUDE.md"),
+            "Codex": read(self.templates / "codex-AGENTS.md"),
+        }
+        shared_headings = {
+            "## Directory Means Trust",
+            "## Session Start",
+            "## The Wall",
+            "## Campaign Lifecycle",
+            "## Manager And Drafter Roles",
+            "## Commits And Local State",
+            "## Anti-Patterns",
+        }
+
+        for heading in shared_headings:
+            self.assertIn(heading, canonical)
+            for name, adapter in adapters.items():
+                with self.subTest(adapter=name, heading=heading):
+                    self.assertNotIn(heading, adapter)
+
+        self.assertNotIn("claude-laws", adapters["Claude"])
+        self.assertNotIn("codex-laws", adapters["Codex"])
+        self.assertEqual(canonical.count("re-discipline:shared-laws v"), 1)
+        self.assertEqual(canonical.count("re-discipline:shared-laws:end"), 1)
+        self.assertLessEqual(len(adapters["Claude"].splitlines()), 24)
+        self.assertLessEqual(len(adapters["Codex"].splitlines()), 28)
+
+    def test_canonical_profile_template_is_host_neutral_and_bounded(self) -> None:
+        canonical = read(self.templates / "project-profile.md")
+
+        self.assertLessEqual(len(canonical.splitlines()), 240)
+        self.assertLessEqual(len(canonical.encode("utf-8")), 16 * 1024)
+        self.assertEqual(canonical.count("framing:"), 1)
+        self.assertNotIn("Claude", canonical)
+        self.assertNotIn("Codex", canonical)
+        self.assertNotIn("overlay", canonical.lower())
 
     def test_external_contract_is_not_the_root_router(self) -> None:
         root = read(self.templates / "AGENTS.md")
@@ -214,8 +267,8 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("$re-discipline:init-project", body)
         self.assertIn("/re-discipline:init-project", body)
         self.assertIn(".re-discipline/project-profile.md", body)
-        self.assertIn(".codex/project-profile.md", body)
-        self.assertIn("overlay", body.lower())
+        self.assertIn("one canonical project profile", body.lower())
+        self.assertNotIn("Yes, a new project gets `.codex/project-profile.md`", body)
         self.assertIn("/hooks", body)
 
     def test_repository_readme_identifies_the_codex_marketplace(self) -> None:
@@ -305,7 +358,21 @@ class HookTests(unittest.TestCase):
         if not self.powershell:
             self.skipTest("PowerShell is required for Windows hook tests")
 
-    def run_hook(self, event: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    def run_hook(
+        self,
+        event: str,
+        cwd: Path,
+        *,
+        host: str = "claude",
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.pop("PLUGIN_ROOT", None)
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        if host == "codex":
+            env["PLUGIN_ROOT"] = str(PLUGIN)
+        else:
+            env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN)
+
         return subprocess.run(
             [
                 self.powershell,
@@ -320,7 +387,7 @@ class HookTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
-            env=os.environ.copy(),
+            env=env,
         )
 
     def test_hook_is_silent_outside_initialized_project(self) -> None:
@@ -330,29 +397,75 @@ class HookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
-    def test_hook_recognizes_neutral_profile(self) -> None:
+    def test_codex_hook_injects_complete_neutral_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".re-discipline").mkdir()
+            profile = "---\nname: test\n---\n# Canonical \"Profile\"\npath: C:\\test\n"
             (root / ".re-discipline" / "project-profile.md").write_text(
-                "---\nname: test\n---\n", encoding="utf-8"
+                profile, encoding="utf-8"
             )
-            result = self.run_hook("session-start", root)
+            result = self.run_hook("session-start", root, host="codex")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual(
+            output["hookSpecificOutput"]["hookEventName"],
+            "SessionStart",
+        )
+        self.assertEqual(
+            output["hookSpecificOutput"]["additionalContext"],
+            profile,
+        )
+
+    def test_codex_hook_discovers_project_from_nested_working_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "src" / "deep"
+            nested.mkdir(parents=True)
+            (root / ".re-discipline").mkdir()
+            profile = "---\nname: nested\n---\n# Nested profile\n"
+            (root / ".re-discipline" / "project-profile.md").write_text(
+                profile, encoding="utf-8"
+            )
+            result = self.run_hook("session-start", nested, host="codex")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual(
+            output["hookSpecificOutput"]["additionalContext"],
+            profile,
+        )
+
+    def test_claude_hook_emits_onboarding_without_duplicate_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".re-discipline").mkdir()
+            profile = "---\nname: claude\n---\n# Must not be duplicated\n"
+            (root / ".re-discipline" / "project-profile.md").write_text(
+                profile, encoding="utf-8"
+            )
+            result = self.run_hook("session-start", root, host="claude")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("onboard", result.stdout.lower())
+        self.assertNotIn("# Must not be duplicated", result.stdout)
 
-    def test_hook_recognizes_legacy_claude_profile(self) -> None:
+    def test_hook_reports_legacy_profile_as_migration_input(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".claude").mkdir()
             (root / ".claude" / "project-profile.md").write_text(
                 "---\nname: legacy\n---\n", encoding="utf-8"
             )
-            result = self.run_hook("pre-compact", root)
+            result = self.run_hook("session-start", root, host="codex")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("checkpoint", result.stdout.lower())
+        output = json.loads(result.stdout)
+        context = output["hookSpecificOutput"]["additionalContext"].lower()
+        self.assertIn("legacy", context)
+        self.assertIn("migration", context)
+        self.assertIn("init-project", context)
 
     def test_windows_overrides_execute_the_packaged_commands(self) -> None:
         event_expectations = {
@@ -386,7 +499,14 @@ class HookTests(unittest.TestCase):
                     )
 
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertIn(expected, result.stdout.lower())
+                    if event_name == "SessionStart":
+                        output = json.loads(result.stdout)
+                        self.assertIn(
+                            "name: test",
+                            output["hookSpecificOutput"]["additionalContext"],
+                        )
+                    else:
+                        self.assertIn(expected, result.stdout.lower())
 
 
 if __name__ == "__main__":

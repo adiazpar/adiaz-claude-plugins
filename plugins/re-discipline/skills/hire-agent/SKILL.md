@@ -57,11 +57,11 @@ the CLI supports them; never make bypass the default.
 
 ## Step 5: Configure Only Required Tool Surfaces
 
-Use the canonical profile and active host overlay to identify tools required by
-the capability target. Register only those tools in the candidate CLI's own
-configuration format, with user approval for each machine-level change. Do not
-hardcode another project's daemon, Ghidra instance, or MCP names. Record every
-temporary registration in the rollback manifest.
+Use the canonical profile and active manager adapter to identify tools
+required by the capability target. Register only those tools in the candidate
+CLI's own configuration format, with user approval for each machine-level
+change. Do not hardcode another project's daemon, Ghidra instance, or MCP
+names. Record every temporary registration in the rollback manifest.
 
 ## Step 6: Run A Representative Battery
 

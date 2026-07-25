@@ -54,4 +54,4 @@ Do not commit unless the user explicitly asks.
 
 - Downgrade or augmentation: `promote-truth`.
 - Chronicle template: `<plugin-root>/templates/chronicle.md`.
-- Active manager contract: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.
+- Active manager adapter: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.

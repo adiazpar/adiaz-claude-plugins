@@ -3,7 +3,7 @@ name: decide-agent
 description: >-
   Apply a user's explicit decision to promote, reject, or remove an evaluated
   external agent. Updates the external-provider roster, provider profile, and
-  teardown record without changing the Claude Code or Codex manager contracts.
+  teardown record without changing the Claude Code or Codex manager adapters.
 ---
 
 # Apply An External-Agent Decision
@@ -13,7 +13,7 @@ current request does not state that choice explicitly, present the scorecard or
 target and obtain confirmation before changing anything.
 
 The root `AGENTS.md`, `.codex/AGENTS.md`, and `.claude/CLAUDE.md` are manager
-routing contracts. Never replace them with a provider-specific drafter prompt.
+routing adapters. Never replace them with a provider-specific drafter prompt.
 
 ## Promote
 
@@ -52,7 +52,7 @@ reverse:
 4. remove only that provider's roster documentation;
 5. retain a dated departure record, then remove its roster directory.
 
-Never delete the shared root router, manager contracts, external drafter
+Never delete the shared root router, manager adapters, external drafter
 contract, or another provider's configuration. Leave the CLI installed unless
 the user explicitly asks otherwise.
 

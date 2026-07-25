@@ -17,7 +17,7 @@
       }
     },
     {
-      "description": "Dual-compatible campaign and knowledge management for Claude Code and Codex. Initializes one canonical project profile, host-specific manager overlays, evidence-gated truth, retrospective chronicles, native subagent adapters, and optional external drafter evaluation.",
+      "description": "Dual-compatible campaign and knowledge management for Claude Code and Codex. Initializes one canonical project profile with shared laws, thin host adapters, evidence-gated truth, retrospective chronicles, native subagent adapters, and optional external drafter evaluation.",
       "name": "re-discipline",
       "source": "./plugins/re-discipline",
       "author": {

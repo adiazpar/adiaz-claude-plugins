@@ -9,9 +9,10 @@ description: >-
 
 # Initialize A Re-Discipline Project
 
-Build one knowledge system with two native manager entrypoints. Project facts
-live once in `.re-discipline/project-profile.md`. Claude Code and Codex each get
-an operating overlay, not a second copy of the project's identity.
+Build one knowledge system with two native manager entrypoints. Shared laws and
+project facts live once in `.re-discipline/project-profile.md`. Claude Code and
+Codex each get a thin adapter with preserved project-owned host notes, not
+separate laws or a second project profile.
 
 ## Locate The Plugin
 
@@ -26,28 +27,30 @@ Every initialized project has:
 
 | Path | Purpose |
 |---|---|
-| `.re-discipline/project-profile.md` | Canonical identity and domain facts. |
-| `.claude/CLAUDE.md` | Claude Code manager laws. |
-| `.claude/project-profile.md` | Claude-only operating overlay. |
+| `.re-discipline/project-profile.md` | Canonical shared laws, identity, and domain facts. |
+| `.claude/CLAUDE.md` | Claude Code import adapter and project-owned Claude notes. |
 | `AGENTS.md` | Root manager/drafter role router. |
-| `.codex/AGENTS.md` | Codex manager laws. |
-| `.codex/project-profile.md` | Codex-only operating overlay. |
+| `.codex/AGENTS.md` | Codex hook/fallback adapter and project-owned Codex notes. |
 | `.codex/external-drafter-contract.md` | Drafter restrictions and report format. |
 | `docs/INDEX.md` | Project front door. |
 
 The `framing` field appears only in the canonical profile. Dispatch tooling
-must read it there, with `.claude/project-profile.md` as a legacy fallback.
+must read it there. Legacy `.claude/project-profile.md` and
+`.codex/project-profile.md` files are migration or recovery input only; they
+are never steady-state outputs.
 
 ## Step 1: Detect The Mode
 
 Inspect `AGENTS.md`, `.codex/`, `.claude/`, `.re-discipline/`, `docs/`, the
 repository tree, README files, and relevant git history before asking anything.
 
-- **Initialized:** the canonical profile and both manager contracts exist.
-  Stop unless the user requested `resync-laws` or repair.
+- **Initialized:** the canonical profile contains a `shared-laws` block and both
+  current manager adapters exist. Stop unless the user requested `resync-laws`
+  or repair.
 - **Migration:** a legacy `.claude/project-profile.md`, a hand-built
-  `.codex/project-profile.md`, or old re-discipline laws exist without the
-  neutral topology. Follow `references/dropin.md` and preserve all meaning.
+  `.codex/project-profile.md`, duplicated host laws, or old re-discipline
+  markers exist without the neutral topology. Follow `references/dropin.md`
+  and preserve all meaning.
 - **Recovery:** re-discipline law markers or routing exist, but every usable
   identity profile is missing. Follow `references/recovery.md`.
 - **Drop-in:** existing project guidance or populated docs exist but no prior
@@ -57,20 +60,30 @@ repository tree, README files, and relevant git history before asking anything.
 
 State the detected mode and the evidence for it.
 
-## Step 2: Preserve One Source Of Project Facts
+## Step 2: Preserve One Source Of Shared Policy And Project Facts
 
-The canonical profile owns `name`, `type`, `framing`, mission, domain, source
-of record, portable tooling, roles, artifact/path schema, and environment.
+The canonical profile owns the shared re-discipline laws plus `name`, `type`,
+`framing`, mission, domain, source of record, portable tooling, roles,
+artifact/path schema, and environment.
 
-Harness overlays own only host-specific material:
+Project-owned sections outside adapter markers own host-specific material:
 
-- Claude settings, Claude MCP names, Claude memory, and `.claude/local-paths.md`.
-- Codex config/sandbox notes, Codex MCP names, Codex memory or memory bridge,
-  and `.codex/local-paths.md`.
+- `.claude/CLAUDE.md`: Claude settings, MCP names, memory, native delegation
+  notes, and `.claude/local-paths.md`.
+- `.codex/AGENTS.md`: Codex config or sandbox notes, MCP names, memory or
+  memory bridge, shell-recovery notes, and `.codex/local-paths.md`.
+
+Do not copy the Wall, trust map, campaign lifecycle, manager/drafter split,
+commit policy, or shared anti-patterns into either host adapter.
 
 When old Claude and Codex profiles repeat a fact, move one reconciled value to
-the canonical profile and replace both copies with a pointer. Never silently
-choose between contradictory copies; show the conflict and ask the user.
+the canonical profile. Move unique host behavior into the matching manager
+adapter outside its managed block. Never silently choose between
+contradictory copies; show the conflict and ask the user.
+
+Keep the canonical profile concise and optimized for agent context. After
+writing it, count lines and UTF-8 bytes. Warn when it exceeds 240 lines or
+16 KiB. Never truncate or silently discard content to satisfy either limit.
 
 ## Step 3: Protect Existing Instructions
 
@@ -83,34 +96,46 @@ project-specific tooling and live-surface rules into the new external contract,
 then replace the old role with the router.
 
 Apply the same managed-block discipline to `.claude/CLAUDE.md` and
-`.codex/AGENTS.md`. A resync changes generic laws and routing only; it never
-overwrites the canonical profile or either overlay.
+`.codex/AGENTS.md`. A resync updates the canonical profile's marked shared-law
+block plus generic adapters and routing; it never overwrites project-owned
+profile facts or host notes.
+
+During migration, delete legacy host profiles only after the
+meaning-preservation gate confirms that every meaningful instruction survives
+in the canonical profile, a project-owned manager section, or its unrelated
+original location.
 
 ## Step 4: Verify
 
 After any write:
 
-1. Confirm all target topology files exist.
-2. Confirm `.claude/CLAUDE.md` imports
-   `@../.re-discipline/project-profile.md` and `@project-profile.md`.
+1. Confirm all target topology files exist and neither legacy host profile
+   exists as a steady-state output.
+2. Confirm `.claude/CLAUDE.md` contains exactly one project-profile import:
+   `@../.re-discipline/project-profile.md`.
 3. Confirm root `AGENTS.md` routes direct managers to `.codex/AGENTS.md` and
    briefed drafters to `.codex/external-drafter-contract.md`.
-4. Confirm `.codex/AGENTS.md` requires both the canonical profile and Codex
-   overlay.
+4. Confirm `.codex/AGENTS.md` requires the canonical profile and explains the
+   trusted SessionStart hook plus explicit-read fallback.
 5. Search outside `active/` for duplicate `framing` declarations. Only the
    canonical profile may declare it.
 6. Confirm existing unrelated instructions remain byte-for-byte or explain each
    approved edit.
-7. Report remaining placeholders and legacy fallbacks.
+7. Confirm the shared laws appear once in the canonical profile and are absent
+   from both host adapters.
+8. Report the canonical profile's line count and UTF-8 byte size, warning above
+   240 lines or 16 KiB without truncating it.
+9. Report remaining placeholders and intentional legacy recovery references.
 
 Do not commit unless the user explicitly asks.
 
-## Resync Laws
+## Resync
 
-When asked to resync, update the managed router, Claude-law, and Codex-law
-blocks from current templates. Show the diff before writing when existing
-project-owned content surrounds a managed block. Leave all three profiles
-untouched.
+When asked to resync, update the marked shared-law block in the canonical
+profile plus the managed router, Claude-adapter, and Codex-adapter blocks from
+current templates. Show the diff before writing when project-owned content
+surrounds a managed block. Leave canonical project facts and all project-owned
+host notes untouched. Never recreate a legacy host profile.
 
 ## References
 

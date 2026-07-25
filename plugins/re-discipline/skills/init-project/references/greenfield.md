@@ -18,7 +18,8 @@ Ask one compact batch for:
 
 Do not ask the user to translate those answers into Claude or Codex settings.
 Inspect existing `.claude/`, `.codex/`, MCP, and shell configuration and derive
-the overlays. Ask only when a host-specific choice cannot be discovered safely.
+project-owned manager notes. Ask only when a host-specific choice cannot be
+discovered safely.
 
 ## Seed The Structure
 
@@ -26,8 +27,10 @@ the overlays. Ask only when a host-specific choice cannot be discovered safely.
    `.gitkeep` only where an empty tracked directory is required.
 2. Render `templates/project/project-profile.md` to
    `.re-discipline/project-profile.md` using the gathered facts.
-3. Render `CLAUDE.md` and `claude-project-profile.md` into `.claude/`.
-4. Render `codex-AGENTS.md` and `codex-project-profile.md` into `.codex/`.
+3. Render `CLAUDE.md` to `.claude/CLAUDE.md`. Add discovered Claude-only notes
+   after the managed block.
+4. Render `codex-AGENTS.md` to `.codex/AGENTS.md`. Add discovered Codex-only
+   notes after the managed block.
 5. Render `external-drafter-contract.md` to
    `.codex/external-drafter-contract.md`.
 6. Render root `AGENTS.md` as the role router. Always create the router even
@@ -40,15 +43,19 @@ the overlays. Ask only when a host-specific choice cannot be discovered safely.
    `backend` set to `native` until a provider passes `hire-agent` and the user
    promotes it.
 
-Use `none` or `not configured` for legitimately empty overlay sections. Do not
-copy canonical mission or domain prose into an overlay just to make it longer.
+Omit legitimately empty project-owned host sections. Do not copy canonical
+laws, mission, or domain prose into a manager adapter just to make it longer.
 
 ## Verify
 
 - The canonical profile is the only file declaring `framing`.
-- Claude imports the canonical profile and Claude overlay.
+- The canonical profile is the only file containing the shared-law block.
+- Claude contains exactly one canonical profile import.
 - The root router and Codex manager chain resolve.
-- Both overlays contain only harness-specific guidance.
+- Neither `.claude/project-profile.md` nor `.codex/project-profile.md` exists.
+- Project-owned manager notes contain only host-specific guidance.
+- The canonical profile is at most 240 lines and 16 KiB, or the report warns
+  that it exceeds a limit without truncating it.
 - All indexes and epistemic-status directories exist.
 
 Report generated files and any user-confirmed unknowns. Do not commit unless
