@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertEqual(manifest["version"], "0.4.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -128,6 +128,86 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertIn("spawn_agent", body)
         self.assertIn("PLUGIN_ROOT", body)
 
+    def test_init_project_always_creates_agent_core(self) -> None:
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md")
+        greenfield = read(
+            PLUGIN / "skills" / "init-project" / "references" / "greenfield.md"
+        )
+        combined = skill + "\n" + greenfield
+
+        for path in (
+            ".re-discipline/agents/README.md",
+            ".re-discipline/agents/config.json",
+            ".re-discipline/agents/dispatch.ps1",
+            ".re-discipline/agents/providers/",
+            ".re-discipline/agents/recruiting/",
+        ):
+            self.assertIn(path, combined)
+
+        self.assertNotIn("If the user wants external-provider dispatch", combined)
+
+    def test_dropin_preserves_inflight_legacy_candidates(self) -> None:
+        dropin = read(
+            PLUGIN / "skills" / "init-project" / "references" / "dropin.md"
+        )
+
+        for mapping in (
+            "`CANDIDATE.md` -> `candidate.md`",
+            "`config-draft.json` -> `config.json`",
+            "`profile-draft.md` -> `profile.md`",
+            "`rollback-manifest.md` -> `teardown.md`",
+            "`interview/` -> `runs/`",
+        ):
+            self.assertIn(mapping, dropin)
+
+        self.assertIn(".re-discipline/agents/recruiting/<candidate>/", dropin)
+
+    def test_agent_framework_has_no_legacy_state_or_descriptive_roles(self) -> None:
+        current_paths = [
+            PLUGIN / "README.md",
+            PLUGIN / "references" / "runtime-adapters.md",
+            PLUGIN / "skills" / "delegate" / "SKILL.md",
+            PLUGIN / "skills" / "hire-agent" / "SKILL.md",
+            PLUGIN
+            / "skills"
+            / "hire-agent"
+            / "references"
+            / "research-checklist.md",
+            PLUGIN / "skills" / "hire-agent" / "references" / "scoring-rubric.md",
+            PLUGIN / "skills" / "decide-agent" / "SKILL.md",
+            PLUGIN
+            / "skills"
+            / "decide-agent"
+            / "references"
+            / "integration-points.md",
+            PLUGIN / "skills" / "onboard" / "SKILL.md",
+            PLUGIN / "templates" / "project" / "agents-README.md",
+            PLUGIN / "templates" / "project" / "agent-profile.md",
+            PLUGIN / "templates" / "project" / "project-profile.md",
+            PLUGIN / "templates" / "project" / "tree.txt",
+        ]
+        forbidden = (
+            "agents/roster",
+            "agents/profiles",
+            "agents/benchmarks",
+            "DEPARTED.md",
+            "departure record",
+            "role-fit",
+            "{{DOMAIN_ROLES}}",
+            "Mechanical fan-out",
+            "Vision reader",
+            "Live tester",
+            "choose capability by role",
+            '"enabled"',
+            '"promoted"',
+        )
+
+        for path in current_paths:
+            body = read(path)
+            for needle in forbidden:
+                with self.subTest(path=path, needle=needle):
+                    self.assertNotIn(needle, body)
+
 
 class ProjectTemplateTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -165,12 +245,33 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertIn(".re-discipline/project-profile.md", dispatcher)
         self.assertIn("AGENTS.override.md", dispatcher)
 
+    def test_agent_framework_templates_use_normalized_topology(self) -> None:
+        config = json.loads(read(self.templates / "agents-config.json"))
+        readme = read(self.templates / "agents-README.md")
+        tree = read(self.templates / "tree.txt")
+        profile = read(self.templates / "agent-profile.md")
+
+        self.assertEqual(config, {"backend": "native", "providers": {}})
+        self.assertIn(".re-discipline/agents/", tree)
+        self.assertNotIn("Empty dirs get a .gitkeep", tree)
+        self.assertIn(".re-discipline/agents/providers/<provider>/", readme)
+        self.assertIn("profile.md", readme)
+        self.assertIn("scorecard.md", readme)
+        self.assertIn("teardown.md", readme)
+        self.assertIn(".re-discipline/agents/recruiting/<candidate>/", readme)
+        self.assertNotIn("role-fit", profile)
+        self.assertNotIn("promoted:", profile)
+        self.assertNotIn("benchmarks/", profile)
+
     def test_root_agents_routes_manager_and_drafter_roles(self) -> None:
         body = read(self.templates / "AGENTS.md")
 
         self.assertIn(".codex/AGENTS.md", body)
         self.assertIn(".codex/external-drafter-contract.md", body)
         self.assertIn("Do not merge these roles", body)
+        self.assertIn("manager", body.lower())
+        self.assertIn("drafter", body.lower())
+        self.assertNotIn("role-fit", body)
 
     def test_harness_contracts_point_to_canonical_profile(self) -> None:
         canonical = read(self.templates / "project-profile.md")
@@ -214,6 +315,8 @@ class ProjectTemplateTests(unittest.TestCase):
 
         self.assertNotIn("claude-laws", adapters["Claude"])
         self.assertNotIn("codex-laws", adapters["Codex"])
+        self.assertNotIn("## Roles", canonical)
+        self.assertIn("## Manager And Drafter Roles", canonical)
         self.assertEqual(canonical.count("re-discipline:shared-laws v"), 1)
         self.assertEqual(canonical.count("re-discipline:shared-laws:end"), 1)
         self.assertLessEqual(len(adapters["Claude"].splitlines()), 24)
@@ -284,70 +387,224 @@ class ExternalDispatcherTests(unittest.TestCase):
         if not self.powershell:
             self.skipTest("PowerShell is required for dispatcher tests")
 
-    def test_dispatcher_dry_run_resolves_a_provider_workspace(self) -> None:
+    def make_dispatch_project(
+        self,
+        root: Path,
+        config: dict,
+        *,
+        candidate: str | None = None,
+    ) -> tuple[Path, Path]:
         templates = PLUGIN / "templates" / "project"
+        agents = root / ".re-discipline" / "agents"
+        agents.mkdir(parents=True)
+        shutil.copy2(templates / "dispatch.ps1", agents / "dispatch.ps1")
+
+        profile = root / ".re-discipline" / "project-profile.md"
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        profile.write_text("---\nname: sample\n---\n", encoding="utf-8")
+
+        if candidate is None:
+            config_path = agents / "config.json"
+            provider_profile = agents / "providers" / "demo" / "profile.md"
+        else:
+            candidate_dir = agents / "recruiting" / candidate
+            candidate_dir.mkdir(parents=True)
+            config_path = candidate_dir / "config.json"
+            provider_profile = candidate_dir / "profile.md"
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        provider_profile.parent.mkdir(parents=True, exist_ok=True)
+        provider_profile.write_text("# Demo provider\n", encoding="utf-8")
+
+        campaign = root / "active" / "sample"
+        workspace = campaign / "subagents" / "demo-task"
+        workspace.mkdir(parents=True)
+        (campaign / "CAMPAIGN.md").write_text("# Campaign\n", encoding="utf-8")
+        (workspace / "brief.md").write_text("# Brief\n", encoding="utf-8")
+        (workspace / "AGENTS.override.md").write_text(
+            "# Drafter\n", encoding="utf-8"
+        )
+        return agents / "dispatch.ps1", config_path
+
+    def dispatch(
+        self,
+        dispatcher: Path,
+        *extra: str,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                self.powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(dispatcher),
+                "-Provider",
+                "demo",
+                "-Slug",
+                "sample",
+                "-Name",
+                "task",
+                *extra,
+                "-DryRun",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_dispatcher_dry_run_resolves_a_provider_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            agents = root / "agents"
-            agents.mkdir()
-            shutil.copy2(templates / "dispatch.ps1", agents / "dispatch.ps1")
             config = {
                 "backend": "native",
                 "providers": {
                     "demo": {
-                        "enabled": True,
-                        "promoted": True,
                         "command": "powershell.exe",
-                        "args": ["{policy_args}", "{prompt}"],
+                        "args": ["{model_args}", "{policy_args}", "{prompt}"],
                         "model_flag": "-Model",
-                        "model_preference": [],
-                        "default_model": None,
                         "sandbox_args": ["-NoProfile"],
                         "bypass_args": ["-NoProfile"],
-                        "instructions_file": ".codex/external-drafter-contract.md",
                     }
                 },
             }
-            (agents / "config.json").write_text(
-                json.dumps(config), encoding="utf-8"
-            )
-            workspace = root / "active" / "sample" / "subagents" / "demo-task"
-            workspace.mkdir(parents=True)
-            (root / "active" / "sample" / "CAMPAIGN.md").write_text(
-                "# Campaign\n", encoding="utf-8"
-            )
-            (workspace / "brief.md").write_text("# Brief\n", encoding="utf-8")
-            (workspace / "AGENTS.override.md").write_text(
-                "# Drafter\n", encoding="utf-8"
-            )
-            profile = root / ".re-discipline" / "project-profile.md"
-            profile.parent.mkdir()
-            profile.write_text("---\nname: sample\n---\n", encoding="utf-8")
-
-            result = subprocess.run(
-                [
-                    self.powershell,
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(agents / "dispatch.ps1"),
-                    "-Provider",
-                    "demo",
-                    "-Slug",
-                    "sample",
-                    "-Name",
-                    "task",
-                    "-DryRun",
-                ],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            dispatcher, _ = self.make_dispatch_project(root, config)
+            result = self.dispatch(dispatcher)
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("provider=demo", result.stdout)
         self.assertIn("SANDBOXED", result.stdout)
+        self.assertIn("<CLI default>", result.stdout)
+        self.assertIn(
+            ".re-discipline\\agents\\providers\\demo\\profile.md",
+            result.stdout.replace("/", "\\"),
+        )
+
+    def test_dispatcher_model_precedence(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{model_args}", "{policy_args}", "{prompt}"],
+                    "model_flag": "-Model",
+                    "model": "configured-model",
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(Path(directory), config)
+            configured = self.dispatch(dispatcher)
+            explicit = self.dispatch(dispatcher, "-Model", "explicit-model")
+
+        self.assertEqual(configured.returncode, 0, configured.stderr)
+        self.assertIn("model=configured-model", configured.stdout)
+        self.assertEqual(explicit.returncode, 0, explicit.stderr)
+        self.assertIn("model=explicit-model", explicit.stdout)
+
+    def test_dispatcher_bypass_is_explicit(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{model_args}", "{policy_args}", "{prompt}"],
+                    "model_flag": "-Model",
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(Path(directory), config)
+            result = self.dispatch(dispatcher, "-Bypass")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("BYPASS (explicit)", result.stdout)
+
+    def test_dispatcher_uses_candidate_config_and_profile(self) -> None:
+        config = {
+            "backend": "demo",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{model_args}", "{policy_args}", "{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dispatcher, config_path = self.make_dispatch_project(
+                root,
+                config,
+                candidate="demo",
+            )
+            result = self.dispatch(
+                dispatcher,
+                "-ConfigPath",
+                str(config_path),
+            )
+            live_provider = (
+                root
+                / ".re-discipline"
+                / "agents"
+                / "providers"
+                / "demo"
+            )
+            self.assertFalse(live_provider.exists())
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            ".re-discipline\\agents\\recruiting\\demo\\profile.md",
+            result.stdout.replace("/", "\\"),
+        )
+
+    def test_dispatcher_rejects_legacy_provider_keys(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                    "enabled": True,
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(Path(directory), config)
+            result = self.dispatch(dispatcher)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unsupported provider key 'enabled'", result.stderr)
+
+    def test_dispatcher_rejects_unknown_backend(self) -> None:
+        config = {
+            "backend": "missing",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(Path(directory), config)
+            result = self.dispatch(dispatcher)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "Backend 'missing' is not native or a configured provider",
+            result.stderr,
+        )
 
 
 class HookTests(unittest.TestCase):

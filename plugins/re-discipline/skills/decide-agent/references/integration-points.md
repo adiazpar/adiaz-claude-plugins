@@ -1,21 +1,24 @@
 # External Provider Integration Points
 
-Promotion records an exact inverse for every point it touches. Fire replays
-that manifest in reverse.
+Promotion records an exact inverse for every external point it touches. Fire
+applies those instructions in reverse.
 
-1. `agents/config.json`: add or remove one promoted provider. The user controls
-   `backend`; reset it to `native` before removing the selected provider.
-2. `agents/profiles/<provider>.md`: provider-specific prompt style and role fit.
-3. Provider CLI configuration: only approved MCP/tool registrations and their
+1. `.re-discipline/agents/config.json`: add or remove one provider. The user
+   controls `backend`; reset it to `native` before removing the selected
+   provider.
+2. `.re-discipline/agents/providers/<provider>/profile.md`: provider-specific
+   prompting and operational guidance.
+3. `.re-discipline/agents/providers/<provider>/scorecard.md`: evaluation
+   evidence and the user-approved promotion basis.
+4. `.re-discipline/agents/providers/<provider>/teardown.md`: exact additions,
+   config keys, external paths, and inverse operations.
+5. Provider CLI configuration: only approved tool registrations and their
    exact config locations. Never store credentials in the repository.
-4. `agents/README.md`: human-readable roster entry.
-5. `agents/roster/<provider>/teardown-manifest.md`: exact additions, config
-   keys, external paths, and reversal commands, plus a dated hiring record.
 
-Do not edit root `AGENTS.md`, `.codex/AGENTS.md`, `.claude/CLAUDE.md`, or either
-harness profile for roster membership. The root file remains the manager versus
-drafter router, and `agents/config.json` remains the roster source of truth.
+Do not edit root `AGENTS.md`, `.codex/AGENTS.md`, or `.claude/CLAUDE.md` for
+provider membership. Live config is the only provider list and backend switch.
 
-After promotion, parse config and run a sandboxed dispatcher dry run. After
-reject or fire, search the repository and recorded external config locations
-for the provider name. Explain any intentional historical record that remains.
+After promotion, parse config, verify the three-file provider record, and run a
+sandboxed dispatcher dry run. After reject or fire, search the repository and
+recorded external config locations for the provider name. Explain any
+unrelated historical prose that intentionally remains.

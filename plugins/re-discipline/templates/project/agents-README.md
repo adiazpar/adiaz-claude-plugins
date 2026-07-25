@@ -1,55 +1,92 @@
-# External Agent Adapters
+# External Agent Framework
 
-This directory is optional. Native Claude Code and Codex delegation does not
-use it. It exists only for external CLI providers that have passed the
-`hire-agent` evaluation and were promoted by an explicit user decision.
+## State
 
-## Routing
+`config.json` is the only live roster and backend switch. `backend: native`
+uses the active manager host's native delegation. Any other backend must name
+a configured provider. A provider's presence under `providers` means it was
+promoted; there is no separate status flag.
 
-`config.json` is the roster and backend switch:
-
-- `backend: native` uses the current manager host's native subagent adapter.
-- `backend: <provider>` selects a promoted provider under `providers`.
-
-Only the user changes this selection. A one-off provider named in the user's
-request is also valid without changing the default.
+Only the user changes the live backend or authorizes a one-off external
+provider.
 
 ## Provider Schema
 
-Each provider entry contains:
+Each provider entry requires `command` and `args`. It may also contain
+`model`, `model_flag`, `sandbox_args`, and `bypass_args`:
 
 ```json
 {
-  "enabled": true,
-  "promoted": true,
   "command": "provider-cli",
   "args": ["exec", "{model_args}", "{policy_args}", "{prompt}"],
+  "model": "optional-model-id",
   "model_flag": "--model",
-  "model_preference": [],
-  "default_model": null,
   "sandbox_args": ["--sandbox", "workspace-write"],
-  "bypass_args": ["--dangerously-bypass-sandbox"],
-  "instructions_file": ".codex/external-drafter-contract.md",
-  "profile": "profiles/provider.md"
+  "bypass_args": ["--dangerously-bypass-sandbox"]
 }
 ```
 
 Supported argument tokens are `{model_args}`, `{policy_args}`, `{root}`,
-`{workspace}`, `{brief}`, `{report}`, `{lastmsg}`, and `{prompt}`.
+`{workspace}`, `{brief}`, `{report}`, `{lastmsg}`, and `{prompt}`. An explicit
+dispatcher `-Model` overrides the configured `model`; otherwise the provider
+CLI chooses its own default.
 
-The dispatcher uses `sandbox_args` by default. It expands `bypass_args` only
-when called with `-Bypass`, which must correspond to an explicit user decision
-for that dispatch.
+## Durable Provider Record
 
-## Contract
+Every configured provider has exactly three durable Markdown records:
 
-The manager creates the workspace and brief through `delegate`. The external
-CLI runs in `active/<slug>/subagents/<provider>-<name>/`, where
-`AGENTS.override.md` selects the drafter role. The expected result is
-`report.md`; `last_message.md` is copied there only as a fallback.
+```text
+.re-discipline/agents/providers/<provider>/
+  profile.md
+  scorecard.md
+  teardown.md
+```
 
-Run a configuration check before a real dispatch:
+`profile.md` contains provider-specific prompting guidance. `scorecard.md`
+contains the evaluation and promotion judgment. `teardown.md` contains exact
+cleanup instructions for any provider-specific machine configuration.
+
+## Recruiting
+
+Candidate state is transient:
+
+```text
+.re-discipline/agents/recruiting/<candidate>/
+  candidate.md
+  config.json
+  profile.md
+  scorecard.md
+  teardown.md
+  runs/
+```
+
+Candidate configuration is passed with `-ConfigPath`. Candidate `runs/` and
+the entire candidate directory are deleted after promotion or rejection.
+
+## Lifecycle
+
+- Recruit: evaluate isolated candidate state without changing live config.
+- Promote: add the provider to live config and retain only its three durable
+  Markdown records.
+- Reject: delete the candidate directory.
+- Fire: remove the provider from live config and delete its provider directory
+  after applying `teardown.md`.
+
+Reject and fire create no retained historical artifact or event chronicle.
+
+## Dispatch
+
+The manager creates the workspace and brief through `delegate`. The dispatcher
+uses sandbox arguments by default. `-Bypass` is valid only for a user-approved
+dispatch and requires configured `bypass_args`.
+
+The external drafter runs in
+`active/<slug>/subagents/<provider>-<name>/`, follows the fixed
+`.codex/external-drafter-contract.md`, and writes `report.md`.
+`last_message.md` is copied there only as a fallback.
+
+Check a live provider configuration before executing it:
 
 ```powershell
-agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name> -DryRun
+.re-discipline/agents/dispatch.ps1 -Provider <provider> -Slug <slug> -Name <name> -DryRun
 ```

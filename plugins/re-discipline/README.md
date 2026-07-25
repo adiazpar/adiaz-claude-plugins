@@ -23,7 +23,8 @@ Run the initializer once in each project. It creates or reconciles:
 
 | Path | Ownership |
 |---|---|
-| `.re-discipline/project-profile.md` | Single source for shared re-discipline laws plus project identity, framing, source of record, tooling, roles, paths, and environment. |
+| `.re-discipline/project-profile.md` | Single source for shared re-discipline laws plus project identity, framing, source of record, tooling, paths, and environment. |
+| `.re-discipline/agents/` | Always-present host-neutral provider configuration, recruiting, durable records, and dispatch. |
 | `.claude/CLAUDE.md` | Thin Claude Code adapter with one native import of the canonical profile and preserved Claude-specific notes. |
 | `AGENTS.md` | Root role router for direct Codex managers versus briefed drafters. |
 | `.codex/AGENTS.md` | Thin Codex adapter with the canonical-profile fallback and preserved Codex-specific notes. |
@@ -35,6 +36,11 @@ import. A trusted Codex `SessionStart` hook injects the complete profile, while
 root and nested `AGENTS.md` instructions provide an explicit-read fallback.
 Host-specific configuration stays in project-owned sections of the applicable
 manager adapter. Shared laws never fork by host.
+
+The state model is manager-neutral. Claude Code and Codex are the packaged
+native adapters today; another manager host needs only a thin loader/tool
+adapter for its instruction and delegation surfaces. It does not get a
+different project profile or provider state model.
 
 The initializer is migration-aware. It preserves unrelated existing
 instructions, moves old root drafter rules into the dedicated contract, and
@@ -106,10 +112,14 @@ Native delegation is the default:
 - Claude Code uses its native subagent tool.
 - Codex uses `spawn_agent` when collaboration is available and allowed.
 
-An external CLI provider is optional. `hire-agent` can scaffold the generic
-`agents/` adapter layer, evaluate a candidate, and leave the final promotion to
-the user through `decide-agent`. External dispatch is sandboxed by default;
-bypass requires an explicit per-dispatch user decision.
+The external-provider core is always initialized at `.re-discipline/agents/`
+with `backend: native` and no configured providers. `hire-agent` evaluates a
+candidate in isolated recruiting state and leaves the final promotion to the
+user through `decide-agent`. Live config is the only provider list. Every
+configured provider retains exactly `profile.md`, `scorecard.md`, and
+`teardown.md`; raw candidate runs are discarded after a decision. External
+dispatch is sandboxed by default, and bypass requires an explicit
+per-dispatch user decision.
 
 ## Updating
 

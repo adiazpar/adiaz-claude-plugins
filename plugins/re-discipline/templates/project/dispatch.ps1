@@ -2,7 +2,8 @@
 Provider-neutral external drafter dispatcher.
 
 The delegate skill owns policy and creates the workspace. This script expands
-a promoted provider's command template and ensures the standard report lands.
+a configured provider's command template and ensures the standard report
+lands.
 #>
 [CmdletBinding()]
 param(
@@ -26,6 +27,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$canonicalProfile = Join-Path $root '.re-discipline\project-profile.md'
+if (-not (Test-Path -LiteralPath $canonicalProfile -PathType Leaf)) {
+    throw 'Canonical profile not found: .re-discipline/project-profile.md'
+}
 
 function Resolve-FromRoot {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -36,7 +42,32 @@ function Resolve-FromRoot {
     return [System.IO.Path]::GetFullPath((Join-Path $script:root $Path))
 }
 
-$root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+function Assert-AllowedProperties {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string[]]$Allowed,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    foreach ($property in @($Object.PSObject.Properties.Name)) {
+        if ($Allowed -notcontains $property) {
+            throw "Unsupported $Label key '$property'."
+        }
+    }
+}
+
+function Get-OptionalArray {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $Object.PSObject.Properties[$Name]) {
+        return @()
+    }
+    return @($Object.$Name)
+}
+
 $configFile = if ($ConfigPath) {
     Resolve-FromRoot $ConfigPath
 }
@@ -49,18 +80,55 @@ if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) {
 }
 
 $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
-$providerConfig = $config.providers.$Provider
-if ($null -eq $providerConfig) {
+Assert-AllowedProperties $config @('backend', 'providers') 'config'
+if ([string]::IsNullOrWhiteSpace([string]$config.backend)) {
+    throw "Config requires a non-empty 'backend'."
+}
+if ($null -eq $config.providers) {
+    throw "Config requires a 'providers' object."
+}
+
+$backend = [string]$config.backend
+$configuredProviderNames = @($config.providers.PSObject.Properties.Name)
+if ($backend -ne 'native' -and $configuredProviderNames -notcontains $backend) {
+    throw "Backend '$backend' is not native or a configured provider."
+}
+
+$providerProperty = $config.providers.PSObject.Properties[$Provider]
+if ($null -eq $providerProperty) {
     throw "Unknown provider '$Provider'."
 }
-if (-not $providerConfig.enabled) {
-    throw "Provider '$Provider' is disabled."
+$providerConfig = $providerProperty.Value
+Assert-AllowedProperties $providerConfig @(
+    'command',
+    'args',
+    'model',
+    'model_flag',
+    'sandbox_args',
+    'bypass_args'
+) 'provider'
+
+if ([string]::IsNullOrWhiteSpace([string]$providerConfig.command)) {
+    throw "Provider '$Provider' requires a command."
 }
-if (-not $ConfigPath -and -not $providerConfig.promoted) {
-    throw "Provider '$Provider' is not promoted."
+if ($null -eq $providerConfig.PSObject.Properties['args']) {
+    throw "Provider '$Provider' requires args."
+}
+if (@($providerConfig.args).Count -eq 0) {
+    throw "Provider '$Provider' requires at least one argument template."
 }
 if ($null -eq (Get-Command $providerConfig.command -ErrorAction SilentlyContinue)) {
     throw "CLI '$($providerConfig.command)' was not found on PATH."
+}
+
+$providerProfile = if ($ConfigPath) {
+    Join-Path (Split-Path -Parent $configFile) 'profile.md'
+}
+else {
+    Join-Path $PSScriptRoot "providers\$Provider\profile.md"
+}
+if (-not (Test-Path -LiteralPath $providerProfile -PathType Leaf)) {
+    throw "Provider profile not found: $providerProfile"
 }
 
 $campaign = Resolve-FromRoot "active/$Slug"
@@ -86,57 +154,40 @@ if (-not (Test-Path -LiteralPath $brief -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $override -PathType Leaf)) {
     throw "Drafter AGENTS.override.md not found: $override"
 }
-if (-not (Test-Path -LiteralPath (Join-Path $root '.re-discipline/project-profile.md') -PathType Leaf)) {
-    throw 'Canonical profile not found: .re-discipline/project-profile.md'
-}
 
 $report = Join-Path $workspace 'report.md'
 $lastMessage = Join-Path $workspace 'last_message.md'
 $log = Join-Path $workspace 'dispatch.log'
-$instructionsFile = if ($providerConfig.instructions_file) {
-    [string]$providerConfig.instructions_file
-}
-else {
-    '.codex/external-drafter-contract.md'
-}
-$profileNote = if ($providerConfig.profile) {
-    " Read agents/$($providerConfig.profile) for provider-specific prompting guidance."
-}
-else {
-    ''
-}
-
+$instructionsFile = '.codex/external-drafter-contract.md'
 $prompt = "You are an external drafter. Start in '$workspace'. Read AGENTS.override.md, " +
-    "$instructionsFile, .re-discipline/project-profile.md, and '$brief'." +
-    $profileNote + " Carry out only the brief and write the full report to '$report'."
+    "$instructionsFile, '$canonicalProfile', '$providerProfile', and '$brief'. " +
+    "Carry out only the brief and write the full report to '$report'."
 
-$resolvedModel = $Model
-if (-not $resolvedModel -and $providerConfig.model_preference) {
-    $preferences = @($providerConfig.model_preference)
-    if ($preferences.Count -gt 0) {
-        $resolvedModel = [string]$preferences[0]
-    }
+$resolvedModel = if ($Model) {
+    $Model
 }
-if (-not $resolvedModel -and $providerConfig.default_model) {
-    $resolvedModel = [string]$providerConfig.default_model
+elseif ($providerConfig.model) {
+    [string]$providerConfig.model
+}
+else {
+    $null
 }
 
-$policyArgs = @()
 if ($Bypass) {
-    $policyArgs = @($providerConfig.bypass_args)
+    $policyArgs = Get-OptionalArray $providerConfig 'bypass_args'
     if ($policyArgs.Count -eq 0) {
         throw "Provider '$Provider' has no verified bypass_args."
     }
     $policyLabel = 'BYPASS (explicit)'
 }
 else {
-    $policyArgs = @($providerConfig.sandbox_args)
+    $policyArgs = Get-OptionalArray $providerConfig 'sandbox_args'
     $policyLabel = 'SANDBOXED'
 }
 
 $modelArgs = @()
 if ($resolvedModel) {
-    if (-not $providerConfig.model_flag) {
+    if ([string]::IsNullOrWhiteSpace([string]$providerConfig.model_flag)) {
         throw "Provider '$Provider' has a model but no model_flag."
     }
     $modelArgs = @([string]$providerConfig.model_flag, $resolvedModel)
