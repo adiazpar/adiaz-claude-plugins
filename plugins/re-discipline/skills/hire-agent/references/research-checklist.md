@@ -28,15 +28,13 @@ installed CLI's help and a harmless dry run. Record exact version and date.
 | executable | `command` |
 | invocation template | `args` |
 | model flag | `model_flag` |
-| preferred/current model | `model_preference`, `default_model` |
+| configured model, when required | `model` |
 | safe policy | `sandbox_args` |
 | explicit unsafe policy | `bypass_args` |
-| drafter law | `instructions_file` |
-| provider prompt overlay | `profile` |
 
 The dispatcher supports `{model_args}`, `{policy_args}`, `{root}`,
 `{workspace}`, `{brief}`, `{report}`, `{lastmsg}`, and `{prompt}` tokens.
 
 Do not add credentials, access tokens, local secrets, or unverified flags to a
-draft config. Keep `promoted: false` until `decide-agent` applies the user's
-decision.
+candidate config. Candidate presence never changes live provider state;
+`decide-agent` applies the user's decision.

@@ -3,13 +3,13 @@ name: onboard
 description: >-
   Orient a re-discipline project at session start or when asked to get caught
   up, show current project state, or resume an active campaign. Reads the
-  canonical profile, active manager adapter, truth and history
-  indexes, and active campaign masterfiles, then returns a compact orientation.
+  canonical profile, active manager adapter, truth and history indexes, active
+  campaign masterfiles, and normalized external-provider state.
 ---
 
 # Onboard A Re-Discipline Project
 
-Onboarding is a read-only orientation. Directory location encodes trust:
+Onboarding is read-only. Directory location encodes trust:
 
 | Location | Status |
 |---|---|
@@ -22,21 +22,20 @@ Onboarding is a read-only orientation. Directory location encodes trust:
 
 Determine the active host from the tools exposed by the session and the
 instructions that loaded. Do not infer it merely because `.claude/` or
-`.codex/` exists; a dual-compatible project contains both.
+`.codex/` exists; a compatible project can contain both.
 
 - **Claude Code:** read `.claude/CLAUDE.md`.
 - **Codex:** read `.codex/AGENTS.md`.
-- **Unknown host:** read both manager adapters, identify the applicable tool
-  adapter, and state the uncertainty instead of silently choosing one.
+- **Unknown host:** read available manager adapters, identify the applicable
+  tool surface, and state the uncertainty instead of silently choosing one.
 
 Always read `.re-discipline/project-profile.md` first. It is the single source
-for shared re-discipline laws, name, framing, mission, source of record,
-portable tooling, and domain roles.
+for shared laws, name, framing, mission, source of record, portable tooling,
+and domain facts.
 
 If the canonical profile is missing, stop substantive work and invoke
-`init-project` in migration or recovery mode. A legacy
-`.claude/project-profile.md` or `.codex/project-profile.md` is recovery input,
-not permission to invent a replacement.
+`init-project` in migration or recovery mode. A legacy host profile is
+recovery input, not permission to invent a replacement.
 
 ## Step 2: Read The Masterfiles
 
@@ -58,17 +57,20 @@ questions, Dead ends, and the disposition manifest.
 When no campaign is active, call the state a cold start and await direction.
 Do not open a campaign merely because none exists.
 
-## Step 4: Read Optional Agent State
+## Step 4: Read External-Provider State
 
-If `agents/config.json` exists, list promoted external providers and the
-configured backend. Treat absent or `native` as the active host. If
-`recruiting/` exists, list candidate directories. Do not describe Claude Code
-or Codex as the permanent default; the active manager host is the native
-adapter for this session.
+Read `.re-discipline/agents/config.json`. Its provider keys are the complete
+set of live external providers, and `backend` is the live route selected by the
+user. `native` means the active host's native adapter.
+
+List candidate directories directly under
+`.re-discipline/agents/recruiting/`, if any. Do not treat candidates as live
+providers. If the normalized agent core is missing or the JSON is invalid,
+report that `init-project` resync or repair is required.
 
 ## Step 5: Return One Screen
 
-Use this shape, replacing placeholders with facts from the files:
+Use this shape:
 
 ```text
 ## Onboarded - <project name>
@@ -81,7 +83,9 @@ Active campaigns:
 - <slug>: <status>; open questions: <count>
 - none (cold start)
 
-Agent roster: <native host plus promoted external providers>
+Delegation backend: <native|provider>
+External providers: <configured names|none>
+Recruiting candidates: <candidate names|none>
 Recent history: <latest chronicle and outcome>
 Ready to: <resume named campaign, open a requested campaign, or await direction>
 ```

@@ -12,7 +12,7 @@ This is the single source of project identity, domain facts, and shared
 re-discipline laws. Runtime-specific bootstrap and configuration belong in
 thin manager adapters, not in a second project profile.
 
-<!-- re-discipline:shared-laws v0.3.0 -->
+<!-- re-discipline:shared-laws v0.4.0 -->
 ## Directory Means Trust
 
 | Location | Status | Treatment |
@@ -94,13 +94,6 @@ committed scripts.
 
 <!-- Record portable tool locations and sanctioned invocations. Runtime-specific
      MCP names or permission settings belong in the manager adapters. -->
-
-## Roles
-
-{{DOMAIN_ROLES}}
-
-<!-- Generic roles are Orchestrator, Analyst, Mechanical fan-out, and
-     Synthesizer. Add only roles created by this project's actual apparatus. -->
 
 ## Paths And Artifacts
 

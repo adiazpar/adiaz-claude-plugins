@@ -4,25 +4,38 @@ description: >-
   Evaluate an external agent or CLI for a re-discipline project when asked to
   hire, interview, onboard, or benchmark a candidate. Builds an isolated
   recruiting workspace, runs an evidence-based interview battery, and drafts a
-  recommendation without changing the active roster.
+  recommendation without changing live provider configuration.
 ---
 
 # Evaluate An External Agent
 
-This workflow evaluates an optional external CLI as a drafter. It never changes
-the active roster; `decide-agent` applies the user's later decision.
+This workflow evaluates an external CLI as a drafter. It never changes live
+provider state; `decide-agent` applies the user's later decision.
 
-## Step 1: Ensure The Optional Adapter Layer
+## Step 1: Verify The Agent Core
 
-If `agents/` is absent, render `agents-config.json`, `agents-README.md`, and
-`dispatch.ps1` from `<plugin-root>/templates/project/`, then create
-`agents/profiles/`, `agents/roster/`, and `agents/benchmarks/`. Keep
-`backend: native`.
+Require the normalized files created by `init-project`:
 
-Create `recruiting/<candidate>/` with `interview/`, `CANDIDATE.md`, and
-`rollback-manifest.md`. Candidate work stays there. Any approved write outside
-the repository, such as temporary provider configuration, must be recorded with
-an exact undo operation in the rollback manifest.
+- `.re-discipline/agents/README.md`
+- `.re-discipline/agents/config.json`
+- `.re-discipline/agents/dispatch.ps1`
+- `.re-discipline/agents/providers/`
+- `.re-discipline/agents/recruiting/`
+
+If any are missing or malformed, use `init-project` repair before recruiting.
+Create `.re-discipline/agents/recruiting/<candidate>/` with:
+
+```text
+candidate.md
+config.json
+profile.md
+scorecard.md
+teardown.md
+runs/
+```
+
+Candidate state stays isolated there. `teardown.md` records an exact inverse
+for every approved write outside the repository.
 
 ## Step 2: Research Current CLI Behavior
 
@@ -32,8 +45,8 @@ directory, prompt delivery, model selection, output capture, sandbox and
 approval controls, MCP configuration, instruction discovery, authentication,
 and current prompting guidance. Follow `references/research-checklist.md`.
 
-Do not rely on remembered flag names. If live documentation and the installed
-CLI disagree, use the installed version and record the discrepancy.
+Do not rely on remembered flag names. When live documentation and installed
+help disagree, use the installed version and record the discrepancy.
 
 ## Step 3: Install And Authenticate Deliberately
 
@@ -42,39 +55,44 @@ machine-level configuration. Never automate login, copy credentials, or handle
 authentication secrets. Pause with the exact official login command when user
 action is required.
 
-## Step 4: Draft Config And Profile
+## Step 4: Draft Candidate State
 
-Write:
+- `candidate.md`: provider, installed version, research date, sources, and
+  evaluation target.
+- `config.json`: the documented provider schema, with the candidate as its
+  backend and only provider. Include no lifecycle flags.
+- `profile.md`: render `agent-profile.md` with only provider-specific
+  prompting and operational guidance.
+- `teardown.md`: exact paths, keys, and inverse operations for approved
+  external configuration.
+- `scorecard.md`: start with fixture and manager-baseline metadata; complete
+  it after evaluation.
 
-- `config-draft.json`, using the schema in `agents/README.md`, with
-  `enabled: true` and `promoted: false`;
-- `profile-draft.md`, rendered from
-  `<plugin-root>/templates/project/agent-profile.md`, containing only
-  provider-specific prompting guidance and provisional role fit.
-
-Use verified `sandbox_args` as the normal path. Record `bypass_args` only when
-the CLI supports them; never make bypass the default.
+Use verified `sandbox_args` for normal dispatch. Record `bypass_args` only
+when the CLI supports them; bypass is never the default.
 
 ## Step 5: Configure Only Required Tool Surfaces
 
-Use the canonical profile and active manager adapter to identify tools
-required by the capability target. Register only those tools in the candidate
-CLI's own configuration format, with user approval for each machine-level
-change. Do not hardcode another project's daemon, Ghidra instance, or MCP
-names. Record every temporary registration in the rollback manifest.
+Derive concrete tool requirements from the candidate tasks. Register only
+those tools in the candidate CLI's own configuration format, with user
+approval for each machine-level change. Do not hardcode another project's
+daemon, disassembler, or MCP names. Record every temporary registration in
+`teardown.md`.
 
 ## Step 6: Run A Representative Battery
 
 Use cheap static tasks first, then tool-reach and production-loop tasks only if
 the candidate passes the gate. Each task needs a versioned brief, manager-only
 answer key or observable oracle, write-scope check, and cost/latency capture.
-Dispatch with the candidate config through `agents/dispatch.ps1 -ConfigPath`;
-do not add the candidate to the live roster.
 
-The bundled T1/T2/T3 fixtures are legacy examples from one RE project. T1 may
-be used as a general evidence-honesty sample. Run T2 or T3 only when the new
-project actually exposes the named subject and tools; otherwise create
-project-specific equivalents under the recruiting workspace.
+Store each run under `runs/` and dispatch with:
+
+```powershell
+.re-discipline/agents/dispatch.ps1 -Provider <candidate> -Slug <slug> -Name <name> -ConfigPath <candidate-config>
+```
+
+Do not add the candidate to live config. Bundled fixtures are examples only;
+use a project-specific equivalent when their subject or tools do not exist.
 
 ## Step 7: Score And Recommend
 
@@ -83,9 +101,8 @@ Follow `references/scoring-rubric.md` and
 version. Record the fixed manager host/model used for ratification so future
 runs are comparable. Weight evidence honesty and scope compliance above speed.
 
-Write `scorecard.md` with role fit, limitations, costs, a hire or no-hire
-recommendation, and rollback status. Stop for the user's decision. Do not mark
-the candidate promoted.
+Complete `scorecard.md` with limitations, costs, unsafe modes, a hire or
+no-hire recommendation, and teardown status. Stop for the user's decision.
 
 Do not commit unless the user explicitly asks.
 

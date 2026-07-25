@@ -11,7 +11,7 @@ Read root and nested `AGENTS.md` files, `.codex/AGENTS.md`,
 git history. Classify every relevant instruction as:
 
 - **Project fact:** identity, mission, domain, source of record, portable
-  tooling, roles, paths, or environment.
+  tooling, paths, or environment.
 - **Generic re-discipline law:** Wall, directory trust, campaign lifecycle, or
   manager/drafter asymmetry; preserve once in the canonical shared-law block.
 - **Claude manager note:** Claude settings, tools, memory, delegation behavior,
@@ -47,6 +47,7 @@ Before destructive refactoring, show:
   section.
 - The root `AGENTS.md` routing block.
 - Any old external-drafter content moving to the dedicated contract.
+- Any legacy external-provider state moving under `.re-discipline/agents/`.
 - Unrelated instructions that will remain unchanged.
 
 Ask only about genuine ambiguity. An explicit user request to apply an already
@@ -65,15 +66,31 @@ reviewed reconciliation is sufficient approval to continue.
 5. Move the old root drafter role to
    `.codex/external-drafter-contract.md` and install the root router, preserving
    unrelated root guidance outside managed markers.
-6. Update dispatchers to read canonical `framing`. Retain legacy host paths
+6. Always render the normalized agent core under `.re-discipline/agents/`.
+   Migrate only real configured providers; do not promote disabled,
+   placeholder, or unevaluated entries. Preserve each real provider as one
+   config entry and exactly `profile.md`, `scorecard.md`, and `teardown.md`.
+7. Preserve each in-flight candidate under
+   `.re-discipline/agents/recruiting/<candidate>/`, using this mechanical
+   mapping when the legacy names exist:
+   - `CANDIDATE.md` -> `candidate.md`
+   - `config-draft.json` -> `config.json`
+   - `profile-draft.md` -> `profile.md`
+   - `rollback-manifest.md` -> `teardown.md`
+   - `interview/` -> `runs/`
+   Keep an existing `scorecard.md`. Validate candidate config without adding
+   it to live config.
+8. Update dispatchers to read canonical `framing`. Retain legacy host paths
    only in explicitly labeled migration or recovery code.
-7. Replace duplicate identity prose in internal agent-loaded docs with links to
+9. Replace duplicate identity prose in internal agent-loaded docs with links to
    the canonical profile. Human-facing README files may remain self-contained
    when they do not contradict it.
-8. Compare the post-migration union against both legacy profiles. Delete
+10. Compare the post-migration union against both legacy profiles. Delete
    `.claude/project-profile.md` and `.codex/project-profile.md` only after every
    meaningful instruction has a surviving destination.
-9. Count canonical-profile lines and UTF-8 bytes. Warn above 240 lines or
+11. Delete old root agent and recruiting directories only after their
+    normalized state and meaning are verified.
+12. Count canonical-profile lines and UTF-8 bytes. Warn above 240 lines or
    16 KiB; never truncate it.
 
 Never normalize provisional `active/` scratch as part of migration.
