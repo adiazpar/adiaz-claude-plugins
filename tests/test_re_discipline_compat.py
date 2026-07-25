@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.4.0")
+        self.assertEqual(manifest["version"], "0.4.1")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -76,6 +76,56 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertNotIn(".claude/project-profile.md", topology)
         self.assertIn("project-owned", body.lower())
         self.assertIn("legacy", body.lower())
+
+    def test_init_project_owns_one_neutral_local_path_signature(self) -> None:
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md")
+        topology = skill.split("## Target Topology", 1)[1].split(
+            "The `framing` field",
+            1,
+        )[0]
+        greenfield = read(
+            PLUGIN / "skills" / "init-project" / "references" / "greenfield.md"
+        )
+        dropin = read(
+            PLUGIN / "skills" / "init-project" / "references" / "dropin.md"
+        )
+
+        self.assertIn(".re-discipline/local-paths.md", topology)
+        self.assertNotIn(".claude/local-paths.md", topology)
+        self.assertNotIn(".codex/local-paths.md", topology)
+        self.assertIn(".re-discipline/local-paths.md", greenfield)
+        self.assertIn(".gitignore", greenfield)
+        self.assertIn(".claude/local-paths.md", dropin)
+        self.assertIn(".codex/local-paths.md", dropin)
+        self.assertIn("merge", dropin.lower())
+        self.assertIn("conflict", dropin.lower())
+        self.assertIn(".re-discipline/local-paths.md", dropin)
+
+    def test_initialized_mode_requires_the_neutral_local_path_contract(self) -> None:
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md")
+        initialized = skill.split("- **Initialized:**", 1)[1].split(
+            "- **Migration:**",
+            1,
+        )[0]
+
+        self.assertIn(".re-discipline/local-paths.md", initialized)
+        self.assertIn("ignored", initialized)
+        self.assertIn("legacy", initialized)
+
+    def test_init_project_keeps_defensive_legacy_secret_ignores(self) -> None:
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md")
+        greenfield = read(
+            PLUGIN / "skills" / "init-project" / "references" / "greenfield.md"
+        )
+        dropin = read(
+            PLUGIN / "skills" / "init-project" / "references" / "dropin.md"
+        )
+
+        for guide in (skill, greenfield, dropin):
+            self.assertIn(".re-discipline/local-paths.md", guide)
+            self.assertIn(".claude/local-paths.md", guide)
+            self.assertIn(".codex/local-paths.md", guide)
+            self.assertIn("defense-only", guide.lower())
 
     def test_delegate_has_native_claude_and_codex_adapters(self) -> None:
         body = read(PLUGIN / "skills" / "delegate" / "SKILL.md")
@@ -223,6 +273,7 @@ class ProjectTemplateTests(unittest.TestCase):
             "codex-AGENTS.md",
             "drafter-AGENTS-override.md",
             "external-drafter-contract.md",
+            "local-paths.md",
             "project-profile.md",
         }
 
@@ -290,6 +341,20 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertNotIn(".codex/project-profile.md", codex)
         self.assertNotIn(".codex/project-profile.md", root)
         self.assertNotIn(".claude/project-profile.md", root)
+
+    def test_local_path_template_is_neutral_and_untracked_by_contract(self) -> None:
+        canonical = read(self.templates / "project-profile.md")
+        local_paths = read(self.templates / "local-paths.md")
+        claude = read(self.templates / "CLAUDE.md")
+        codex = read(self.templates / "codex-AGENTS.md")
+
+        self.assertIn(".re-discipline/local-paths.md", canonical)
+        self.assertIn("untracked", local_paths.lower())
+        self.assertIn("{{LOCAL_PATH_ASSIGNMENTS}}", local_paths)
+        self.assertNotIn("Claude", local_paths)
+        self.assertNotIn("Codex", local_paths)
+        self.assertNotIn(".claude/local-paths.md", claude)
+        self.assertNotIn(".codex/local-paths.md", codex)
 
     def test_shared_laws_exist_only_in_the_canonical_profile(self) -> None:
         canonical = read(self.templates / "project-profile.md")
@@ -370,6 +435,7 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("$re-discipline:init-project", body)
         self.assertIn("/re-discipline:init-project", body)
         self.assertIn(".re-discipline/project-profile.md", body)
+        self.assertIn(".re-discipline/local-paths.md", body)
         self.assertIn("one canonical project profile", body.lower())
         self.assertNotIn("Yes, a new project gets `.codex/project-profile.md`", body)
         self.assertIn("/hooks", body)
@@ -674,6 +740,27 @@ class HookTests(unittest.TestCase):
             output["hookSpecificOutput"]["additionalContext"],
             profile,
         )
+
+    def test_codex_hook_does_not_inject_machine_local_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".re-discipline").mkdir()
+            profile = "---\nname: test\n---\n# Canonical profile\n"
+            (root / ".re-discipline" / "project-profile.md").write_text(
+                profile, encoding="utf-8"
+            )
+            private_sentinel = "PRIVATE_LOCAL_VALUE_MUST_NOT_ENTER_CONTEXT"
+            (root / ".re-discipline" / "local-paths.md").write_text(
+                f'$PRIVATE = "{private_sentinel}"\n',
+                encoding="utf-8",
+            )
+            result = self.run_hook("session-start", root, host="codex")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        context = output["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(context, profile)
+        self.assertNotIn(private_sentinel, context)
 
     def test_codex_hook_discovers_project_from_nested_working_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

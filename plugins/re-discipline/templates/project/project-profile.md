@@ -12,7 +12,7 @@ This is the single source of project identity, domain facts, and shared
 re-discipline laws. Runtime-specific bootstrap and configuration belong in
 thin manager adapters, not in a second project profile.
 
-<!-- re-discipline:shared-laws v0.4.0 -->
+<!-- re-discipline:shared-laws v0.4.1 -->
 ## Directory Means Trust
 
 | Location | Status | Treatment |
@@ -58,8 +58,10 @@ drafter contract, and serialize exclusive live surfaces.
 ## Commits And Local State
 
 Commit or push only when the user asks. Follow the project rules below. Keep
-machine-local values in documented untracked files and never hardcode them in
-committed scripts.
+machine-local values in `.re-discipline/local-paths.md`, keep that file
+untracked, and never hardcode its values in committed scripts. Treat the
+values as private machine state; do not copy them into manager context,
+dispatch briefs, reports, or memory.
 
 ## Anti-Patterns
 
@@ -100,7 +102,8 @@ committed scripts.
 {{BINARIES_AND_PATHS}}
 
 <!-- Record path schema, tracked artifact locations, and re-verification
-     triggers. Machine-local values stay in harness-local untracked files. -->
+     triggers. Machine-local values stay in the untracked
+     `.re-discipline/local-paths.md`. -->
 
 ## Environment
 

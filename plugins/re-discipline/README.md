@@ -24,6 +24,7 @@ Run the initializer once in each project. It creates or reconciles:
 | Path | Ownership |
 |---|---|
 | `.re-discipline/project-profile.md` | Single source for shared re-discipline laws plus project identity, framing, source of record, tooling, paths, and environment. |
+| `.re-discipline/local-paths.md` | Single untracked machine-local path map shared by all manager hosts and maintained project tools. |
 | `.re-discipline/agents/` | Always-present host-neutral provider configuration, recruiting, durable records, and dispatch. |
 | `.claude/CLAUDE.md` | Thin Claude Code adapter with one native import of the canonical profile and preserved Claude-specific notes. |
 | `AGENTS.md` | Root role router for direct Codex managers versus briefed drafters. |
@@ -36,6 +37,14 @@ import. A trusted Codex `SessionStart` hook injects the complete profile, while
 root and nested `AGENTS.md` instructions provide an explicit-read fallback.
 Host-specific configuration stays in project-owned sections of the applicable
 manager adapter. Shared laws never fork by host.
+
+The initializer adds `.re-discipline/local-paths.md` to the project
+`.gitignore` before creating it. During migration it merges legacy
+`.claude/local-paths.md` and `.codex/local-paths.md` assignments, reports
+conflicting variable names without exposing private values, updates maintained
+readers, and removes the legacy files only after coverage is verified.
+Session hooks continue to inject only the canonical project profile; they
+never inject the private local-path file into manager context.
 
 The state model is manager-neutral. Claude Code and Codex are the packaged
 native adapters today; another manager host needs only a thin loader/tool

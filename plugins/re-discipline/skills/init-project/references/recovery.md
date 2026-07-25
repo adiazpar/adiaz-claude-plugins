@@ -36,10 +36,20 @@ tooling, config, and targeted memory indexes. Present the best draft and ask
 the user to confirm `name`, `type`, `framing`, and mission before writing.
 Never silently invent those fields.
 
+## Recover Local Paths Separately
+
+Do not recover machine-local values from Git history. If
+`.re-discipline/local-paths.md` is missing, reconcile surviving
+`.claude/local-paths.md` and `.codex/local-paths.md` through the drop-in
+procedure. If no local file survives, render the neutral signature with a
+commented assignment instruction and ask for only the values required by
+current tools. Ensure the neutral file is ignored before writing values.
+
 ## Verify
 
 - The canonical profile exists and contains confirmed identity frontmatter.
 - Both manager adapters resolve it.
+- The neutral local-path signature exists and remains untracked.
 - Shared laws exist once in the canonical profile and not in either adapter.
 - Dispatch framing comes from the canonical file.
 - Recovered host-specific instructions live in project-owned manager sections.

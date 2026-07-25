@@ -1,4 +1,4 @@
-<!-- re-discipline:router v0.4.0 -->
+<!-- re-discipline:router v0.4.1 -->
 # AGENTS.md - {{PROJECT_NAME}} entrypoint
 
 This root file is a compatibility entrypoint for agents that discover
