@@ -1040,12 +1040,14 @@ func TestAdversarialCacheRootsRequireDeterministicLocalGrant(t *testing.T) {
 	projectCache, err := ResolveCacheRoot(
 		boundary, filepath.Join(root, ".re-discipline", "cache", "knowledge"),
 	)
-	if err != nil || !withinRoot(root, projectCache) {
+	if err != nil || !withinRoot(boundary.Root, projectCache) {
 		t.Fatalf("project cache grant failed: path=%s err=%v", projectCache, err)
 	}
 	machine := MachineCacheRoot(boundary)
 	machineCache, err := ResolveCacheRoot(boundary, machine)
-	if err != nil || filepath.Clean(machineCache) != filepath.Clean(machine) {
+	expectedMachine, expectedErr := evalNearestExisting(machine)
+	if err != nil || expectedErr != nil ||
+		filepath.Clean(machineCache) != filepath.Clean(expectedMachine) {
 		t.Fatalf("deterministic machine cache grant failed: path=%s err=%v", machineCache, err)
 	}
 	outside := t.TempDir()
