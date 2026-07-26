@@ -12,17 +12,16 @@ This is the single source of project identity, domain facts, and shared
 re-discipline laws. Runtime-specific bootstrap and configuration belong in
 thin manager adapters, not in a second project profile.
 
-<!-- re-discipline:shared-laws v0.4.1 -->
+<!-- re-discipline:shared-laws v0.5.0 -->
 ## Directory Means Trust
 
 | Location | Status | Treatment |
 |---|---|---|
-| `docs/truth/` | verified durable fact | Trust it; promote only with DIRECT evidence. |
-| `docs/history/` | retrospective narrative | Use for context and leads, never current authority. |
-| `active/<slug>/` | in-flight scratch | Treat as provisional; do not present it as fact. |
-| `archive/` | preserved evidence | Treat as evidence, not prose authority. |
+| `docs/truth/` | verified current claim | Trust it only within its scope and re-verification conditions. |
+| `docs/history/` | retrospective provenance | Use for context and leads, never current authority or sole empirical support. |
+| `active/<slug>/` | provisional work and temporary evidence | Keep unresolved material here; do not present it as fact. |
 | `docs/backlog/` | deferred briefs | Treat as intent, not completed work. |
-| maintained source and tests | working system | Change only for scoped work and verify. |
+| maintained source, tools, tests, fixtures, corpora, and references | durable project assets | Keep only with an active consumer or owner; change only for scoped work and verify. |
 
 ## Session Start
 
@@ -37,8 +36,10 @@ in a way that would be impossible if the claim were false. INFERRED evidence
 is a best explanation while alternatives survive.
 
 Check the source of record below before empirical work on subject-defined
-facts. Truth must be value-precise and cite a recipe, permanent test, preserved
-artifact, or chronicle that survives deletion of campaign scratch.
+facts. Truth admission has two gates: DIRECT evidence must establish the claim,
+and a maintained source, permanent test or fixture, or runnable recipe must let
+a future manager recheck it. A chronicle records provenance and cannot be the
+claim's sole empirical support.
 
 ## Campaign Lifecycle
 
@@ -67,9 +68,12 @@ dispatch briefs, reports, or memory.
 
 - Do not move INFERRED findings into truth.
 - Do not blindly accept a drafter report.
-- Do not treat a chronicle as current truth.
+- Do not treat a chronicle as current truth or sole empirical support.
 - Do not merge manager and drafter roles.
 - Do not leave closed campaign scratch in `active/`.
+- Do not preserve raw output without an active consumer or owner.
+- At closure, Maintain durable project assets, Distill necessary meaning, and
+  Delete the remainder.
 - Do not use an empirical shortcut before checking an authoritative source.
 - Do not duplicate this profile's facts or laws in a manager adapter.
 <!-- re-discipline:shared-laws:end -->

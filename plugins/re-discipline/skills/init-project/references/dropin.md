@@ -9,12 +9,15 @@ Read root and nested `AGENTS.md` files, `.codex/AGENTS.md`,
 `.codex/project-profile.md`, `.claude/CLAUDE.md`,
 `.claude/project-profile.md`, `.codex/local-paths.md`,
 `.claude/local-paths.md`, `.gitignore`, docs indexes, README files, dispatch
-scripts, and git history. Classify every relevant instruction as:
+scripts, campaign templates, truth files, chronicles, and git history. Search
+those sources for legacy archive semantics before treating any filesystem path
+as re-discipline state. Classify every relevant instruction as:
 
 - **Project fact:** identity, mission, domain, source of record, portable
   tooling, paths, or environment.
-- **Generic re-discipline law:** Wall, directory trust, campaign lifecycle, or
-  manager/drafter asymmetry; preserve once in the canonical shared-law block.
+- **Generic re-discipline law:** Wall, directory trust, campaign lifecycle,
+  legacy archive evidence semantics, or manager/drafter asymmetry; preserve or
+  migrate once in the canonical shared-law block.
 - **Claude manager note:** Claude settings, tools, memory, or delegation
   behavior.
 - **Codex manager note:** Codex settings, tools, memory, sandbox, shell
@@ -22,6 +25,29 @@ scripts, and git history. Classify every relevant instruction as:
 - **Machine-local value:** a host-neutral assignment for the untracked
   `.re-discipline/local-paths.md`.
 - **Unrelated project guidance:** preserve in place.
+
+## Gate Legacy Archive Semantics
+
+The existence of a directory named `archive` alone does not prove
+re-discipline ownership. A project may use that name for releases or domain
+data. Treat a path as a legacy re-discipline archive only when managed shared
+laws, campaign templates, truth files, or chronicles describe it as preserved
+evidence.
+
+When that semantic evidence exists:
+
+1. Inventory every reference and active consumer.
+2. Report that semantic migration is required.
+3. Do not delete, move, or rewrite any file automatically.
+4. Preserve the current shared-law block until the user approves migration.
+5. After approval, classify each affected artifact as Maintain, Distill, or
+   Delete. Verify maintained consumers, distilled destinations, and deletion
+   rationale before changing the legacy directory.
+
+Create no durable root-level replacement evidence directory. Temporary
+campaign evidence under `active/<slug>/evidence/` remains valid until
+checkpoint or closure. Leave a project-owned directory named `archive`
+unchanged.
 
 ## Reconcile Duplicated Profiles
 
@@ -76,12 +102,19 @@ Before destructive refactoring, show:
 - Any legacy external-provider state moving under `.re-discipline/agents/`.
 - Legacy local-path assignments merging into the untracked neutral signature,
   including conflict names but not private values.
+- Legacy archive references and active consumers, with proposed Maintain,
+  Distill, or Delete dispositions.
 - Unrelated instructions that will remain unchanged.
 
 Ask only about genuine ambiguity. An explicit user request to apply an already
 reviewed reconciliation is sufficient approval to continue.
 
 ## Apply Non-Destructively
+
+Run the legacy archive semantic migration gate before replacing the canonical
+shared-law block. When the gate finds unresolved dependencies, stop that part
+of migration, preserve the existing block and files, and report partial
+progress instead of claiming completion.
 
 1. Add missing epistemic directories and indexes; never overwrite a populated
    index without approval.
@@ -134,4 +167,8 @@ managed adapters, drafter contract, and preserved unrelated guidance contains
 every meaningful instruction from the originals. Report moved, deduplicated,
 and unchanged sections. Separately verify that the neutral local-path file
 covers every legacy assignment key, remains untracked, and is the only current
-local-path signature. Do not commit unless the user asks.
+local-path signature. Confirm that a greenfield or fully migrated project does
+not create or require a durable root-level replacement evidence directory.
+Temporary campaign evidence under `active/<slug>/evidence/` remains valid.
+Report unresolved legacy archive dependencies explicitly and do not declare
+migration complete. Do not commit unless the user asks.

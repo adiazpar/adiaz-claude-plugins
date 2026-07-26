@@ -26,16 +26,18 @@ overturns target syntheses.
 
 ## Step 2: Establish The Replacement
 
-State the corrected claim when DIRECT evidence supports one. It is valid to
-remove a false synthesis without replacing it; record the resulting gap as an
-open campaign question.
+State the corrected claim only when DIRECT evidence supports it and a
+maintained source, permanent test and fixture, or runnable recipe can recheck
+it later. A chronicle supplies provenance, not sole empirical support. It is
+valid to remove a false synthesis without replacing it; record the resulting
+gap as an open campaign question.
 
 ## Step 3: Correct Current Truth
 
 - Rewrite the existing file in place when the replacement has the same home.
 - Remove the file when no current claim survives; do not leave a normative
   zombie or create a separate refuted-truth tree.
-- Update verification date, scope, confidence, recipes, and archive pointers.
+- Update verification date, scope, confidence, and verification basis.
 - Search `Depends-on` links and recheck every dependent claim.
 - Remove or retarget the entry in `docs/truth/INDEX.md`.
 
@@ -44,6 +46,8 @@ open campaign question.
 Quote the old claim verbatim in the active campaign's Dead ends section with
 the DIRECT disconfirming evidence and any residual inference. The closing
 chronicle must preserve that explanation so the dead claim is not rediscovered.
+Keep the old claim and disconfirmation in history as provenance; do not cite
+history as the replacement truth's empirical support.
 
 Verify that current truth contains only the replacement, while history retains
 the old claim as retrospective context.

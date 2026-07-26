@@ -26,7 +26,6 @@
 ## Reproduction Recipes
 
 - `<command or permanent test>` - <what it reproduces>
-- `archive/<path>` - <what irreproducible evidence it preserves>
 
 ## Leads For Future Campaigns
 
@@ -35,5 +34,6 @@
 ## Provenance
 
 - **Relevant commits:** <SHAs or none>
-- **Irreproducible artifacts:** `archive/...` or none
+- **Maintained deliverables:** <source, tool, test, fixture, corpus, or reference paths>
+- **Discarded material:** <classes of raw output removed after distillation>
 - **Folded from deleted scratch:** <campaign paths summarized here>

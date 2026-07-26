@@ -19,14 +19,16 @@
 - [<other truth file>](../path)
 - or: none
 
-## Evidence
+## Verification
 
-- **Recipe:** `<runnable command or permanent test>`
-- **Archive:** `archive/<preserved irreproducible artifact>`, when required
-- **Chronicle:** `docs/history/chronicles/<date>-<topic>.md`
+- **Source:** <maintained primary source path and exact value, or none>
+- **Test or fixture:** <permanent test and maintained fixture, or none>
+- **Recipe:** `<runnable command against the named subject revision>`, or none
+- **Provenance:** `docs/history/chronicles/<date>-<topic>.md`
 
-Only DIRECT evidence supports promotion. Each citation must survive deletion
-of the campaign scratch.
+Only DIRECT evidence supports promotion. At least one of Source, Test or
+fixture, or Recipe must let a future manager recheck the claim after campaign
+scratch is deleted. Provenance explains derivation; it is not empirical support.
 
 ## Detail
 

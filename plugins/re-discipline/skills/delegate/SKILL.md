@@ -103,7 +103,7 @@ Report: active/<slug>/subagents/<dispatch-id>/report.md
 - .codex/external-drafter-contract.md
 - active/<slug>/CAMPAIGN.md
 - docs/INDEX.md and docs/truth/INDEX.md
-- <selected truth, history, and artifact paths>
+- <selected truth, history, source, tool, test, fixture, and campaign paths>
 
 ## Required Tools And Access
 - <exact tools and granted paths>
@@ -127,7 +127,8 @@ Write report.md and lead with VERDICT. Include CLAIMS, CORRECTIONS / OVERTURNS,
 TRUTH-PROMOTION CANDIDATES, DELIVERABLES when applicable, RESIDUAL
 UNCERTAINTIES, MANAGER RUNBOOK when applicable, EVIDENCE INDEX, MEMORY
 CANDIDATES, and OVERALL CONFIDENCE. Every promotion candidate needs a
-surviving recipe or preserved artifact. Do not add a next-steps section.
+maintained source, permanent test and fixture, or runnable recipe. A chronicle
+is provenance, not sole empirical support. Do not add a next-steps section.
 
 ## Exit
 Budget: <budget>. If blocked, return a partial report with the evidence boundary

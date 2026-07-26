@@ -15,7 +15,6 @@ docs/history
 docs/history/chronicles
 docs/backlog
 active
-archive
 src
 tests
 # tools/ is NOT force-created -- a project gets it only if it has its own code tooling.

@@ -55,8 +55,8 @@ a report because two summaries use different words.
 
 | Verdict | Condition | Action |
 |---|---|---|
-| PROMOTE | DIRECT, value-precise, no unresolved conflict | Offer it to `promote-truth`. |
-| HOLD | INFERRED or one observation short | Keep it provisional and name the decisive observation. |
+| PROMOTE | DIRECT, value-precise, no unresolved conflict, with a durable verifier | Offer it to `promote-truth`. |
+| HOLD | INFERRED, one observation short, or missing a durable verifier | Keep it provisional and name the decisive observation or verifier. |
 | DROP | Disproved or repeats a dead end | Add it to campaign dead ends with evidence. |
 | BLOCK | Conflicts with current truth or primary evidence | Stop promotion and reconcile both sides. |
 
@@ -78,8 +78,9 @@ Record the report, review date, PROMOTE/HOLD/DROP/BLOCK outcomes, corrections,
 and any blocking uncertainty in `CAMPAIGN.md`. Keep report artifacts in place
 until closure disposition.
 
-Verify that every proposed promotion has a surviving recipe or preserved
-artifact and every rejected claim has a clear reason.
+Verify that every proposed promotion has a maintained source, permanent test
+and fixture, or runnable recipe. Reject a chronicle as sole empirical support,
+and give every rejected claim a clear reason.
 
 Do not commit unless the user explicitly asks.
 

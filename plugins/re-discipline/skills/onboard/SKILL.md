@@ -13,10 +13,10 @@ Onboarding is read-only. Directory location encodes trust:
 
 | Location | Status |
 |---|---|
-| `docs/truth/` | Verified and durable. |
-| `docs/history/` | Retrospective context and leads, never current authority. |
-| `active/<slug>/` | Provisional, in-flight work. |
-| `archive/` | Preserved evidence, not prose authority. |
+| `docs/truth/` | Current claims with durable verification. |
+| `docs/history/` | Retrospective provenance and leads, never current authority or sole empirical support. |
+| `active/<slug>/` | Provisional work and temporary evidence. |
+| maintained source, tools, tests, fixtures, corpora, and references | Durable project assets with an active consumer or owner. |
 
 ## Step 1: Detect The Active Host
 

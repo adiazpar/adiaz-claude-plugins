@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.4.2")
+        self.assertEqual(manifest["version"], "0.5.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -44,6 +44,8 @@ class PackagingTests(unittest.TestCase):
         claude = json.loads(read(PLUGIN / ".claude-plugin" / "plugin.json"))
         codex = json.loads(read(PLUGIN / ".codex-plugin" / "plugin.json"))
 
+        self.assertEqual(claude["version"], "0.5.0")
+        self.assertEqual(codex["version"], "0.5.0")
         self.assertEqual(claude["version"], codex["version"])
 
 
@@ -304,6 +306,80 @@ class SkillMetadataTests(unittest.TestCase):
                 with self.subTest(path=path, needle=needle):
                     self.assertNotIn(needle, body)
 
+    def test_lifecycle_uses_durable_verification_not_archive_storage(self) -> None:
+        lifecycle_paths = [
+            PLUGIN / "skills" / "onboard" / "SKILL.md",
+            PLUGIN / "skills" / "checkpoint-campaign" / "SKILL.md",
+            PLUGIN / "skills" / "close-campaign" / "SKILL.md",
+            PLUGIN / "skills" / "promote-truth" / "SKILL.md",
+            PLUGIN / "skills" / "review-subagent" / "SKILL.md",
+            PLUGIN / "skills" / "overturn" / "SKILL.md",
+            PLUGIN / "skills" / "delegate" / "SKILL.md",
+        ]
+        forbidden = (
+            "archive/",
+            "irreproducible artifacts",
+            "expensive-reproducible",
+            "preserved artifact",
+        )
+
+        for path in lifecycle_paths:
+            body = read(path).lower()
+            for phrase in forbidden:
+                with self.subTest(skill=path.parent.name, phrase=phrase):
+                    self.assertNotIn(phrase, body)
+
+        promote = read(PLUGIN / "skills" / "promote-truth" / "SKILL.md").lower()
+        self.assertIn("direct", promote)
+        self.assertIn("durable verifier", promote)
+        self.assertIn("maintained source", promote)
+        self.assertIn("permanent test", promote)
+        self.assertIn("runnable recipe", promote)
+        self.assertIn("chronicle", promote)
+        self.assertIn("sole empirical support", promote)
+
+    def test_init_project_gates_legacy_archive_semantic_migration(self) -> None:
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md").lower()
+        dropin = read(
+            PLUGIN / "skills" / "init-project" / "references" / "dropin.md"
+        ).lower()
+        combined = skill + "\n" + dropin
+
+        for phrase in (
+            "legacy archive",
+            "semantic migration",
+            "do not delete",
+            "directory named `archive` alone",
+            "does not prove re-discipline ownership",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, combined)
+
+        self.assertIn("maintain", combined)
+        self.assertIn("distill", combined)
+        self.assertIn("delete", combined)
+
+    def test_legacy_archive_semantics_override_initialized_mode(self) -> None:
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md").lower()
+        initialized = skill.split("- **initialized:**", 1)[1].split(
+            "- **migration:**",
+            1,
+        )[0]
+
+        self.assertIn("no unresolved legacy archive semantics", initialized)
+        self.assertIn("legacy archive semantics always override initialized", skill)
+
+    def test_legacy_migration_allows_temporary_active_evidence(self) -> None:
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md").lower()
+        dropin = read(
+            PLUGIN / "skills" / "init-project" / "references" / "dropin.md"
+        ).lower()
+        combined = skill + "\n" + dropin
+
+        self.assertIn("active/<slug>/evidence/", combined)
+        self.assertIn("temporary campaign evidence", combined)
+        self.assertIn("no durable root-level replacement evidence directory", combined)
+
 
 class ProjectTemplateTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -496,6 +572,54 @@ class ProjectTemplateTests(unittest.TestCase):
                 self.assertNotIn("snaphak", body)
                 self.assertNotIn("doom", body)
 
+    def test_greenfield_topology_has_no_archive_directory(self) -> None:
+        tree = read(self.templates / "tree.txt")
+        topology = {
+            line.strip().lower()
+            for line in tree.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+        self.assertNotIn("archive", topology)
+
+    def test_truth_requires_recheckable_verification(self) -> None:
+        truth = read(PLUGIN / "templates" / "truth-claim.md")
+
+        self.assertIn("## Verification", truth)
+        self.assertIn("**Source:**", truth)
+        self.assertIn("**Test or fixture:**", truth)
+        self.assertIn("**Recipe:**", truth)
+        self.assertIn("**Provenance:**", truth)
+        self.assertIn("future manager", truth.lower())
+        self.assertIn("not empirical support", truth.lower())
+        self.assertNotIn("**Archive:**", truth)
+
+    def test_chronicle_preserves_provenance_not_raw_evidence(self) -> None:
+        chronicle = read(PLUGIN / "templates" / "chronicle.md")
+
+        self.assertIn("## Reproduction Recipes", chronicle)
+        self.assertIn("Maintained deliverables", chronicle)
+        self.assertIn("Discarded material", chronicle)
+        self.assertIn("Folded from deleted scratch", chronicle)
+        self.assertIn("provenance", chronicle.lower())
+        self.assertNotIn("Irreproducible artifacts", chronicle)
+        self.assertNotIn("archive/", chronicle.lower())
+
+    def test_campaign_disposes_artifacts_by_maintenance_value(self) -> None:
+        campaign = read(PLUGIN / "templates" / "campaign-masterfile.md").lower()
+
+        for disposition in ("maintain", "distill", "delete"):
+            with self.subTest(disposition=disposition):
+                self.assertIn(f"| {disposition} |", campaign)
+
+        for legacy_tag in (
+            "| ground-truth |",
+            "| capture |",
+            "| expensive-reproducible |",
+        ):
+            with self.subTest(legacy_tag=legacy_tag):
+                self.assertNotIn(legacy_tag, campaign)
+
 
 class DocumentationTests(unittest.TestCase):
     def test_plugin_readme_explains_both_install_and_init_flows(self) -> None:
@@ -512,6 +636,16 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("/hooks", body)
         self.assertIn(".agents/plugins/marketplace.json", body)
         self.assertIn("not re-discipline scratch", body.lower())
+
+    def test_plugin_readme_defines_no_archive_knowledge_model(self) -> None:
+        body = read(PLUGIN / "README.md").lower()
+
+        self.assertNotIn("archive/", body)
+        self.assertIn("temporary evidence", body)
+        self.assertIn("durable verification", body)
+        self.assertIn("maintain", body)
+        self.assertIn("distill", body)
+        self.assertIn("delete", body)
 
     def test_repository_readme_identifies_the_codex_marketplace(self) -> None:
         body = read(ROOT / "README.md")

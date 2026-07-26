@@ -40,13 +40,11 @@ where, what remains provisional, the next action, and blockers.>
 
 ## Disposition Manifest
 
-| Artifact | Tag | Destination At Close |
+| Artifact | Disposition | Destination Or Rationale |
 |---|---|---|
-| <path> | ground-truth | `archive/<appropriate-area>/` |
-| <path> | capture | archive if truth-cited, otherwise remove |
-| <path> | reproducible | preserve recipe or test, then remove output |
-| <path> | expensive-reproducible | preserve recipe and useful output |
-| <path> | keeper-tool | move to maintained project tooling |
+| <path> | maintain | <maintained project destination and active consumer> |
+| <path> | distill | <truth, chronicle, or backlog destination> |
+| <path> | delete | remove after its relevant meaning is recorded |
 
 ## Historical Log
 
