@@ -278,6 +278,14 @@ atomically replaces `bin/` only after the whole package succeeds. It emits:
   manifest, and all shared runtime assets without copying them;
 - `bin/THIRD_PARTY_NOTICES.md`.
 
+The Windows architecture dispatcher is canonicalized by a Windows-hosted
+build. Windows packagers rebuild it from source; Linux and macOS packagers
+copy the checked-in PE byte-for-byte and verify its target and pinned Go
+toolchain. The Windows CI leg therefore enforces source freshness while every
+host can require one identical release package without accepting
+host-dependent PE output. A non-Windows source-only checkout must first
+generate `knowledge/bin` on Windows.
+
 The checksum rows for shared runtime assets use parent-relative paths such as
 `../profiles/balanced-v1.json` because `SHA256SUMS` itself lives in `bin/`.
 Only files under the four declared runtime-asset roots can appear there.
