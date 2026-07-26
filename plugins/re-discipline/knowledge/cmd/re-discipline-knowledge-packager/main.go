@@ -26,7 +26,7 @@ const (
 	runtimeName          = "re-discipline-knowledge"
 	runtimeVersion       = "0.6.0"
 	runtimeBuildIDPath   = "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
-	windowsLauncherMode  = 0o644
+	windowsArtifactMode  = 0o644
 )
 
 type targetSpec struct {
@@ -415,17 +415,21 @@ func buildPackageTree(moduleRoot, outputRoot, pinnedGo, buildID string) (package
 			targetBinaryName(target.GOOS),
 		))
 		destination := filepath.Join(outputRoot, filepath.FromSlash(relative))
-		if err := buildGoBinary(
+		if err := materializeRuntimeBinary(
 			moduleRoot,
+			relative,
 			destination,
 			target,
-			"./cmd/re-discipline-knowledge",
 			pinnedGo,
 			buildID,
 		); err != nil {
 			return packageManifest{}, err
 		}
-		artifact, err := describeFile(outputRoot, relative, "runtime", target.GOOS, target.GOARCH, "0755")
+		mode := "0755"
+		if target.GOOS == "windows" {
+			mode = "0644"
+		}
+		artifact, err := describeFile(outputRoot, relative, "runtime", target.GOOS, target.GOARCH, mode)
 		if err != nil {
 			return packageManifest{}, err
 		}
@@ -552,6 +556,35 @@ func buildGoBinary(
 	return nil
 }
 
+func materializeRuntimeBinary(
+	moduleRoot string,
+	relative string,
+	destination string,
+	target targetSpec,
+	pinnedGo string,
+	buildID string,
+) error {
+	if runtime.GOOS != "windows" && target.GOOS == "windows" {
+		return copyCanonicalWindowsBinary(
+			moduleRoot, relative, destination, target, pinnedGo, buildID,
+		)
+	}
+	if err := buildGoBinary(
+		moduleRoot,
+		destination,
+		target,
+		"./cmd/re-discipline-knowledge",
+		pinnedGo,
+		buildID,
+	); err != nil {
+		return err
+	}
+	if target.GOOS == "windows" {
+		return os.Chmod(destination, windowsArtifactMode)
+	}
+	return nil
+}
+
 func materializeWindowsLauncher(moduleRoot, destination, pinnedGo string) error {
 	if runtime.GOOS == "windows" {
 		if err := buildGoBinary(
@@ -564,26 +597,48 @@ func materializeWindowsLauncher(moduleRoot, destination, pinnedGo string) error 
 		); err != nil {
 			return err
 		}
-		return os.Chmod(destination, windowsLauncherMode)
+		return os.Chmod(destination, windowsArtifactMode)
 	}
 	return copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo)
 }
 
 func copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo string) error {
-	source := filepath.Join(moduleRoot, "bin", "re-discipline-knowledge.exe")
+	return copyCanonicalWindowsBinary(
+		moduleRoot,
+		"re-discipline-knowledge.exe",
+		destination,
+		windowsLauncherTarget,
+		pinnedGo,
+		"",
+	)
+}
+
+func copyCanonicalWindowsBinary(
+	moduleRoot string,
+	relative string,
+	destination string,
+	target targetSpec,
+	pinnedGo string,
+	expectedBuildID string,
+) error {
+	source, err := packagePath(filepath.Join(moduleRoot, "bin"), relative)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
-	if err := copyRegularFile(source, destination, windowsLauncherMode); err != nil {
+	if err := copyRegularFile(source, destination, windowsArtifactMode); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return errors.New(
-				"canonical Windows launcher is missing; generate knowledge/bin on Windows first",
+			return fmt.Errorf(
+				"canonical Windows artifact %s is missing; generate knowledge/bin on Windows first",
+				relative,
 			)
 		}
-		return fmt.Errorf("copy canonical Windows launcher: %w", err)
+		return fmt.Errorf("copy canonical Windows artifact %s: %w", relative, err)
 	}
-	if err := verifyBuiltBinary(destination, windowsLauncherTarget, pinnedGo, ""); err != nil {
-		return fmt.Errorf("verify canonical Windows launcher: %w", err)
+	if err := verifyBuiltBinary(destination, target, pinnedGo, expectedBuildID); err != nil {
+		return fmt.Errorf("verify canonical Windows artifact %s: %w", relative, err)
 	}
 	return nil
 }
@@ -1207,11 +1262,15 @@ func readAndValidateManifest(
 		expectedPath := filepath.ToSlash(filepath.Join(
 			target.GOOS+"-"+target.GOARCH, targetBinaryName(target.GOOS),
 		))
+		expectedMode := "0755"
+		if target.GOOS == "windows" {
+			expectedMode = "0644"
+		}
 		if artifact.Kind != "runtime" ||
 			artifact.GOOS != target.GOOS ||
 			artifact.GOARCH != target.GOARCH ||
 			artifact.Path != expectedPath ||
-			artifact.Mode != "0755" {
+			artifact.Mode != expectedMode {
 			return packageManifest{}, nil, fmt.Errorf("manifest target %d is invalid", index)
 		}
 	}

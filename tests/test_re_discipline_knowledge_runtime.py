@@ -296,12 +296,19 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                     "path": relative,
                     "sha256": row["sha256"],
                     "size": row["size"],
-                    "mode": "0755",
+                    "mode": "0644" if goos == "windows" else "0755",
                 },
             )
             artifact = BIN_ROOT / relative
             self.assertTrue(artifact.is_file(), f"missing packaged artifact {relative}")
             self.assert_binary_identity(artifact, goos, goarch)
+            if os.name != "nt":
+                expected_mode = 0o644 if goos == "windows" else 0o755
+                self.assertEqual(
+                    stat.S_IMODE(artifact.stat().st_mode),
+                    expected_mode,
+                    f"unstable POSIX mode for {relative}",
+                )
             digest = sha256(artifact)
             artifact_hashes.add(digest)
             self.assertEqual(row["size"], artifact.stat().st_size)
