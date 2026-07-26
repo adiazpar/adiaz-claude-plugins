@@ -197,15 +197,20 @@ type RuntimeContractIdentity struct {
 }
 
 func RuntimeContract(runtime RuntimeIdentity) RuntimeContractIdentity {
+	sqliteSourceContract := "sha256:" + SHA256String(strings.Join([]string{
+		runtime.SQLiteDriver,
+		runtime.SQLiteVersion,
+		"source-contract-" + RuntimeVersion,
+	}, "\n"))
 	return RuntimeContractIdentity{
 		Implementation: runtime.Implementation, Version: runtime.Version,
 		GoVersion: runtime.GoVersion,
-		// This is the logical source contract, not the executable packaging
-		// identity. RuntimeIdentity separately reports the actual linked build
-		// ID and executable checksum.
+		// This is the portable source contract, not host-specific packaging or
+		// SQLite compile-option identity. RuntimeIdentity separately reports
+		// the actual linked build, executable, and SQLite build checksums.
 		CompiledBuildID: "source-contract-" + RuntimeVersion,
 		SQLiteDriver:    runtime.SQLiteDriver, SQLiteVersion: runtime.SQLiteVersion,
-		SQLiteBuild: runtime.SQLiteBuild, NumericalBackend: runtime.NumericalBackend,
+		SQLiteBuild: sqliteSourceContract, NumericalBackend: runtime.NumericalBackend,
 		TieBreaker: runtime.TieBreaker,
 	}
 }

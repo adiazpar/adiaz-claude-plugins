@@ -764,6 +764,10 @@ class ExternalDispatcherTests(unittest.TestCase):
         dispatch_id: str | None = None,
         managed_v06: bool = False,
     ) -> tuple[Path, Path]:
+        for provider_config in config.get("providers", {}).values():
+            if provider_config.get("command") == "powershell.exe":
+                provider_config["command"] = self.powershell
+
         templates = PLUGIN / "templates" / "project"
         agents = root / ".re-discipline" / "agents"
         agents.mkdir(parents=True)
@@ -924,7 +928,7 @@ class ExternalDispatcherTests(unittest.TestCase):
             dispatcher, _ = self.make_dispatch_project(root, config)
             result = self.dispatch(dispatcher)
             expected = str(
-                root / ".codex" / "external-drafter-contract.md"
+                (root / ".codex" / "external-drafter-contract.md").resolve()
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -994,6 +998,7 @@ class ExternalDispatcherTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            expected_context_pack = str(context_pack.resolve())
             verifier = root / "verify-pack-fixture.ps1"
             verifier.write_text(
                 "if ($args.Count -ne 5 -or $args[0] -ne 'verify-pack' "
@@ -1075,7 +1080,7 @@ class ExternalDispatcherTests(unittest.TestCase):
             verified.stdout,
         )
         self.assertIn("blocked report", verified.stdout)
-        self.assertIn(str(context_pack), verified.stdout)
+        self.assertIn(expected_context_pack, verified.stdout)
         self.assertNotEqual(tampered.returncode, 0)
         self.assertIn("Context pack verification failed", tampered.stderr)
 
@@ -2467,6 +2472,8 @@ class HookTests(unittest.TestCase):
             self.assertIn(f"D\t{path}", cached_after)
 
     def test_windows_overrides_execute_the_packaged_commands(self) -> None:
+        if os.name != "nt":
+            self.skipTest("Windows is required for Windows hook tests")
         if not self.powershell:
             self.skipTest("PowerShell is required for Windows hook tests")
         event_expectations = {

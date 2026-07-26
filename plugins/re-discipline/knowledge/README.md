@@ -221,6 +221,12 @@ coverage becomes a release gate at each case's declared budget and above;
 lower-budget degradation remains measured rather than being mislabeled as a
 policy failure.
 
+Benchmark digests bind the portable source runtime contract: runtime and Go
+versions, SQLite driver and version, a source-contract checksum, numerical
+backend, and tie breaker. Platform-specific executable and SQLite
+compile-option checksums remain visible in runtime/generation provenance but
+do not make the same evidence receipt differ across operating systems.
+
 This small packaged seed suite establishes deterministic conformance and
 fixture non-inferiority. It does not establish general retrieval quality,
 large-corpus latency, or optimal project-specific weights; projects grow that
