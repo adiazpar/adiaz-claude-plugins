@@ -599,7 +599,7 @@ function Set-TomlBooleanField {
     )
 
     $newline = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $lines = @($Text -split "\r?\n", -1)
+    $lines = @([regex]::Split($Text, "\r?\n"))
     $sectionIndexes = New-Object System.Collections.Generic.List[int]
     for ($index = 0; $index -lt $lines.Count; $index++) {
         if ($lines[$index] -match "^\s*\[([^\]]+)\]\s*(?:#.*)?$") {

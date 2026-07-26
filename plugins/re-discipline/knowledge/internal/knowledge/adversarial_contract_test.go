@@ -1347,6 +1347,37 @@ func assertAdversarialRuntimeIdentity(t *testing.T, identity RuntimeIdentity) {
 	}
 }
 
+func TestAdversarialRuntimeContractExcludesHostPackagingIdentity(t *testing.T) {
+	first := RuntimeIdentity{
+		Implementation:   "re-discipline-knowledge-go",
+		Version:          RuntimeVersion,
+		GoVersion:        "go1.26.5",
+		CompiledBuildID:  "windows-build",
+		ExecutableSHA256: "sha256:" + strings.Repeat("a", 64),
+		SQLiteDriver:     "modernc.org/sqlite@v1.54.0",
+		SQLiteVersion:    "3.53.3",
+		SQLiteBuild:      "sha256:" + strings.Repeat("b", 64),
+		NumericalBackend: "fixed-int64-v1",
+		TieBreaker:       "score-desc,path-asc,start-line-asc,chunk-id-asc",
+	}
+	second := first
+	second.CompiledBuildID = "linux-build"
+	second.ExecutableSHA256 = "sha256:" + strings.Repeat("c", 64)
+	second.SQLiteBuild = "sha256:" + strings.Repeat("d", 64)
+
+	firstContract := RuntimeContract(first)
+	secondContract := RuntimeContract(second)
+	if firstContract != secondContract {
+		t.Fatalf("portable runtime contract varies by host packaging: %#v != %#v",
+			firstContract, secondContract)
+	}
+	if firstContract.SQLiteBuild == first.SQLiteBuild ||
+		!sha256IdentityRE.MatchString(firstContract.SQLiteBuild) {
+		t.Fatalf("runtime contract retained host SQLite build identity: %#v",
+			firstContract)
+	}
+}
+
 func TestAdversarialContextGenerationCompactsBinaryProvenance(t *testing.T) {
 	runtimeIdentity := RuntimeIdentity{
 		Implementation:   "re-discipline-knowledge-go",
