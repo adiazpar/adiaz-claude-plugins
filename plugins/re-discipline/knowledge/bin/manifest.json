@@ -34,7 +34,7 @@
       "path": "windows-amd64/re-discipline-knowledge.exe",
       "sha256": "sha256:c071e330febf7e04d71c17a0630b66299cb9afce2efb0627c163bfbe17969632",
       "size": 8115200,
-      "mode": "0755"
+      "mode": "0644"
     },
     {
       "kind": "runtime",
@@ -43,7 +43,7 @@
       "path": "windows-arm64/re-discipline-knowledge.exe",
       "sha256": "sha256:b82f5ac8d40fa9e1759943ef6996469cfcb03fdeafa00050f9043495913cd40d",
       "size": 7676928,
-      "mode": "0755"
+      "mode": "0644"
     },
     {
       "kind": "runtime",

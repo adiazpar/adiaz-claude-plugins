@@ -268,7 +268,7 @@ go run ./cmd/re-discipline-knowledge-packager --output bin
 go run ./cmd/re-discipline-knowledge-packager --output bin --verify
 ```
 
-The first command builds all six targets into a staging directory and
+The first command materializes all six targets into a staging directory and
 atomically replaces `bin/` only after the whole package succeeds. It emits:
 
 - `bin/manifest.json`, with ordered targets, runtime/build identity, sizes,
@@ -278,15 +278,16 @@ atomically replaces `bin/` only after the whole package succeeds. It emits:
   manifest, and all shared runtime assets without copying them;
 - `bin/THIRD_PARTY_NOTICES.md`.
 
-The Windows architecture dispatcher is canonicalized by a Windows-hosted
-build. Windows packagers rebuild it from source; Linux and macOS packagers
-copy the checked-in PE byte-for-byte and verify its target and pinned Go
-toolchain. The dispatcher uses mode `0644` on POSIX hosts because it is a
-Windows-only PE; this also preserves its checked-in Git mode. The Windows CI
-leg therefore enforces source freshness while every host can require one
-identical release package without accepting host-dependent PE output. A
-non-Windows source-only checkout must first generate `knowledge/bin` on
-Windows.
+The Windows runtime payloads and architecture dispatcher are canonicalized by
+a Windows-hosted build. Windows packagers rebuild all three PE files from
+source; Linux and macOS packagers copy the checked-in files byte-for-byte and
+verify each target, pinned Go toolchain, and runtime build identity. Windows
+artifacts use mode `0644` on POSIX hosts because they are not native
+executables there; this also preserves their checked-in Git modes. The
+Windows CI leg therefore enforces source freshness while every host can
+require one identical release package without accepting host-dependent PE
+output. A non-Windows source-only checkout must first generate
+`knowledge/bin` on Windows.
 
 The checksum rows for shared runtime assets use parent-relative paths such as
 `../profiles/balanced-v1.json` because `SHA256SUMS` itself lives in `bin/`.

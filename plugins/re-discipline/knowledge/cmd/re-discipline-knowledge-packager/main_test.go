@@ -303,12 +303,67 @@ func TestCanonicalWindowsLauncherCopyIsByteExact(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != windowsLauncherMode {
+		if info.Mode().Perm() != windowsArtifactMode {
 			t.Fatalf(
 				"canonical Windows launcher mode = %04o, want %04o",
 				info.Mode().Perm(),
-				windowsLauncherMode,
+				windowsArtifactMode,
 			)
+		}
+	}
+}
+
+func TestCanonicalWindowsRuntimeCopiesAreByteExact(t *testing.T) {
+	moduleRoot, err := findModuleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinnedGo, err := readPinnedGoVersion(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildID, err := computeRuntimeBuildID(moduleRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range supportedTargets {
+		if target.GOOS != "windows" {
+			continue
+		}
+		relative := filepath.ToSlash(filepath.Join(
+			target.GOOS+"-"+target.GOARCH,
+			targetBinaryName(target.GOOS),
+		))
+		destination := filepath.Join(t.TempDir(), target.GOARCH, targetBinaryName(target.GOOS))
+		if err := copyCanonicalWindowsBinary(
+			moduleRoot, relative, destination, target, pinnedGo, buildID,
+		); err != nil {
+			t.Fatal(err)
+		}
+		sourceBody, err := os.ReadFile(filepath.Join(moduleRoot, "bin", filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		destinationBody, err := os.ReadFile(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(destinationBody, sourceBody) {
+			t.Fatalf("canonical Windows %s runtime copy was not byte-exact", target.GOARCH)
+		}
+		if runtime.GOOS != "windows" {
+			info, err := os.Stat(destination)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != windowsArtifactMode {
+				t.Fatalf(
+					"canonical Windows %s runtime mode = %04o, want %04o",
+					target.GOARCH,
+					info.Mode().Perm(),
+					windowsArtifactMode,
+				)
+			}
 		}
 	}
 }
