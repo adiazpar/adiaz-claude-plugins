@@ -281,10 +281,12 @@ atomically replaces `bin/` only after the whole package succeeds. It emits:
 The Windows architecture dispatcher is canonicalized by a Windows-hosted
 build. Windows packagers rebuild it from source; Linux and macOS packagers
 copy the checked-in PE byte-for-byte and verify its target and pinned Go
-toolchain. The Windows CI leg therefore enforces source freshness while every
-host can require one identical release package without accepting
-host-dependent PE output. A non-Windows source-only checkout must first
-generate `knowledge/bin` on Windows.
+toolchain. The dispatcher uses mode `0644` on POSIX hosts because it is a
+Windows-only PE; this also preserves its checked-in Git mode. The Windows CI
+leg therefore enforces source freshness while every host can require one
+identical release package without accepting host-dependent PE output. A
+non-Windows source-only checkout must first generate `knowledge/bin` on
+Windows.
 
 The checksum rows for shared runtime assets use parent-relative paths such as
 `../profiles/balanced-v1.json` because `SHA256SUMS` itself lives in `bin/`.

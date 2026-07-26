@@ -26,6 +26,7 @@ const (
 	runtimeName          = "re-discipline-knowledge"
 	runtimeVersion       = "0.6.0"
 	runtimeBuildIDPath   = "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
+	windowsLauncherMode  = 0o644
 )
 
 type targetSpec struct {
@@ -454,7 +455,7 @@ func buildPackageTree(moduleRoot, outputRoot, pinnedGo, buildID string) (package
 		return packageManifest{}, err
 	}
 	windowsArtifact, err := describeFile(
-		outputRoot, windowsRelative, "windows-architecture-dispatch", "windows", "amd64", "0755",
+		outputRoot, windowsRelative, "windows-architecture-dispatch", "windows", "amd64", "0644",
 	)
 	if err != nil {
 		return packageManifest{}, err
@@ -553,14 +554,17 @@ func buildGoBinary(
 
 func materializeWindowsLauncher(moduleRoot, destination, pinnedGo string) error {
 	if runtime.GOOS == "windows" {
-		return buildGoBinary(
+		if err := buildGoBinary(
 			moduleRoot,
 			destination,
 			windowsLauncherTarget,
 			"./cmd/re-discipline-knowledge-launcher",
 			pinnedGo,
 			"",
-		)
+		); err != nil {
+			return err
+		}
+		return os.Chmod(destination, windowsLauncherMode)
 	}
 	return copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo)
 }
@@ -570,7 +574,7 @@ func copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo string) erro
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
-	if err := copyRegularFile(source, destination, 0o755); err != nil {
+	if err := copyRegularFile(source, destination, windowsLauncherMode); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return errors.New(
 				"canonical Windows launcher is missing; generate knowledge/bin on Windows first",
@@ -1218,7 +1222,7 @@ func readAndValidateManifest(
 		manifest.Launchers[1].Path != "re-discipline-knowledge.exe" ||
 		manifest.Launchers[1].GOOS != "windows" ||
 		manifest.Launchers[1].GOARCH != "amd64" ||
-		manifest.Launchers[1].Mode != "0755" {
+		manifest.Launchers[1].Mode != "0644" {
 		return packageManifest{}, nil, errors.New("manifest launcher contract mismatch")
 	}
 	if manifest.Notices.Kind != "third-party-notices" ||

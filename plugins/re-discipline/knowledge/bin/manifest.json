@@ -97,7 +97,7 @@
       "path": "re-discipline-knowledge.exe",
       "sha256": "sha256:99710033f966fcdd2ac62b453547cf90fcad4d8cb1854a7c1b2c755108f57f69",
       "size": 2071552,
-      "mode": "0755"
+      "mode": "0644"
     }
   ],
   "sharedAssets": [

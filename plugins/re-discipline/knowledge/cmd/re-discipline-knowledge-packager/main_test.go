@@ -298,6 +298,19 @@ func TestCanonicalWindowsLauncherCopyIsByteExact(t *testing.T) {
 	if !bytes.Equal(destinationBody, sourceBody) {
 		t.Fatal("canonical Windows launcher copy was not byte-exact")
 	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != windowsLauncherMode {
+			t.Fatalf(
+				"canonical Windows launcher mode = %04o, want %04o",
+				info.Mode().Perm(),
+				windowsLauncherMode,
+			)
+		}
+	}
 }
 
 func TestCanonicalWindowsLauncherCopyRequiresExistingArtifact(t *testing.T) {
