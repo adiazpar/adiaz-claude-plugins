@@ -754,6 +754,10 @@ class ExternalDispatcherTests(unittest.TestCase):
         if not self.powershell:
             self.skipTest("PowerShell is required for dispatcher tests")
 
+    @staticmethod
+    def expected_dispatch_path(path: Path) -> str:
+        return str(path.resolve()) if os.name == "nt" else str(path)
+
     def make_dispatch_project(
         self,
         root: Path,
@@ -927,8 +931,8 @@ class ExternalDispatcherTests(unittest.TestCase):
             root = Path(directory)
             dispatcher, _ = self.make_dispatch_project(root, config)
             result = self.dispatch(dispatcher)
-            expected = str(
-                (root / ".codex" / "external-drafter-contract.md").resolve()
+            expected = self.expected_dispatch_path(
+                root / ".codex" / "external-drafter-contract.md"
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -998,7 +1002,7 @@ class ExternalDispatcherTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            expected_context_pack = str(context_pack.resolve())
+            expected_context_pack = self.expected_dispatch_path(context_pack)
             verifier = root / "verify-pack-fixture.ps1"
             verifier.write_text(
                 "if ($args.Count -ne 5 -or $args[0] -ne 'verify-pack' "
