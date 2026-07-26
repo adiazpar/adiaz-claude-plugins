@@ -31,10 +31,13 @@ ends with DIRECT or INFERRED labels. Update the artifact disposition manifest.
 Survey tracked and untracked files under the campaign. For each one-off script
 or log:
 
-- delete it only when its result and reproduction recipe are already captured;
+- delete it only when its necessary meaning and durable verification are
+  already captured;
 - keep it and name it in Current state when the next session still needs it;
-- promote genuinely reusable tooling to the project's durable tooling area;
-- preserve irreproducible evidence for closure disposition.
+- move genuinely reusable tooling into maintained project tooling only when it
+  has an active consumer or owner;
+- keep ambiguous or campaign-needed evidence inside the active campaign until
+  closure disposition.
 
 Do not delete ambiguous or user-owned artifacts. Do not touch another active
 campaign.

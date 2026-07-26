@@ -2,22 +2,22 @@
 name: close-campaign
 description: >-
   Close an irrefutably solved re-discipline campaign when asked to distill its
-  findings, write its chronicle, promote DIRECT truth, archive irreproducible
-  evidence, and remove scratch. Keep the campaign open when the closure bar is
-  not met.
+  findings, write its chronicle, promote DIRECT truth with durable
+  verification, classify campaign artifacts, and remove scratch. Keep the
+  campaign open when the closure bar is not met.
 ---
 
 # Close A Campaign
 
-Closure converts provisional work into durable truth, preserved evidence,
-maintained deliverables, and a retrospective chronicle. Scratch is removed only
-after each useful artifact has a durable disposition.
+Closure converts provisional work into durable truth, maintained deliverables,
+and a retrospective chronicle. Scratch is removed only after every artifact is
+classified as Maintain, Distill, or Delete.
 
 ## Step 1: Check The Closure Bar
 
 Read the campaign objective and definition of solved. Close only when the
 question is irrefutably resolved and a future manager could reopen the topic
-from the resulting truth, archive, and chronicle. Otherwise run
+from the resulting truth, maintained project assets, and chronicle. Otherwise run
 `checkpoint-campaign` and leave the campaign open.
 
 For a non-trivial campaign, use `delegate` to request a bounded fresh-eyes
@@ -26,20 +26,22 @@ model. The manager still ratifies the proposal.
 
 ## Step 2: Ratify Findings
 
-Classify every candidate through the Wall. Present the proposed promotion,
+Classify every candidate through the Wall. Require both DIRECT establishment
+and a durable verifier before promotion. Present the proposed promotion,
 augmentation, overturn, hold, and dead-end list to the user. Invoke
-`promote-truth` or `overturn` only for approved DIRECT findings.
+`promote-truth` or `overturn` only for approved findings that pass both gates.
 
 ## Step 3: Disposition Artifacts
 
 Complete the campaign manifest, then handle each artifact:
 
-- **ground-truth:** preserve under an appropriate `archive/` location;
-- **capture:** archive only when a durable truth cites it, otherwise remove it;
-- **reproducible:** preserve the recipe or permanent test, then remove output;
-- **expensive-reproducible:** preserve both recipe and useful output;
-- **keeper-tool/test/code:** generalize and move into the maintained project
-  location named by the canonical profile.
+- **Maintain:** move it into supported source, tooling, tests, fixtures,
+  corpora, or reference material only when an active consumer or owner
+  justifies ongoing maintenance.
+- **Distill:** record its necessary meaning in truth, history, or backlog, then
+  remove the raw material.
+- **Delete:** remove raw output, screenshots, superseded reports, and spent
+  scripts after their relevant meaning is recorded.
 
 Do not delete an unclassified artifact. Preserve licenses and source
 restrictions when moving material into the repository.
@@ -61,7 +63,8 @@ retrospective voice. Include:
 - dead ends with DIRECT or INFERRED labels;
 - old claims overturned by this campaign;
 - truth files produced;
-- exact reproduction recipes and archive pointers;
+- exact reproduction recipes and maintained deliverables;
+- classes of raw material discarded after distillation;
 - deferred leads and backlog links;
 - provenance and scratch sources folded into the chronicle.
 
@@ -80,16 +83,18 @@ the target is exactly `<repo>/active/<slug>`, remains inside `<repo>/active/`,
 and is the campaign the user asked to close. Use one shell and literal paths
 throughout the operation.
 
-Remove the campaign only after the chronicle passes a cold-reopen read and all
-manifest entries have durable destinations. If there is any hesitation, stop
-and improve the chronicle or disposition first.
+Remove the campaign only after the chronicle passes a cold-reopen read, every
+truth has a durable verifier, and every manifest entry has a completed
+Maintain, Distill, or Delete disposition. If there is any hesitation, stop and
+improve the chronicle or disposition first.
 
 ## Step 7: Verify And Report
 
-Confirm truth links, index links, archive paths, recipes, and promoted code or
-tests. Confirm `active/<slug>/` is gone and no durable file points only to the
-deleted scratch. Report truth additions, overturns, chronicle, archived items,
-and maintained deliverables.
+Confirm truth links, index links, verification bases, recipes, and maintained
+source, tools, tests, fixtures, corpora, or references. Confirm
+`active/<slug>/` is gone and no durable file points only to the deleted
+scratch. Report truth additions, overturns, chronicle, maintained deliverables,
+distilled material, and deletions.
 
 Do not commit unless the user explicitly asks.
 

@@ -56,14 +56,20 @@ Inspect `AGENTS.md`, `.codex/`, `.claude/`, `.re-discipline/`, `.gitignore`,
 `docs/`, the repository tree, README files, dispatch scripts, and relevant git
 history before asking anything.
 
+Evaluate migration and recovery gates before Initialized.
+Legacy archive semantics always override Initialized. Apply this rule even when
+normalized topology already exists.
+
 - **Initialized:** the canonical profile, `.re-discipline/local-paths.md`,
   both current manager adapters, and normalized agent core exist; the neutral
   local-path file is ignored and untracked; and no legacy host profile or
-  host-local path file remains. Stop unless the user requested resync or repair.
-- **Migration:** legacy profiles, duplicated host laws, old agent paths, old
-  host-local path files, a missing neutral local-path signature or ignore rule,
-  or old re-discipline markers exist without the normalized topology. Follow
-  `references/dropin.md` and preserve meaning.
+  host-local path file remains; and no unresolved legacy archive semantics
+  remain. Stop unless the user requested resync or repair.
+- **Migration:** legacy archive semantics, legacy profiles, duplicated host
+  laws, old agent paths, old host-local path files, or a missing neutral
+  local-path signature or ignore rule exists. Old re-discipline markers without
+  normalized topology also qualify. Follow `references/dropin.md` and preserve
+  meaning.
 - **Recovery:** re-discipline law markers or routing exist, but every usable
   identity profile is missing. Follow `references/recovery.md`.
 - **Drop-in:** existing project guidance or populated docs exist but no prior
@@ -72,6 +78,28 @@ history before asking anything.
   `references/greenfield.md`.
 
 State the detected mode and evidence.
+
+## Legacy Archive Semantic Migration
+
+Treat ownership as semantic, not lexical. The existence of a directory named
+`archive` alone does not prove re-discipline ownership; it may contain
+project-owned release bundles or domain data. Classify it as a legacy
+re-discipline archive only when managed shared laws, campaign templates, truth
+files, or chronicles describe that path as preserved evidence.
+
+When legacy archive semantics are present:
+
+1. Inventory every reference and active consumer before writing.
+2. Report that semantic migration is required.
+3. Do not delete, move, or rewrite any file automatically.
+4. Preserve the current shared-law block until the user approves migration.
+5. After approval, classify every affected artifact as Maintain, Distill, or
+   Delete and verify each destination or recorded rationale.
+
+Create no durable root-level replacement evidence directory. Temporary
+campaign evidence under `active/<slug>/evidence/` remains valid until
+checkpoint or closure. A project-owned directory named `archive` remains
+project-owned and unchanged.
 
 ## Step 2: Preserve One Source Of Shared Policy And Project Facts
 
@@ -175,7 +203,12 @@ After any write:
    from host adapters.
 11. Confirm maintained code and current documentation do not name
     `.claude/local-paths.md` or `.codex/local-paths.md`.
-12. Report canonical profile line and byte counts, remaining placeholders,
+12. Confirm greenfield and fully migrated topology does not create or require a
+    durable root-level replacement evidence directory. Temporary campaign
+    evidence under `active/<slug>/evidence/` remains valid. Report every
+    unresolved legacy archive dependency instead of declaring migration
+    complete.
+13. Report canonical profile line and byte counts, remaining placeholders,
     and intentional migration or recovery references.
 
 Do not commit unless the user explicitly asks.
@@ -186,7 +219,9 @@ When asked to resync, update marked shared-law, router, and manager-adapter
 blocks from current templates. Replace the three normalized agent core files
 only after preserving configured provider entries and project-owned additions.
 Leave canonical project facts, provider records, candidates, and project-owned
-host notes untouched. Never recreate legacy paths.
+host notes untouched. Never recreate legacy paths. When unresolved legacy
+archive dependencies remain, preserve the current shared-law block, report the
+semantic migration as incomplete, and do not claim a successful resync.
 
 ## References
 

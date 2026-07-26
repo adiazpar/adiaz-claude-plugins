@@ -26,7 +26,21 @@ observed instances.
 If any load-bearing step remains INFERRED, stop. Record the observation needed
 to settle it in `CAMPAIGN.md`.
 
-## Step 2: Check Existing Knowledge
+## Step 2: Require A Durable Verifier
+
+Pass the second promotion gate only when at least one durable verifier lets a
+future manager recheck the claim:
+
+- a maintained source containing the exact value;
+- a permanent test with its maintained fixture;
+- a runnable recipe against the named subject revision.
+
+A chronicle supplies provenance and is never sole empirical support. When
+DIRECT evidence established the claim during the campaign but no durable
+verifier survives, record a scoped historical observation for the chronicle
+and do not promote it to current truth.
+
+## Step 3: Check Existing Knowledge
 
 Search truth and history for exact values, names, and key terms.
 
@@ -35,38 +49,36 @@ Search truth and history for exact values, names, and key terms.
 - An overlap is an augmentation, not a duplicate file.
 - A dependency requires inverse links and a recheck of affected truth.
 
-## Step 3: Choose The Truth Kind
+## Step 4: Choose The Truth Kind
 
 - **atomic:** reproducible bedrock such as an exact behavior, layout, value, or
   protocol field;
 - **synthesis:** an interpretation across atomic facts, with explicit scope and
   confidence.
 
-## Step 4: Write Or Augment
+## Step 5: Write Or Augment
 
 Resolve the plugin root from this skill's path. For a new claim, render
 `<plugin-root>/templates/truth-claim.md` to
 `docs/truth/<subsystem>/<claim>.md`. Fill claim, kind, confidence, scope,
-validity, re-verification trigger, dependencies, and evidence.
+validity, re-verification trigger, dependencies, and verification.
 
-Evidence must survive campaign deletion:
+The durable verifier must survive campaign deletion. Record:
 
-- a runnable reproduction recipe;
-- a permanent test;
-- a preserved irreproducible artifact in `archive/`;
-- the campaign chronicle for derivation context.
+- the maintained source, permanent test and fixture, or runnable recipe;
+- the campaign chronicle as provenance and derivation context only.
 
 For an augmentation, edit the existing synthesis in place, update its scope and
 verification date, add the new evidence, and preserve dependency integrity.
 
-## Step 5: Update Index And Campaign
+## Step 6: Update Index And Campaign
 
 Add or revise the one-line entry in `docs/truth/INDEX.md`. Update
 `CAMPAIGN.md` to point to the promoted truth and remove any question it
 directly resolves.
 
 Re-open the finished truth file and verify every exact value against its cited
-artifact or recipe.
+maintained source, permanent test and fixture, or runnable recipe.
 
 Do not commit unless the user explicitly asks.
 

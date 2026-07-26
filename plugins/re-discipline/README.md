@@ -8,14 +8,19 @@ and Codex.
 
 Directory location encodes epistemic status:
 
-- `active/<slug>/` is provisional work.
-- `docs/truth/` contains claims admitted through the DIRECT-evidence Wall.
+- `active/<slug>/` is provisional work and temporary evidence.
+- `docs/truth/` contains current claims admitted through the DIRECT-evidence
+  Wall with durable verification.
 - `docs/history/chronicles/` is retrospective context, never current authority.
-- `archive/` preserves irreproducible evidence.
 - `docs/backlog/` contains deferred briefs.
+- Maintained source, tools, tests, fixtures, corpora, and reference material are
+  durable project assets only while they have an active consumer or owner.
 
 The lifecycle skills open, delegate, review, promote, overturn, checkpoint, and
-close campaigns. Drafters investigate; the direct manager ratifies.
+close campaigns. Drafters investigate; the direct manager ratifies. At
+closure, classify every campaign artifact as Maintain, Distill, or Delete:
+maintain useful project assets, distill necessary meaning into truth, history,
+or backlog, and delete the raw remainder.
 
 ## Generated Project Contracts
 
