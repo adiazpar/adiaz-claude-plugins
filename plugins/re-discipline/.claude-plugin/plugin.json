@@ -1,10 +1,11 @@
 {
   "name": "re-discipline",
-  "version": "0.5.0",
-  "description": "Evidence-based campaign and knowledge management with one canonical profile, thin manager adapters, and a normalized external-agent framework.",
+  "version": "0.6.0",
+  "description": "Evidence-based campaigns with one shared project memory, a local knowledge server, thin manager adapters, and governed retrieval.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
   },
-  "keywords": ["reverse-engineering", "research", "knowledge-management", "discipline", "workflow"]
+  "keywords": ["reverse-engineering", "research", "knowledge-management", "shared-memory", "retrieval", "workflow"],
+  "mcpServers": "./.mcp.json"
 }

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/knowledge-settings.schema.json",
+  "title": "Re-Discipline knowledge settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sources", "models", "telemetry", "budgets"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truth", "history", "backlog", "activeCampaigns", "sharedMemory"],
+      "properties": {
+        "truth": {"type": "boolean"},
+        "history": {"type": "boolean"},
+        "backlog": {"type": "boolean"},
+        "activeCampaigns": {"type": "boolean"},
+        "sharedMemory": {"type": "boolean"},
+        "additional": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "pattern", "tier"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "pattern": {"type": "string", "minLength": 1},
+              "tier": {"const": "asset"}
+            }
+          }
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution"],
+      "properties": {
+        "execution": {"const": "local"}
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["off", "metrics-only"]}
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["searchTokens", "managerContextTokens", "drafterContextTokens", "maxPassages", "maxBytes"],
+      "properties": {
+        "searchTokens": {"type": "integer", "minimum": 128, "maximum": 4096},
+        "managerContextTokens": {"type": "integer", "minimum": 512, "maximum": 8192},
+        "drafterContextTokens": {"type": "integer", "minimum": 512, "maximum": 4096},
+        "maxPassages": {"type": "integer", "minimum": 1, "maximum": 50},
+        "maxBytes": {"type": "integer", "minimum": 4096, "maximum": 262144}
+      }
+    }
+  }
+}

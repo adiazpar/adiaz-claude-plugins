@@ -46,6 +46,10 @@ Complete the campaign manifest, then handle each artifact:
 Do not delete an unclassified artifact. Preserve licenses and source
 restrictions when moving material into the repository.
 
+Treat drafter context packs as campaign scratch after their reports and cited
+sources are reviewed. Keep only durable source citations and ratified
+evaluation cases; never promote a generated context pack into truth or memory.
+
 Treat each `subagents/` child name as an opaque workspace key while recording
 provenance. New chronological IDs and legacy task-only or provider-prefixed
 names are equally valid inputs. Do not normalize or rename either form before
@@ -71,10 +75,17 @@ retrospective voice. Include:
 ## Step 5: Update Masterfiles
 
 Add the chronicle to `docs/history/INDEX.md`, remove the campaign from
-`docs/INDEX.md`, and verify `docs/truth/INDEX.md`. Update checked-in project
-memory pointers only when the active project contract requires them and the
-user approved the memory change. Never edit host-native memory stores as an
-implicit closure side effect.
+`docs/INDEX.md`, and verify `docs/truth/INDEX.md`.
+
+Distill any durable operational recall only into a pending file under
+`.re-discipline/memory/proposals/`. Invoke `review-memory` only after
+presenting the exact proposal and obtaining the user's explicit accept or
+reject decision. Never edit accepted memory topics or host-native memory stores
+as an implicit closure side effect.
+
+Add a retrieval failure to `.re-discipline/knowledge/evals/` only after the
+manager or user ratifies its query, expected evidence, hard negatives, tier
+boundary, and token budget.
 
 ## Step 6: Remove Scratch Safely
 
@@ -87,6 +98,10 @@ Remove the campaign only after the chronicle passes a cold-reopen read, every
 truth has a durable verifier, and every manifest entry has a completed
 Maintain, Distill, or Delete disposition. If there is any hesitation, stop and
 improve the chronicle or disposition first.
+
+Before removal, resolve every campaign-owned pending memory proposal or replace
+its scratch-only citation with a durable source. Do not leave accepted recall
+or an evaluation case pointing only to the campaign being deleted.
 
 ## Step 7: Verify And Report
 
@@ -102,3 +117,5 @@ Do not commit unless the user explicitly asks.
 
 - Chronicle template: `<plugin-root>/templates/chronicle.md`.
 - Gates: `review-subagent`, `promote-truth`, and `overturn`.
+- Knowledge governance: `<plugin-root>/references/knowledge-governance.md`.
+- Shared-memory decisions: `review-memory`.

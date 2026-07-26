@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/model-manifest.schema.json",
+  "title": "Re-Discipline local model manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runtime", "models", "externalModelPolicy"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementation", "version", "sqliteDriver", "numericalBackend", "tieBreaker"],
+      "properties": {
+        "implementation": {"const": "re-discipline-knowledge-go"},
+        "version": {"type": "string"},
+        "sqliteDriver": {"type": "string"},
+        "numericalBackend": {"const": "fixed-int64-v1"},
+        "tieBreaker": {"type": "string"}
+      }
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "revision", "implementation", "specFile", "specSha256", "license", "networkRequired"],
+        "properties": {
+          "id": {"type": "string"},
+          "role": {"enum": ["embedding", "reranker"]},
+          "revision": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+          },
+          "implementation": {"enum": ["builtin", "bundled-local", "onnx-local"]},
+          "specFile": {"type": "string", "pattern": "^models/specs/[a-z0-9-]+\\.json$"},
+          "specSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "artifactFile": {"type": "string", "pattern": "^models/artifacts/[a-z0-9-]+\\.bin$"},
+          "artifactSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "license": {"type": "string"},
+          "dimensions": {"type": "integer", "minimum": 0, "maximum": 4096},
+          "normalization": {"type": "string"},
+          "description": {"type": "string"},
+          "networkRequired": {"const": false}
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["implementation"],
+              "properties": {
+                "implementation": {"const": "builtin"}
+              }
+            },
+            "then": {
+              "properties": {
+                "license": {"const": "MIT"}
+              }
+            }
+          }
+        ]
+      }
+    },
+    "externalModelPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["networkDownloads", "requireManifestEntry", "requireArtifactSha256", "requireLocalPathGrant"],
+      "properties": {
+        "networkDownloads": {"const": false},
+        "requireManifestEntry": {"const": true},
+        "requireArtifactSha256": {"const": true},
+        "requireLocalPathGrant": {"const": true}
+      }
+    }
+  }
+}

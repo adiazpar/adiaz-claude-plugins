@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.5.0")
+        self.assertEqual(manifest["version"], "0.6.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -44,15 +44,15 @@ class PackagingTests(unittest.TestCase):
         claude = json.loads(read(PLUGIN / ".claude-plugin" / "plugin.json"))
         codex = json.loads(read(PLUGIN / ".codex-plugin" / "plugin.json"))
 
-        self.assertEqual(claude["version"], "0.5.0")
-        self.assertEqual(codex["version"], "0.5.0")
+        self.assertEqual(claude["version"], "0.6.0")
+        self.assertEqual(codex["version"], "0.6.0")
         self.assertEqual(claude["version"], codex["version"])
 
 
 class SkillMetadataTests(unittest.TestCase):
     def test_every_skill_has_portable_frontmatter(self) -> None:
         skill_paths = sorted((PLUGIN / "skills").glob("*/SKILL.md"))
-        self.assertEqual(len(skill_paths), 11)
+        self.assertEqual(len(skill_paths), 15)
 
         for skill_path in skill_paths:
             with self.subTest(skill=skill_path.parent.name):
@@ -398,6 +398,14 @@ class ProjectTemplateTests(unittest.TestCase):
             "local-paths.md",
             "project-profile.md",
             "recruiting-AGENTS-override.md",
+            "config.json",
+            "knowledge.jsonc",
+            "settings-README.md",
+            "retrieval-profile.json",
+            "memory-INDEX.md",
+            "knowledge-evals-README.md",
+            "claude-settings.json",
+            "codex-config.toml",
         }
 
         self.assertTrue(expected.issubset({path.name for path in self.templates.iterdir()}))
@@ -407,6 +415,88 @@ class ProjectTemplateTests(unittest.TestCase):
             [path.name for path in self.templates.glob("*project-profile.md")],
             ["project-profile.md"],
         )
+
+    def test_new_projects_have_shared_only_knowledge_defaults(self) -> None:
+        config = json.loads(read(self.templates / "config.json"))
+        claude = json.loads(read(self.templates / "claude-settings.json"))
+        codex = read(self.templates / "codex-config.toml")
+        tree = read(self.templates / "tree.txt")
+
+        self.assertEqual(config["schemaVersion"], 1)
+        self.assertEqual(config["memory"], {
+            "mode": "shared-only",
+            "writePolicy": "proposal-only",
+        })
+        self.assertEqual(config["knowledge"]["profile"], "plugin:balanced-v1")
+        self.assertFalse(claude["autoMemoryEnabled"])
+        self.assertIn("[features]\nmemories = false", codex)
+        self.assertIn("generate_memories = false", codex)
+        self.assertIn("use_memories = false", codex)
+        for path in (
+            ".re-discipline/settings",
+            ".re-discipline/memory/proposals",
+            ".re-discipline/memory/topics",
+            ".re-discipline/knowledge/evals",
+            ".re-discipline/cache/knowledge/generations",
+            ".re-discipline/cache/knowledge/vectors",
+            ".re-discipline/cache/calibration",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(path, tree)
+
+    def test_project_retrieval_profile_tracks_packaged_baseline(self) -> None:
+        project_profile = json.loads(read(self.templates / "retrieval-profile.json"))
+        packaged_profile = json.loads(
+            read(PLUGIN / "knowledge" / "profiles" / "balanced-v1.json")
+        )
+
+        project_profile.pop("$schema", None)
+        packaged_profile.pop("$schema", None)
+        self.assertEqual(project_profile, packaged_profile)
+
+    def test_settings_readme_documents_every_control_plane_field(self) -> None:
+        body = read(self.templates / "settings-README.md")
+        required_fields = (
+            "memory.mode",
+            "memory.writePolicy",
+            "knowledge.enabled",
+            "knowledge.profile",
+            "sources.truth",
+            "sources.history",
+            "sources.backlog",
+            "sources.activeCampaigns",
+            "sources.sharedMemory",
+            "models.execution",
+            "telemetry.mode",
+            "budgets.searchTokens",
+            "budgets.managerContextTokens",
+            "budgets.drafterContextTokens",
+            "budgets.maxPassages",
+            "budgets.maxBytes",
+            "effectiveProfiles[].requires.embedding",
+            "effectiveProfiles[].requires.reranker",
+            "effectiveProfiles[].weights",
+            "effectiveProfiles[].benchmark.digest",
+        )
+        for field in required_fields:
+            with self.subTest(field=field):
+                self.assertIn(field, body)
+
+        for default in ("1024", "2048", "12", "32768", "shared-only"):
+            with self.subTest(default=default):
+                self.assertIn(default, body)
+        self.assertIn("never silently replaced", body)
+        self.assertIn("de-initialize", body.lower())
+
+    def test_managed_profile_declares_v060_recovery_contract(self) -> None:
+        canonical = read(self.templates / "project-profile.md")
+        skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md")
+
+        self.assertIn("re-discipline:shared-laws v0.6.0", canonical)
+        self.assertIn("Managed Configuration Recovery", skill)
+        self.assertIn("staged", skill.lower())
+        self.assertIn("de-initialization", skill.lower())
+        self.assertIn("machine-local native memory", skill.lower())
 
     def test_external_dispatch_defaults_to_native_and_sandboxed(self) -> None:
         config = json.loads(read(self.templates / "agents-config.json"))
@@ -657,6 +747,7 @@ class DocumentationTests(unittest.TestCase):
 class ExternalDispatcherTests(unittest.TestCase):
     DISPATCH_ID = "2026-07-25T21-45-03Z-demo-resource-scan"
     RECRUITING_ID = "2026-07-25T21-45-03Z-demo-static-fixture"
+    CONTEXT_PACK_DIGEST = "sha256:" + ("a" * 64)
 
     def setUp(self) -> None:
         self.powershell = shutil.which("powershell.exe") or shutil.which("powershell")
@@ -671,6 +762,7 @@ class ExternalDispatcherTests(unittest.TestCase):
         candidate: str | None = None,
         recruiting: bool = False,
         dispatch_id: str | None = None,
+        managed_v06: bool = False,
     ) -> tuple[Path, Path]:
         templates = PLUGIN / "templates" / "project"
         agents = root / ".re-discipline" / "agents"
@@ -679,7 +771,16 @@ class ExternalDispatcherTests(unittest.TestCase):
 
         profile = root / ".re-discipline" / "project-profile.md"
         profile.parent.mkdir(parents=True, exist_ok=True)
-        profile.write_text("---\nname: sample\n---\n", encoding="utf-8")
+        marker = (
+            "<!-- re-discipline:shared-laws v0.6.0 -->\n"
+            "<!-- re-discipline:shared-laws:end -->\n"
+            if managed_v06
+            else ""
+        )
+        profile.write_text(
+            f"---\nname: sample\n---\n{marker}",
+            encoding="utf-8",
+        )
 
         candidate_name = candidate or "demo"
         if candidate is None and not recruiting:
@@ -831,6 +932,152 @@ class ExternalDispatcherTests(unittest.TestCase):
             expected.replace("/", "\\"),
             result.stdout.replace("/", "\\"),
         )
+
+    def test_managed_dispatch_requires_an_immutable_context_pack(self) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher, _ = self.make_dispatch_project(
+                Path(directory),
+                config,
+                managed_v06=True,
+            )
+            result = self.dispatch(dispatcher)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires immutable context-pack.json", result.stderr)
+
+    def test_dispatcher_invokes_context_pack_verifier_and_rejects_tampering(
+        self,
+    ) -> None:
+        config = {
+            "backend": "native",
+            "providers": {
+                "demo": {
+                    "command": "powershell.exe",
+                    "args": ["{context_pack}", "{prompt}"],
+                    "sandbox_args": ["-NoProfile"],
+                    "bypass_args": ["-NoProfile"],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dispatcher, _ = self.make_dispatch_project(
+                root,
+                config,
+                managed_v06=True,
+            )
+            workspace = (
+                root
+                / "active"
+                / "sample"
+                / "subagents"
+                / self.DISPATCH_ID
+            )
+            context_pack = workspace / "context-pack.json"
+            context_pack.write_text(
+                json.dumps(
+                    {
+                        "packId": "context-verified-fixture",
+                        "digest": self.CONTEXT_PACK_DIGEST,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verifier = root / "verify-pack-fixture.ps1"
+            verifier.write_text(
+                "if ($args.Count -ne 5 -or $args[0] -ne 'verify-pack' "
+                "-or $args[1] -ne '--input' "
+                "-or $args[3] -ne '--expected-digest') "
+                "{ throw 'unexpected verifier args' }\n"
+                "$pack = Get-Content -LiteralPath $args[2] -Raw | ConvertFrom-Json\n"
+                "if ($pack.digest -cne $args[4]) { throw 'digest mismatch' }\n"
+                "Write-Output '{\"valid\":true}'\n",
+                encoding="utf-8",
+            )
+
+            missing_expected = self.dispatch(
+                dispatcher,
+                "-ContextPackPath",
+                str(context_pack),
+                "-KnowledgeRuntime",
+                str(verifier),
+            )
+            malformed_expected = self.dispatch(
+                dispatcher,
+                "-ContextPackPath",
+                str(context_pack),
+                "-ExpectedContextPackDigest",
+                "sha256:not-a-digest",
+                "-KnowledgeRuntime",
+                str(verifier),
+            )
+            mismatched_expected = self.dispatch(
+                dispatcher,
+                "-ContextPackPath",
+                str(context_pack),
+                "-ExpectedContextPackDigest",
+                "sha256:" + ("b" * 64),
+                "-KnowledgeRuntime",
+                str(verifier),
+            )
+            verified = self.dispatch(
+                dispatcher,
+                "-ContextPackPath",
+                str(context_pack),
+                "-ExpectedContextPackDigest",
+                self.CONTEXT_PACK_DIGEST,
+                "-KnowledgeRuntime",
+                str(verifier),
+            )
+            context_pack.write_text(
+                json.dumps(
+                    {
+                        "packId": "context-verified-fixture",
+                        "digest": "sha256:" + ("c" * 64),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            tampered = self.dispatch(
+                dispatcher,
+                "-ContextPackPath",
+                str(context_pack),
+                "-ExpectedContextPackDigest",
+                self.CONTEXT_PACK_DIGEST,
+                "-KnowledgeRuntime",
+                str(verifier),
+            )
+
+        self.assertNotEqual(missing_expected.returncode, 0)
+        self.assertIn("-ExpectedContextPackDigest", missing_expected.stderr)
+        self.assertNotEqual(malformed_expected.returncode, 0)
+        self.assertIn("64 lowercase hexadecimal", malformed_expected.stderr)
+        self.assertNotEqual(mismatched_expected.returncode, 0)
+        self.assertIn(
+            "Context pack verification failed",
+            mismatched_expected.stderr,
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertIn("context-pack=context-verified-fixture", verified.stdout)
+        self.assertIn(
+            f"expected-digest={self.CONTEXT_PACK_DIGEST}",
+            verified.stdout,
+        )
+        self.assertIn("blocked report", verified.stdout)
+        self.assertIn(str(context_pack), verified.stdout)
+        self.assertNotEqual(tampered.returncode, 0)
+        self.assertIn("Context pack verification failed", tampered.stderr)
 
     def test_dispatcher_name_alias_uses_the_exact_completed_id(self) -> None:
         config = {
@@ -1356,10 +1603,16 @@ class ExternalDispatcherTests(unittest.TestCase):
 class HookTests(unittest.TestCase):
     def setUp(self) -> None:
         self.hook = PLUGIN / "hooks" / "re-discipline-hook.ps1"
+        self.shell_hook = PLUGIN / "hooks" / "re-discipline-hook.sh"
         self.hook_config = json.loads(read(PLUGIN / "hooks" / "hooks.json"))
         self.powershell = shutil.which("powershell.exe") or shutil.which("powershell")
-        if not self.powershell:
-            self.skipTest("PowerShell is required for Windows hook tests")
+        self.sh = shutil.which("sh")
+        if not self.sh:
+            git = shutil.which("git.exe") or shutil.which("git")
+            if git:
+                candidate = Path(git).resolve().parent.parent / "bin" / "sh.exe"
+                if candidate.is_file():
+                    self.sh = str(candidate)
 
     def run_hook(
         self,
@@ -1367,7 +1620,11 @@ class HookTests(unittest.TestCase):
         cwd: Path,
         *,
         host: str = "claude",
+        source: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        if not self.powershell:
+            self.skipTest("PowerShell is required for Windows hook tests")
         env = os.environ.copy()
         env.pop("PLUGIN_ROOT", None)
         env.pop("CLAUDE_PLUGIN_ROOT", None)
@@ -1375,6 +1632,12 @@ class HookTests(unittest.TestCase):
             env["PLUGIN_ROOT"] = str(PLUGIN)
         else:
             env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN)
+        if extra_env:
+            env.update(extra_env)
+
+        payload = {"cwd": str(cwd), "hook_event_name": event}
+        if source is not None:
+            payload["source"] = source
 
         return subprocess.run(
             [
@@ -1386,12 +1649,138 @@ class HookTests(unittest.TestCase):
                 str(self.hook),
                 event,
             ],
-            input=json.dumps({"cwd": str(cwd), "hook_event_name": event}),
+            input=json.dumps(payload),
             text=True,
             capture_output=True,
             check=False,
             env=env,
         )
+
+    def run_posix_hook(
+        self,
+        event: str,
+        cwd: Path,
+        *,
+        host: str = "claude",
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if not self.sh:
+            self.skipTest("A POSIX shell is required for hook parity tests")
+
+        def shell_path(path: Path) -> str:
+            if os.name != "nt":
+                return str(path)
+            result = subprocess.run(
+                [self.sh, "-lc", 'cygpath -u "$1"', "sh", str(path)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+
+        env = os.environ.copy()
+        env.pop("PLUGIN_ROOT", None)
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        env["CLAUDE_PROJECT_DIR"] = shell_path(cwd)
+        plugin_path = shell_path(PLUGIN)
+        if host == "codex":
+            env["PLUGIN_ROOT"] = plugin_path
+        else:
+            env["CLAUDE_PLUGIN_ROOT"] = plugin_path
+        if extra_env:
+            env.update(extra_env)
+
+        return subprocess.run(
+            [self.sh, shell_path(self.shell_hook), event],
+            input=json.dumps({"hook_event_name": event}),
+            text=True,
+            capture_output=True,
+            check=False,
+            env=env,
+        )
+
+    def make_managed_project(self, root: Path) -> None:
+        managed = root / ".re-discipline"
+        managed.mkdir(parents=True)
+        (managed / "project-profile.md").write_text(
+            "---\nname: managed-test\n---\n"
+            "<!-- re-discipline:shared-laws v0.6.0 -->\n"
+            "# Managed test\n"
+            "<!-- re-discipline:shared-laws:end -->\n",
+            encoding="utf-8",
+        )
+
+    def assert_ambiguous_host_settings_preserved(self, runner) -> None:
+        cases = (
+            (
+                "claude-root-array",
+                ".claude/settings.json",
+                b'[{"autoMemoryEnabled": true}]\n',
+            ),
+            (
+                "claude-escaped-managed-key",
+                ".claude/settings.json",
+                b'{"auto\\u004demoryEnabled": true}\n',
+            ),
+            (
+                "claude-duplicate-managed-key",
+                ".claude/settings.json",
+                b'{"autoMemoryEnabled": true, "autoMemoryEnabled": false}\n',
+            ),
+            (
+                "codex-root-inline-table",
+                ".codex/config.toml",
+                b"features = { memories = true }\n",
+            ),
+            (
+                "codex-root-dotted-key",
+                ".codex/config.toml",
+                b"features.memories = true\n",
+            ),
+            (
+                "codex-quoted-table",
+                ".codex/config.toml",
+                b'["features"]\nmemories = true\n',
+            ),
+            (
+                "codex-array-table",
+                ".codex/config.toml",
+                b"[[features]]\nmemories = true\n",
+            ),
+            (
+                "codex-multiline-string",
+                ".codex/config.toml",
+                b'description = """\nmanaged-looking text\n"""\n',
+            ),
+            (
+                "codex-unterminated-string",
+                ".codex/config.toml",
+                b'model = "unterminated\n',
+            ),
+        )
+        for label, relative, original in cases:
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_managed_project(root)
+                shutil.copy2(
+                    PLUGIN / "templates" / "project" / "config.json",
+                    root / ".re-discipline" / "config.json",
+                )
+                target = root / relative
+                target.parent.mkdir()
+                target.write_bytes(original)
+
+                result = runner("session-start", root, host="codex")
+                after = target.read_bytes()
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(after, original)
+                context = json.loads(result.stdout)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertRegex(context, r"ambiguous|malformed|JSON object")
+                self.assertIn("preserved", context)
 
     def test_hook_is_silent_outside_initialized_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1399,6 +1788,74 @@ class HookTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
+
+    def test_session_start_runs_bounded_read_only_knowledge_status(self) -> None:
+        powershell_body = read(self.hook)
+        self.assertIn("Get-KnowledgeHealthSummary", powershell_body)
+        self.assertIn("$process.WaitForExit(3000)", powershell_body)
+        self.assertIn('"status"', powershell_body)
+        session_handler = self.hook_config["hooks"]["SessionStart"][0]["hooks"][0]
+        self.assertLessEqual(session_handler["timeout"], 10)
+
+        if not self.sh:
+            self.skipTest("A POSIX shell is required for health-status execution")
+
+        def shell_path(path: Path) -> str:
+            if os.name != "nt":
+                return str(path)
+            result = subprocess.run(
+                [self.sh, "-lc", 'cygpath -u "$1"', "sh", str(path)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "project"
+            fake_plugin = base / "plugin"
+            marker = base / "status-arguments.txt"
+            self.make_managed_project(root)
+            shutil.copytree(PLUGIN / "templates", fake_plugin / "templates")
+            shutil.copytree(PLUGIN / "hooks", fake_plugin / "hooks")
+            launcher = (
+                fake_plugin
+                / "knowledge"
+                / "bin"
+                / "re-discipline-knowledge"
+            )
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$*" > "$HEALTH_MARKER"\n',
+                encoding="utf-8",
+            )
+            launcher.chmod(0o755)
+
+            result = self.run_posix_hook(
+                "session-start",
+                root,
+                host="codex",
+                extra_env={
+                    "PLUGIN_ROOT": shell_path(fake_plugin),
+                    "HEALTH_MARKER": shell_path(marker),
+                },
+            )
+            arguments = marker.read_text(encoding="utf-8").strip()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            arguments,
+            "status "
+            f"--asset-root {shell_path(fake_plugin)}/knowledge "
+            f"--project-root {shell_path(root)}",
+        )
+        context = json.loads(result.stdout)["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertNotIn("packaged runtime is missing", context)
 
     def test_codex_hook_injects_complete_neutral_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1491,10 +1948,532 @@ class HookTests(unittest.TestCase):
         self.assertIn("migration", context)
         self.assertIn("init-project", context)
 
+    def test_session_start_materializes_shared_only_control_plane(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            result = self.run_hook("session-start", root, host="codex")
+
+            config = json.loads(read(root / ".re-discipline" / "config.json"))
+            claude = json.loads(read(root / ".claude" / "settings.json"))
+            codex = read(root / ".codex" / "config.toml")
+            expected_paths = (
+                ".re-discipline/settings/README.md",
+                ".re-discipline/settings/knowledge.jsonc",
+                ".re-discipline/settings/retrieval-profile.json",
+                ".re-discipline/memory/INDEX.md",
+                ".re-discipline/knowledge/evals/README.md",
+            )
+            existing = tuple((root / path).is_file() for path in expected_paths)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(all(existing))
+        self.assertEqual(config["memory"]["mode"], "shared-only")
+        self.assertEqual(config["memory"]["writePolicy"], "proposal-only")
+        self.assertFalse(claude["autoMemoryEnabled"])
+        self.assertIn("[features]\nmemories = false", codex)
+        self.assertIn("generate_memories = false", codex)
+        self.assertIn("use_memories = false", codex)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Recovered managed project files", context)
+
+    def test_hook_repairs_only_managed_host_memory_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            shutil.copy2(
+                PLUGIN / "templates" / "project" / "config.json",
+                root / ".re-discipline" / "config.json",
+            )
+            claude_path = root / ".claude" / "settings.json"
+            claude_path.parent.mkdir()
+            claude_path.write_text(
+                '{\n  "permissions": {"allow": ["Read"]},\n'
+                '  "autoMemoryEnabled": true\n}\n',
+                encoding="utf-8",
+            )
+            codex_path = root / ".codex" / "config.toml"
+            codex_path.parent.mkdir()
+            codex_path.write_text(
+                '# keep this comment\nmodel = "gpt-test"\n\n'
+                "[features]\nweb_search = true # unrelated\n\n"
+                "[memories]\nmax_unused_days = 30\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_hook("session-start", root, host="codex")
+            first_claude = claude_path.read_bytes()
+            first_codex = codex_path.read_bytes()
+            result_again = self.run_hook("session-start", root, host="codex")
+            second_claude = claude_path.read_bytes()
+            second_codex = codex_path.read_bytes()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result_again.returncode, 0, result_again.stderr)
+        settings = json.loads(first_claude.decode("utf-8"))
+        self.assertEqual(settings["permissions"], {"allow": ["Read"]})
+        self.assertFalse(settings["autoMemoryEnabled"])
+        codex = first_codex.decode("utf-8")
+        self.assertIn("# keep this comment", codex)
+        self.assertIn('model = "gpt-test"', codex)
+        self.assertIn("web_search = true # unrelated", codex)
+        self.assertIn("max_unused_days = 30", codex)
+        self.assertIn("memories = false", codex)
+        self.assertIn("generate_memories = false", codex)
+        self.assertIn("use_memories = false", codex)
+        self.assertEqual(first_claude, second_claude)
+        self.assertEqual(first_codex, second_codex)
+
+    def test_hook_preserves_malformed_existing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            config_path = root / ".re-discipline" / "config.json"
+            malformed_config = b'{"schemaVersion": 1, "memory": '
+            config_path.write_bytes(malformed_config)
+
+            result = self.run_hook("session-start", root, host="codex")
+            preserved = config_path.read_bytes()
+            hosts_absent = (
+                not (root / ".claude" / "settings.json").exists()
+                and not (root / ".codex" / "config.toml").exists()
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(preserved, malformed_config)
+        self.assertTrue(hosts_absent)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("read-only degraded", context)
+        self.assertIn("malformed", context)
+
+    def test_hook_preserves_malformed_host_settings_byte_for_byte(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            shutil.copy2(
+                PLUGIN / "templates" / "project" / "config.json",
+                root / ".re-discipline" / "config.json",
+            )
+            claude_path = root / ".claude" / "settings.json"
+            claude_path.parent.mkdir()
+            claude_original = b'{"autoMemoryEnabled": false'
+            claude_path.write_bytes(claude_original)
+            codex_path = root / ".codex" / "config.toml"
+            codex_path.parent.mkdir()
+            codex_original = b"{ definitely-not-toml\n"
+            codex_path.write_bytes(codex_original)
+
+            result = self.run_hook("session-start", root, host="codex")
+            claude_after = claude_path.read_bytes()
+            codex_after = codex_path.read_bytes()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(claude_after, claude_original)
+        self.assertEqual(codex_after, codex_original)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("malformed", context)
+        self.assertIn("preserved", context)
+
+    def test_hook_preserves_ambiguous_host_settings_byte_for_byte(self) -> None:
+        self.assert_ambiguous_host_settings_preserved(self.run_hook)
+
+    def test_hook_recovers_staged_deletions_without_changing_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            first = self.run_hook("session-start", root, host="codex")
+            self.assertEqual(first.returncode, 0, first.stderr)
+            subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Test"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-m", "fixture"],
+                check=True,
+                capture_output=True,
+            )
+            deleted = (
+                ".re-discipline/config.json",
+                ".re-discipline/settings/knowledge.jsonc",
+            )
+            expected = {
+                path: (root / path).read_bytes()
+                for path in deleted
+            }
+            for path in deleted:
+                (root / path).unlink()
+            subprocess.run(
+                ["git", "-C", str(root), "add", "-u", "--", *deleted],
+                check=True,
+            )
+            cached_before = subprocess.run(
+                ["git", "-C", str(root), "diff", "--cached", "--name-status", "--", *deleted],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+
+            result = self.run_hook("session-start", root, host="codex")
+            cached_after = subprocess.run(
+                ["git", "-C", str(root), "diff", "--cached", "--name-status", "--", *deleted],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+            restored = {
+                path: (root / path).read_bytes()
+                for path in deleted
+            }
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(cached_before, cached_after)
+        self.assertEqual(restored, expected)
+        for path in deleted:
+            self.assertIn(f"D\t{path}", cached_after)
+
+    def test_hook_never_accesses_configured_native_memory_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            self.make_managed_project(root)
+            native = Path(directory) / "native"
+            claude_native = native / "claude" / "projects" / "memory"
+            codex_native = native / "codex" / "memories"
+            claude_native.mkdir(parents=True)
+            codex_native.mkdir(parents=True)
+            claude_sentinel = claude_native / "MEMORY.md"
+            codex_sentinel = codex_native / "MEMORY.md"
+            claude_sentinel.write_text("CLAUDE_NATIVE_SENTINEL", encoding="utf-8")
+            codex_sentinel.write_text("CODEX_NATIVE_SENTINEL", encoding="utf-8")
+
+            result = self.run_hook(
+                "session-start",
+                root,
+                host="codex",
+                extra_env={
+                    "CLAUDE_CONFIG_DIR": str(native / "claude"),
+                    "CODEX_HOME": str(native / "codex"),
+                },
+            )
+            claude_after = claude_sentinel.read_text(encoding="utf-8")
+            codex_after = codex_sentinel.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(claude_after, "CLAUDE_NATIVE_SENTINEL")
+        self.assertEqual(codex_after, "CODEX_NATIVE_SENTINEL")
+
+    def test_compaction_and_subagent_hooks_inject_bounded_context(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            post = self.run_hook("post-compact", root, host="codex")
+            compatibility = self.run_hook(
+                "session-start",
+                root,
+                host="codex",
+                source="compact",
+            )
+            subagent = self.run_hook("subagent-start", root, host="codex")
+
+        self.assertEqual(post.returncode, 0, post.stderr)
+        self.assertEqual(compatibility.returncode, 0, compatibility.stderr)
+        self.assertEqual(subagent.returncode, 0, subagent.stderr)
+        post_output = json.loads(post.stdout)["hookSpecificOutput"]
+        compatibility_output = json.loads(compatibility.stdout)["hookSpecificOutput"]
+        subagent_output = json.loads(subagent.stdout)["hookSpecificOutput"]
+        self.assertEqual(post_output["hookEventName"], "PostCompact")
+        self.assertIn("bounded orientation", post_output["additionalContext"])
+        self.assertEqual(compatibility_output["hookEventName"], "SessionStart")
+        self.assertIn("after compaction", compatibility_output["additionalContext"])
+        self.assertEqual(subagent_output["hookEventName"], "SubagentStart")
+        self.assertIn("drafter, not a ratifier", subagent_output["additionalContext"])
+        self.assertIn("immutable context pack", subagent_output["additionalContext"])
+
+    def test_posix_session_start_materializes_shared_only_control_plane(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            result = self.run_posix_hook("session-start", root, host="codex")
+
+            config = json.loads(read(root / ".re-discipline" / "config.json"))
+            claude = json.loads(read(root / ".claude" / "settings.json"))
+            codex = read(root / ".codex" / "config.toml")
+            expected_paths = (
+                ".re-discipline/settings/README.md",
+                ".re-discipline/settings/knowledge.jsonc",
+                ".re-discipline/settings/retrieval-profile.json",
+                ".re-discipline/memory/INDEX.md",
+                ".re-discipline/knowledge/evals/README.md",
+            )
+            existing = tuple((root / path).is_file() for path in expected_paths)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(all(existing))
+        self.assertEqual(config["memory"]["mode"], "shared-only")
+        self.assertEqual(config["memory"]["writePolicy"], "proposal-only")
+        self.assertFalse(claude["autoMemoryEnabled"])
+        self.assertIn("[features]\nmemories = false", codex)
+        self.assertIn("generate_memories = false", codex)
+        self.assertIn("use_memories = false", codex)
+
+    def test_posix_hook_repairs_only_managed_host_memory_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            shutil.copy2(
+                PLUGIN / "templates" / "project" / "config.json",
+                root / ".re-discipline" / "config.json",
+            )
+            claude_path = root / ".claude" / "settings.json"
+            claude_path.parent.mkdir()
+            claude_path.write_text(
+                '{\n  "permissions": {"allow": ["Read"]},\n'
+                '  "autoMemoryEnabled": true\n}\n',
+                encoding="utf-8",
+            )
+            codex_path = root / ".codex" / "config.toml"
+            codex_path.parent.mkdir()
+            codex_path.write_text(
+                '# keep this comment\nmodel = "gpt-test"\n\n'
+                "[features]\nweb_search = true # unrelated\n\n"
+                "[memories]\nmax_unused_days = 30\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_posix_hook("session-start", root, host="codex")
+            first_claude = claude_path.read_bytes()
+            first_codex = codex_path.read_bytes()
+            result_again = self.run_posix_hook("session-start", root, host="codex")
+            second_claude = claude_path.read_bytes()
+            second_codex = codex_path.read_bytes()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result_again.returncode, 0, result_again.stderr)
+        settings = json.loads(first_claude.decode("utf-8"))
+        self.assertEqual(settings["permissions"], {"allow": ["Read"]})
+        self.assertFalse(settings["autoMemoryEnabled"])
+        codex = first_codex.decode("utf-8")
+        self.assertIn("# keep this comment", codex)
+        self.assertIn('model = "gpt-test"', codex)
+        self.assertIn("web_search = true # unrelated", codex)
+        self.assertIn("max_unused_days = 30", codex)
+        self.assertIn("memories = false", codex)
+        self.assertIn("generate_memories = false", codex)
+        self.assertIn("use_memories = false", codex)
+        self.assertEqual(first_claude, second_claude)
+        self.assertEqual(first_codex, second_codex)
+
+    def test_posix_hook_fails_closed_on_malformed_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            config_path = root / ".re-discipline" / "config.json"
+            malformed = (
+                read(PLUGIN / "templates" / "project" / "config.json")
+                + "\nmalformed trailing text\n"
+            ).encode("utf-8")
+            config_path.write_bytes(malformed)
+
+            result = self.run_posix_hook("session-start", root, host="codex")
+            preserved = config_path.read_bytes()
+            host_absent = not (root / ".claude" / "settings.json").exists()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(preserved, malformed)
+        self.assertTrue(host_absent)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("read-only degraded", context)
+
+    def test_posix_hook_preserves_malformed_host_settings_byte_for_byte(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            shutil.copy2(
+                PLUGIN / "templates" / "project" / "config.json",
+                root / ".re-discipline" / "config.json",
+            )
+            claude_path = root / ".claude" / "settings.json"
+            claude_path.parent.mkdir()
+            claude_original = b'{"autoMemoryEnabled": false'
+            claude_path.write_bytes(claude_original)
+            codex_path = root / ".codex" / "config.toml"
+            codex_path.parent.mkdir()
+            codex_original = b"{ definitely-not-toml\n"
+            codex_path.write_bytes(codex_original)
+
+            result = self.run_posix_hook("session-start", root, host="codex")
+            claude_after = claude_path.read_bytes()
+            codex_after = codex_path.read_bytes()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(claude_after, claude_original)
+        self.assertEqual(codex_after, codex_original)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("malformed", context)
+        self.assertIn("preserved", context)
+
+    def test_posix_hook_preserves_ambiguous_host_settings_byte_for_byte(
+        self,
+    ) -> None:
+        self.assert_ambiguous_host_settings_preserved(self.run_posix_hook)
+
+    def test_posix_hook_does_not_follow_managed_directory_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            self.make_managed_project(root)
+            shutil.copy2(
+                PLUGIN / "templates" / "project" / "config.json",
+                root / ".re-discipline" / "config.json",
+            )
+            outside = Path(directory) / "outside"
+            outside.mkdir()
+            sentinel = outside / "sentinel.txt"
+            sentinel.write_text("OUTSIDE_SENTINEL", encoding="utf-8")
+            settings_link = root / ".re-discipline" / "settings"
+            try:
+                settings_link.symlink_to(outside, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"directory symlinks are unavailable: {error}")
+
+            result = self.run_posix_hook("session-start", root, host="codex")
+            sentinel_after = sentinel.read_text(encoding="utf-8")
+            escaped_files = tuple(
+                (outside / name).exists()
+                for name in ("README.md", "knowledge.jsonc", "retrieval-profile.json")
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sentinel_after, "OUTSIDE_SENTINEL")
+        self.assertFalse(any(escaped_files))
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("escapes through a link", context)
+
+    @unittest.skipIf(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        "POSIX permissions require a non-root POSIX test process",
+    )
+    def test_posix_hook_degrades_without_terminating_on_read_only_project(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            managed = root / ".re-discipline"
+            managed.chmod(0o555)
+            try:
+                result = self.run_posix_hook("session-start", root, host="codex")
+                config_absent = not (managed / "config.json").exists()
+            finally:
+                managed.chmod(0o755)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(config_absent)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("read-only degraded", context)
+        self.assertIn("could not be created", context)
+
+    def test_posix_hook_never_accesses_configured_native_memory_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            self.make_managed_project(root)
+            native = Path(directory) / "native"
+            claude_native = native / "claude" / "projects" / "memory"
+            codex_native = native / "codex" / "memories"
+            claude_native.mkdir(parents=True)
+            codex_native.mkdir(parents=True)
+            claude_sentinel = claude_native / "MEMORY.md"
+            codex_sentinel = codex_native / "MEMORY.md"
+            claude_sentinel.write_text("CLAUDE_NATIVE_SENTINEL", encoding="utf-8")
+            codex_sentinel.write_text("CODEX_NATIVE_SENTINEL", encoding="utf-8")
+
+            result = self.run_posix_hook(
+                "session-start",
+                root,
+                host="codex",
+                extra_env={
+                    "CLAUDE_CONFIG_DIR": str(native / "claude"),
+                    "CODEX_HOME": str(native / "codex"),
+                },
+            )
+            claude_after = claude_sentinel.read_text(encoding="utf-8")
+            codex_after = codex_sentinel.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(claude_after, "CLAUDE_NATIVE_SENTINEL")
+        self.assertEqual(codex_after, "CODEX_NATIVE_SENTINEL")
+
+    def test_posix_hook_recovers_staged_deletions_without_changing_index(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_managed_project(root)
+            first = self.run_posix_hook("session-start", root, host="codex")
+            self.assertEqual(first.returncode, 0, first.stderr)
+            subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Test"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-m", "fixture"],
+                check=True,
+                capture_output=True,
+            )
+            deleted = (
+                ".re-discipline/config.json",
+                ".re-discipline/settings/knowledge.jsonc",
+            )
+            expected = {path: (root / path).read_bytes() for path in deleted}
+            for path in deleted:
+                (root / path).unlink()
+            subprocess.run(
+                ["git", "-C", str(root), "add", "-u", "--", *deleted],
+                check=True,
+            )
+            cached_before = subprocess.run(
+                ["git", "-C", str(root), "diff", "--cached", "--name-status", "--", *deleted],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+
+            result = self.run_posix_hook("session-start", root, host="codex")
+            cached_after = subprocess.run(
+                ["git", "-C", str(root), "diff", "--cached", "--name-status", "--", *deleted],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+            restored = {path: (root / path).read_bytes() for path in deleted}
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(cached_before, cached_after)
+        self.assertEqual(restored, expected)
+        for path in deleted:
+            self.assertIn(f"D\t{path}", cached_after)
+
     def test_windows_overrides_execute_the_packaged_commands(self) -> None:
+        if not self.powershell:
+            self.skipTest("PowerShell is required for Windows hook tests")
         event_expectations = {
             "SessionStart": "onboard",
             "PreCompact": "checkpoint",
+            "PostCompact": "rehydrate",
+            "SubagentStart": "drafter",
         }
 
         with tempfile.TemporaryDirectory() as directory:
@@ -1523,12 +2502,13 @@ class HookTests(unittest.TestCase):
                     )
 
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    if event_name == "SessionStart":
+                    if event_name in ("SessionStart", "PostCompact", "SubagentStart"):
                         output = json.loads(result.stdout)
-                        self.assertIn(
-                            "name: test",
-                            output["hookSpecificOutput"]["additionalContext"],
-                        )
+                        context = output["hookSpecificOutput"]["additionalContext"]
+                        if event_name == "SessionStart":
+                            self.assertIn("name: test", context)
+                        else:
+                            self.assertIn(expected, context.lower())
                     else:
                         self.assertIn(expected, result.stdout.lower())
 

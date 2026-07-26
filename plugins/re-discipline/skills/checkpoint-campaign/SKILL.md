@@ -25,6 +25,8 @@ newest first, and answers:
 Move superseded session narrative to Historical log or a campaign evidence
 note. Remove solved open questions and point to their disposition. Add new dead
 ends with DIRECT or INFERRED labels. Update the artifact disposition manifest.
+Preserve compact source handles, reviewed report paths, and immutable
+context-pack IDs and digests instead of copying passages or spent tool output.
 
 ## Step 2: Sweep Scratch Carefully
 
@@ -38,6 +40,10 @@ or log:
   has an active consumer or owner;
 - keep ambiguous or campaign-needed evidence inside the active campaign until
   closure disposition.
+- retain a drafter's `brief.md`, `context-pack.json`, and `report.md` together
+  until manager review and closure disposition;
+- route durable recall candidates to `.re-discipline/memory/proposals/`
+  without accepting them during checkpointing.
 
 Do not delete ambiguous or user-owned artifacts. Do not touch another active
 campaign.
@@ -46,7 +52,17 @@ Treat every `subagents/` child name as an opaque workspace key. Preserve both
 new chronological IDs and legacy task-only or provider-prefixed names exactly
 as they are. Checkpointing never parses, normalizes, or renames them.
 
-## Step 3: Verify Cold Resume
+## Step 3: Preserve Knowledge Boundaries
+
+Run only the cheap knowledge status and freshness check. Record a changed
+corpus generation, requested/effective profile, or fallback reason only when
+it affects the next campaign action or invalidates a cited pack.
+
+Do not run a full benchmark, calibrate weights, activate a retrieval profile,
+accept memory, or copy raw conversation transcripts into durable state. Leave
+pending proposals for `review-memory`.
+
+## Step 4: Verify Cold Resume
 
 Read the rewritten masterfile as if the session had no prior context. Confirm
 that its links resolve, its next action is executable, and every new artifact
@@ -61,4 +77,6 @@ Do not commit unless the user explicitly asks.
 ## Reference
 
 - Active manager adapter: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.
+- Knowledge governance: `<plugin-root>/references/knowledge-governance.md`.
+- Memory decisions: `review-memory`.
 - Closure: `close-campaign`.

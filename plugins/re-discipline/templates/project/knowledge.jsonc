@@ -1,0 +1,40 @@
+{
+  "$schema": "plugin://re-discipline/schemas/knowledge-settings.schema.json",
+  "schemaVersion": 1,
+
+  // These are the only project knowledge classes indexed by default.
+  // Pending memory proposals and arbitrary repository files are excluded.
+  "sources": {
+    "truth": true,
+    "history": true,
+    "backlog": true,
+    "activeCampaigns": true,
+    "sharedMemory": true,
+
+    // Optional project-relative Markdown source classes belong here. Keep the
+    // list empty unless the project explicitly classifies a maintained asset;
+    // external roots and sensitive paths cannot be granted from this file.
+    "additional": []
+  },
+
+  // Embeddings and reranking stay on this machine. A tracked project setting
+  // cannot grant remote transmission or access to external source roots.
+  "models": {
+    "execution": "local"
+  },
+
+  // Store aggregate local health and token measurements, never query or
+  // passage text. Use "off" to disable even local aggregate measurements.
+  "telemetry": {
+    "mode": "metrics-only"
+  },
+
+  // Hard ceilings for returned context. Callers may request smaller budgets.
+  "budgets": {
+    "searchTokens": 1024,
+    "managerContextTokens": 2048,
+    "drafterContextTokens": 1024,
+    "maxPassages": 12,
+    "maxBytes": 32768
+  }
+}

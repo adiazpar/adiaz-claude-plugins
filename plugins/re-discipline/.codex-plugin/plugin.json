@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
-  "version": "0.5.0",
-  "description": "Evidence-based campaign and knowledge management with one canonical profile, thin manager adapters, and a normalized external-agent framework.",
+  "version": "0.6.0",
+  "description": "Evidence-based campaigns with one shared project memory, a local knowledge server, thin manager adapters, and governed retrieval.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
@@ -10,14 +10,26 @@
     "reverse-engineering",
     "research",
     "knowledge-management",
-    "discipline",
+    "shared-memory",
+    "retrieval",
     "workflow"
   ],
   "skills": "./skills/",
+  "mcpServers": {
+    "re-discipline-knowledge": {
+      "command": "knowledge/bin/re-discipline-knowledge",
+      "args": [
+        "serve",
+        "--asset-root",
+        "knowledge"
+      ],
+      "cwd": "."
+    }
+  },
   "interface": {
     "displayName": "Re-Discipline",
-    "shortDescription": "Evidence-based research campaign workflow",
-    "longDescription": "Run durable research campaigns, separate provisional work from verified truth, delegate draft investigations through native or configured external providers, and preserve reproducible findings across manager hosts.",
+    "shortDescription": "Shared project knowledge and evidence workflow",
+    "longDescription": "Run durable research campaigns, retrieve citable project knowledge through one local server, share governed recall across manager hosts and subagents, and keep provisional work separate from verified truth.",
     "developerName": "Alex Diaz",
     "category": "Productivity",
     "capabilities": [
@@ -27,6 +39,7 @@
     "defaultPrompt": [
       "Initialize this project with re-discipline.",
       "Orient me to the current campaign state.",
+      "Search the shared project knowledge.",
       "Open a focused research campaign."
     ]
   }

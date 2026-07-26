@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "settingsDirectory": "settings",
+  "memory": {
+    "mode": "shared-only",
+    "writePolicy": "proposal-only"
+  },
+  "knowledge": {
+    "enabled": true,
+    "profile": "plugin:balanced-v1",
+    "settingsFile": "settings/knowledge.jsonc",
+    "projectProfile": "settings/retrieval-profile.json"
+  }
+}

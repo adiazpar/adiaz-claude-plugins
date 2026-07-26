@@ -1,0 +1,322 @@
+{
+  "$schema": "../schemas/runtime-package-manifest.schema.json",
+  "schemaVersion": 1,
+  "runtime": {
+    "name": "re-discipline-knowledge",
+    "version": "0.6.0",
+    "buildId": "sha256:2e1caaa8c52032510a1e1bc85963b116b86f3779f2b945e4bf15a9ec5d49aab5"
+  },
+  "build": {
+    "goToolchain": "go1.26.5",
+    "cgoEnabled": false,
+    "flags": [
+      "-trimpath",
+      "-buildvcs=false",
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:2e1caaa8c52032510a1e1bc85963b116b86f3779f2b945e4bf15a9ec5d49aab5"
+    ],
+    "environment": [
+      "CGO_ENABLED=0",
+      "GOAMD64=v1",
+      "GOARM64=v8.0",
+      "GOENV=off",
+      "GOEXPERIMENT=",
+      "GOFIPS140=off",
+      "GOFLAGS=-mod=readonly",
+      "GOWORK=off"
+    ],
+    "targetOrder": "windows-amd64,windows-arm64,linux-amd64,linux-arm64,darwin-amd64,darwin-arm64"
+  },
+  "targets": [
+    {
+      "kind": "runtime",
+      "goos": "windows",
+      "goarch": "amd64",
+      "path": "windows-amd64/re-discipline-knowledge.exe",
+      "sha256": "sha256:2e6ea7461757c4196137e7a50ff2866c0285201a53e02a20019c59cd26c2833a",
+      "size": 8117248,
+      "mode": "0755"
+    },
+    {
+      "kind": "runtime",
+      "goos": "windows",
+      "goarch": "arm64",
+      "path": "windows-arm64/re-discipline-knowledge.exe",
+      "sha256": "sha256:2d5458dc47666c30728a978e1cb410e90c15872fbfd052504d26ff72f4605fc5",
+      "size": 7679488,
+      "mode": "0755"
+    },
+    {
+      "kind": "runtime",
+      "goos": "linux",
+      "goarch": "amd64",
+      "path": "linux-amd64/re-discipline-knowledge",
+      "sha256": "sha256:04a0a70cce985b84a816e27637dde890607a31d2007d826eaea43482b89a7404",
+      "size": 7884926,
+      "mode": "0755"
+    },
+    {
+      "kind": "runtime",
+      "goos": "linux",
+      "goarch": "arm64",
+      "path": "linux-arm64/re-discipline-knowledge",
+      "sha256": "sha256:bb7c72d62f1860982051eab7b28c7d8e4aac936d584bfee23c17dec0c4e0b277",
+      "size": 7667838,
+      "mode": "0755"
+    },
+    {
+      "kind": "runtime",
+      "goos": "darwin",
+      "goarch": "amd64",
+      "path": "darwin-amd64/re-discipline-knowledge",
+      "sha256": "sha256:c024c894649a854e664748b1956c92ac7e065b3340408d012bdb2f3dd427b5f3",
+      "size": 8016880,
+      "mode": "0755"
+    },
+    {
+      "kind": "runtime",
+      "goos": "darwin",
+      "goarch": "arm64",
+      "path": "darwin-arm64/re-discipline-knowledge",
+      "sha256": "sha256:040dac863b41f03db9ad09444842ee9c5c4e18aa01ffbaa2489ebae883a55b85",
+      "size": 7761250,
+      "mode": "0755"
+    }
+  ],
+  "launchers": [
+    {
+      "kind": "posix-dispatch",
+      "path": "re-discipline-knowledge",
+      "sha256": "sha256:348c4e98c2a18c8281cac70eeea9ff5e8d4d680386249361eebde84fc40ad2c5",
+      "size": 775,
+      "mode": "0755"
+    },
+    {
+      "kind": "windows-architecture-dispatch",
+      "goos": "windows",
+      "goarch": "amd64",
+      "path": "re-discipline-knowledge.exe",
+      "sha256": "sha256:99710033f966fcdd2ac62b453547cf90fcad4d8cb1854a7c1b2c755108f57f69",
+      "size": 2071552,
+      "mode": "0755"
+    }
+  ],
+  "sharedAssets": [
+    {
+      "kind": "benchmark-cases",
+      "path": "evals/conformance/cases.json",
+      "sha256": "sha256:1036da2595d09764c3d609eacc89f0c647e88f955f8c14750b30fa6eaf2c63c7",
+      "size": 7438,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/.re-discipline/config.json",
+      "sha256": "sha256:92bda450d1d1d831d31d68be5415f0aa3636d425b459f3b2288b8a066307e0ba",
+      "size": 325,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/.re-discipline/memory/INDEX.md",
+      "sha256": "sha256:5a4439ff5898f43d24888c56aeb9088fb4f781bfb505d3f16a221caf695f2490",
+      "size": 60,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/.re-discipline/memory/proposals/excluded.md",
+      "sha256": "sha256:f5c72f5239154052cbc1ffeec1b3c0cc739215c0202f375655135406f4667ea7",
+      "size": 98,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/.re-discipline/memory/topics/navigation.md",
+      "sha256": "sha256:6c7603898982d16859cc34ed5769b5710b6080ac26964348c7272903a3798683",
+      "size": 81,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/.re-discipline/project-profile.md",
+      "sha256": "sha256:be6fe74de668f2e9db7a4cdde32cb1d1ddd52d1c33c6677947e41039bd7b2f6c",
+      "size": 269,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/.re-discipline/settings/knowledge.jsonc",
+      "sha256": "sha256:03af95bed9127a2803383db3bfb451d0d60a28f7358d6c19517e6bcdd76cdfb1",
+      "size": 490,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/active/fixture-campaign/CAMPAIGN.md",
+      "sha256": "sha256:91321c36bcc7e674f132cfc5725aa5ab8305b58e47268e325ed9b1ee0a7c96a4",
+      "size": 96,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/INDEX.md",
+      "sha256": "sha256:14921ac8f7ef7c73600fbe434be107d8fc8782e343f051b181a545f9fadc1006",
+      "size": 109,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/backlog/INDEX.md",
+      "sha256": "sha256:4837c07898136b05dc7f307a467289efaf1bd78ff95d7ce30d8d4ecac98d9909",
+      "size": 56,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/backlog/experiment.md",
+      "sha256": "sha256:8d4f4447cf5fa406ab58a9321f9750b9638eff94bad393bbaa9b22ff5fae6ebf",
+      "size": 94,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/history/INDEX.md",
+      "sha256": "sha256:2d84f8cfbf60de600b7d06d85fb4f31bf2f9fda61897a40f7503f5efda549161",
+      "size": 51,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/history/retired.md",
+      "sha256": "sha256:bb481e01f34f60461d78802086d6e6aaf7908e5fa4be836e6922c70603f795bf",
+      "size": 102,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/truth/INDEX.md",
+      "sha256": "sha256:776ff12fd91a235667b96ae06a54591f1cc3cf5ab3043694c690fda89792f28b",
+      "size": 109,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/truth/consumer.md",
+      "sha256": "sha256:21ec8491efbc1fe117e55bb5132c7fa088e9e2a31a9b7a1b2b5c4cab23e0554b",
+      "size": 119,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/truth/engine.md",
+      "sha256": "sha256:6d27e1341a2d784dca13c47d1d7d83c25af904ef320b3bd258e692bfb4b77d69",
+      "size": 151,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/truth/portability.md",
+      "sha256": "sha256:a2de40d5611452f293a7e3e8fe0da7e3ea2d8a390500d35900314837c15a007e",
+      "size": 102,
+      "mode": "0644"
+    },
+    {
+      "kind": "model-artifact-documentation",
+      "path": "models/artifacts/README.md",
+      "sha256": "sha256:67b78163221fba8080d64bcd9522ae74b3de953d1b65af9cc1f649580b84d6be",
+      "size": 2312,
+      "mode": "0644"
+    },
+    {
+      "kind": "shared-model-artifact",
+      "path": "models/artifacts/glove-6b-50d-top50k-q8-v1.bin",
+      "sha256": "sha256:fb108eef095f00bcc06a38e10d7f9671d9e6664ab79ae8a2c1cef5b31375b2ab",
+      "size": 2949669,
+      "mode": "0644"
+    },
+    {
+      "kind": "model-manifest",
+      "path": "models/manifest.json",
+      "sha256": "sha256:d0c17624d97fa4da78c812b6d54d30fd794015cc1316c18d3cbba48d5e965161",
+      "size": 1835,
+      "mode": "0644"
+    },
+    {
+      "kind": "model-specification",
+      "path": "models/specs/glove-6b-50d-top50k-q8-v1.json",
+      "sha256": "sha256:2cdb94f94891907db8bdba40148dc6052b7d2cddacf868bb563092255ef1319a",
+      "size": 1766,
+      "mode": "0644"
+    },
+    {
+      "kind": "model-specification",
+      "path": "models/specs/linear-reranker-v1.json",
+      "sha256": "sha256:4deaafbfeb3aaa7c90b466cf20d7c206c735260e898f8d739ad98c281f6acdd1",
+      "size": 690,
+      "mode": "0644"
+    },
+    {
+      "kind": "retrieval-profile",
+      "path": "profiles/balanced-v1.json",
+      "sha256": "sha256:cc69f5b84d78356d8b22d99b3a602f1e91e17cf495808b0ff2296ee502dc7b56",
+      "size": 3935,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/config.schema.json",
+      "sha256": "sha256:07682469d59dd8d8b6c83abdfa35929668e15a3b8fc335412445ca86d11fd405",
+      "size": 1103,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/context-pack.schema.json",
+      "sha256": "sha256:ded68c46fc3606eb079a09c2d65d8d84f599b7f75d58bf00d43a58c90dd42567",
+      "size": 4716,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/eval-case.schema.json",
+      "sha256": "sha256:f122f7c147a197ef02bcd990ec4e7f6f9fba5ac9dd77dc804798b167318f5d71",
+      "size": 3697,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/knowledge-settings.schema.json",
+      "sha256": "sha256:16b1b5d869072d5b8d77da484900b0e8b3d07d85e2480f54cb9c3556751c62c7",
+      "size": 2275,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/model-manifest.schema.json",
+      "sha256": "sha256:66b0ab1d2035638f5c5490909f8494e5396e3d3085709e6f48c571eaeb212708",
+      "size": 2845,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/retrieval-profile.schema.json",
+      "sha256": "sha256:0e2075729844696fb0bffcb21e4e6ae26eb69158eaa96f7f87eee070fce73ec7",
+      "size": 6094,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/runtime-package-manifest.schema.json",
+      "sha256": "sha256:5dc0070d9f8e7608f14c4357549a1a4d9304f4bdeb281cdc736750ef2798435a",
+      "size": 4391,
+      "mode": "0644"
+    }
+  ],
+  "notices": {
+    "kind": "third-party-notices",
+    "path": "THIRD_PARTY_NOTICES.md",
+    "sha256": "sha256:e64197043c243cd33d1dd6de3ac87ea0d9fc7a54b01f18ac6339c0c337e2ee48",
+    "size": 11065,
+    "mode": "0644"
+  }
+}

@@ -5,7 +5,7 @@ A plugin marketplace containing:
 | Plugin | Hosts | Purpose |
 |---|---|---|
 | [cofounder](./plugins/cofounder/) | Claude Code | A structured founding session that produces a validated direction and execution handoff. |
-| [re-discipline](./plugins/re-discipline/) | Claude Code and Codex | Evidence-based campaign and durable-knowledge management for reverse-engineering and research. |
+| [re-discipline](./plugins/re-discipline/) | Claude Code and Codex | Evidence-based campaigns with one shared project memory and local, citable knowledge retrieval. |
 
 The plugins are independent.
 
@@ -57,12 +57,13 @@ adiaz-claude-plugins/
     `-- re-discipline/
         |-- .codex-plugin/plugin.json
         |-- .claude-plugin/plugin.json
+        |-- .mcp.json
         |-- hooks/
+        |-- knowledge/
         |-- skills/
         `-- templates/
 ```
 
 ## License
 
-MIT. See `plugins/cofounder/LICENSE`; the remaining plugins inherit the same
-license.
+MIT. Each plugin carries its applicable license in its own directory.

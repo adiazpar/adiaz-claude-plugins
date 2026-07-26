@@ -1,0 +1,1749 @@
+package knowledge
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+type CaseOutcome struct {
+	CaseID                 string   `json:"caseId"`
+	Split                  string   `json:"split"`
+	Topic                  string   `json:"topic"`
+	Paths                  []string `json:"paths"`
+	Tiers                  []string `json:"tiers"`
+	ChunkIDs               []string `json:"chunkIds"`
+	ContentHashes          []string `json:"contentHashes"`
+	RelevantPaths          []string `json:"relevantPaths"`
+	RelevantRanks          []int    `json:"relevantRanks"`
+	HardNegativeHits       []string `json:"hardNegativeHits"`
+	ExpectedCitationsFound []string `json:"expectedCitationsFound"`
+	EstimatedTokens        int      `json:"estimatedTokens"`
+	ReturnedUniquePaths    int      `json:"returnedUniquePaths"`
+	ExpectedFound          bool     `json:"expectedFound"`
+	CompleteEvidence       bool     `json:"completeEvidence"`
+	AuthoritySafe          bool     `json:"authoritySafe"`
+	CitationMetadataSafe   bool     `json:"citationMetadataSafe"`
+	CitationSafe           bool     `json:"citationSafe"`
+	CorpusMatched          bool     `json:"corpusMatched"`
+	AbstentionCorrect      bool     `json:"abstentionCorrect"`
+	BudgetSafe             bool     `json:"budgetSafe"`
+	ReplayIdentical        bool     `json:"replayIdentical"`
+	MinimumTokenBudget     int      `json:"minimumTokenBudget"`
+	QualityGateApplicable  bool     `json:"qualityGateApplicable"`
+	SafetyPassed           bool     `json:"safetyPassed"`
+	QualityPassed          bool     `json:"qualityPassed"`
+	GatePassed             bool     `json:"gatePassed"`
+	ReturnedTokens         int      `json:"returnedTokens"`
+	RelevantTokens         int      `json:"relevantTokens"`
+	DuplicateTokens        int      `json:"duplicateTokens"`
+	StaleResults           int      `json:"staleResults"`
+	LatencyMillis          int64    `json:"latencyMillis"`
+}
+
+type ContextPackOutcome struct {
+	CaseID                  string   `json:"caseId"`
+	Split                   string   `json:"split"`
+	Topic                   string   `json:"topic"`
+	Role                    string   `json:"role"`
+	RequestedTokenBudget    int      `json:"requestedTokenBudget"`
+	EffectiveTokenBudget    int      `json:"effectiveTokenBudget"`
+	RoleTokenCeiling        int      `json:"roleTokenCeiling"`
+	MaxPassages             int      `json:"maxPassages"`
+	MaxBytes                int      `json:"maxBytes"`
+	PackID                  string   `json:"packId,omitempty"`
+	Digest                  string   `json:"digest,omitempty"`
+	Generation              string   `json:"generation,omitempty"`
+	EffectiveProfile        string   `json:"effectiveProfile,omitempty"`
+	Paths                   []string `json:"paths"`
+	Tiers                   []string `json:"tiers"`
+	RequiredPaths           []string `json:"requiredPaths"`
+	RequiredPathsFound      []string `json:"requiredPathsFound"`
+	PassageCount            int      `json:"passageCount"`
+	SerializedBytes         int      `json:"serializedBytes"`
+	EstimatedTokens         int      `json:"estimatedTokens"`
+	RoleCeilingSafe         bool     `json:"roleCeilingSafe"`
+	AllowedTiersSafe        bool     `json:"allowedTiersSafe"`
+	RequiredEvidencePresent bool     `json:"requiredEvidencePresent"`
+	ExpectedEvidenceFound   bool     `json:"expectedEvidenceFound"`
+	AbstentionCorrect       bool     `json:"abstentionCorrect"`
+	PassageCapSafe          bool     `json:"passageCapSafe"`
+	ByteCapSafe             bool     `json:"byteCapSafe"`
+	TokenAccountingSafe     bool     `json:"tokenAccountingSafe"`
+	BudgetSafe              bool     `json:"budgetSafe"`
+	GenerationPinned        bool     `json:"generationPinned"`
+	ProfilePinned           bool     `json:"profilePinned"`
+	VerificationPassed      bool     `json:"verificationPassed"`
+	ReplayIdentical         bool     `json:"replayIdentical"`
+	MinimumTokenBudget      int      `json:"minimumTokenBudget"`
+	QualityGateApplicable   bool     `json:"qualityGateApplicable"`
+	SafetyPassed            bool     `json:"safetyPassed"`
+	QualityPassed           bool     `json:"qualityPassed"`
+	Passed                  bool     `json:"passed"`
+	Error                   string   `json:"error,omitempty"`
+}
+
+type QualityMetrics struct {
+	RecallAtK                float64 `json:"recallAtK"`
+	MeanReciprocalRank       float64 `json:"meanReciprocalRank"`
+	NDCG                     float64 `json:"nDCG"`
+	PrecisionAtK             float64 `json:"precisionAtK"`
+	ExactIdentifierHitRate   float64 `json:"exactIdentifierHitRate"`
+	CompleteEvidenceCoverage float64 `json:"completeEvidenceCoverage"`
+	AbstentionAccuracy       float64 `json:"abstentionAccuracy"`
+	CitationPrecision        float64 `json:"citationPrecision"`
+	CitationRecall           float64 `json:"citationRecall"`
+	SupportingEvidenceRecall float64 `json:"supportingEvidenceRecall"`
+	BudgetComplianceRate     float64 `json:"budgetComplianceRate"`
+	AuthorityViolationRate   float64 `json:"authorityViolationRate"`
+	StaleResultRate          float64 `json:"staleResultRate"`
+	AuthorityViolations      int     `json:"authorityViolations"`
+	CitationViolations       int     `json:"citationViolations"`
+	HardNegativeHits         int     `json:"hardNegativeHits"`
+	RelevantTokenRatio       float64 `json:"relevantTokenRatio"`
+	DuplicateTokenRatio      float64 `json:"duplicateTokenRatio"`
+	DeterministicReplayRate  float64 `json:"deterministicReplayRate"`
+	P50LatencyMillis         int64   `json:"p50LatencyMillis"`
+	P95LatencyMillis         int64   `json:"p95LatencyMillis"`
+}
+
+type ProfileBenchmark struct {
+	ProfileName            string                          `json:"profileName"`
+	DeclaredDigest         string                          `json:"declaredDigest"`
+	ComputedDigest         string                          `json:"computedDigest"`
+	DigestVerified         bool                            `json:"digestVerified"`
+	Passed                 bool                            `json:"passed"`
+	NonInferiorToLexical   bool                            `json:"nonInferiorToLexical"`
+	Cases                  []CaseOutcome                   `json:"cases"`
+	CasesByBudget          map[string][]CaseOutcome        `json:"casesByBudget"`
+	ContextPackCases       []ContextPackOutcome            `json:"contextPackCases"`
+	ContextPacksByBudget   map[string][]ContextPackOutcome `json:"contextPacksByBudget"`
+	ContextPackRoles       []string                        `json:"contextPackRoles"`
+	ContextPackPassed      bool                            `json:"contextPackPassed"`
+	Metrics                QualityMetrics                  `json:"metrics"`
+	HoldoutMetrics         QualityMetrics                  `json:"holdoutMetrics"`
+	MetricsBySplit         map[string]QualityMetrics       `json:"metricsBySplit"`
+	MetricsByBudget        map[string]QualityMetrics       `json:"metricsByBudget"`
+	QualityMetricsByBudget map[string]QualityMetrics       `json:"qualityMetricsByBudget"`
+}
+
+type BenchmarkReport struct {
+	SchemaVersion int                `json:"schemaVersion"`
+	Mode          string             `json:"mode"`
+	Suite         string             `json:"suite"`
+	Profiles      []ProfileBenchmark `json:"profiles"`
+	Passed        bool               `json:"passed"`
+}
+
+func LoadEvalCases(path string) ([]EvalCase, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > maxSourceBytes {
+		return nil, errors.New("evaluation case file has unsafe type or size")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cases []EvalCase
+	if err := decodeStrict(body, &cases); err != nil {
+		var single EvalCase
+		if singleErr := decodeStrict(body, &single); singleErr != nil {
+			return nil, err
+		}
+		cases = []EvalCase{single}
+	}
+	if err := ValidateEvalCorpus(cases); err != nil {
+		return nil, err
+	}
+	return cases, nil
+}
+
+func ValidateEvalCorpus(cases []EvalCase) error {
+	if len(cases) == 0 || len(cases) > 10000 {
+		return errors.New("evaluation case set is empty")
+	}
+	seen := map[string]bool{}
+	topicSplits := map[string]string{}
+	for index := range cases {
+		eval := &cases[index]
+		if !managedSlugRE.MatchString(eval.ID) || seen[eval.ID] ||
+			strings.TrimSpace(eval.Query) == "" ||
+			len([]byte(eval.Query)) > 1000 {
+			return errors.New("evaluation case IDs and queries must be unique and nonempty")
+		}
+		seen[eval.ID] = true
+		if eval.Role != "manager" && eval.Role != "drafter" {
+			return fmt.Errorf("case %s has invalid role", eval.ID)
+		}
+		if !managedSlugRE.MatchString(eval.Topic) {
+			return fmt.Errorf("case %s has invalid topic", eval.ID)
+		}
+		if eval.Split != "development" && eval.Split != "holdout" {
+			return fmt.Errorf("case %s has invalid split", eval.ID)
+		}
+		if previous, exists := topicSplits[eval.Topic]; exists && previous != eval.Split {
+			return fmt.Errorf("evaluation topic %q leaks across development and holdout", eval.Topic)
+		}
+		topicSplits[eval.Topic] = eval.Split
+		switch eval.QueryClass {
+		case "auto", "exact", "conceptual", "orientation", "current",
+			"provenance", "dependency", "contradiction":
+		default:
+			return fmt.Errorf("case %s has invalid query class", eval.ID)
+		}
+		normalizedTiers, err := ValidateTierList(eval.AllowedTiers)
+		if err != nil {
+			return fmt.Errorf("case %s: %w", eval.ID, err)
+		}
+		if len(normalizedTiers) != len(eval.AllowedTiers) {
+			return fmt.Errorf("case %s repeats an allowed tier", eval.ID)
+		}
+		eval.AllowedTiers = normalizedTiers
+		if len(SortedUnique(eval.ForbiddenTiers)) != len(eval.ForbiddenTiers) {
+			return fmt.Errorf("case %s repeats a forbidden tier", eval.ID)
+		}
+		for _, tier := range eval.ForbiddenTiers {
+			if !AllowedTiers[tier] {
+				return fmt.Errorf("case %s has invalid forbidden tier %q", eval.ID, tier)
+			}
+		}
+		if eval.TokenBudget < 128 || eval.TokenBudget > 4096 {
+			return fmt.Errorf("case %s has invalid token budget", eval.ID)
+		}
+		if !(strings.HasPrefix(eval.CorpusSnapshot, "fixture:") &&
+			managedSlugRE.MatchString(strings.TrimPrefix(eval.CorpusSnapshot, "fixture:"))) &&
+			!sha256IdentityRE.MatchString(eval.CorpusSnapshot) {
+			return fmt.Errorf("case %s has invalid corpus snapshot", eval.ID)
+		}
+		if eval.Answerable == nil {
+			return fmt.Errorf("case %s must declare answerable", eval.ID)
+		}
+		for _, paths := range [][]string{
+			eval.ExpectedPaths, eval.MinimumEvidencePaths, eval.HardNegativePaths,
+			eval.ExpectedCitations,
+		} {
+			for _, path := range paths {
+				if err := validateEvalPath(path); err != nil {
+					return fmt.Errorf("case %s: %w", eval.ID, err)
+				}
+			}
+			if len(SortedUnique(paths)) != len(paths) {
+				return fmt.Errorf("case %s repeats an evaluation path", eval.ID)
+			}
+		}
+		eval.ExpectedPaths = SortedUnique(eval.ExpectedPaths)
+		eval.MinimumEvidencePaths = SortedUnique(eval.MinimumEvidencePaths)
+		eval.HardNegativePaths = SortedUnique(eval.HardNegativePaths)
+		eval.ExpectedCitations = SortedUnique(eval.ExpectedCitations)
+		if *eval.Answerable && len(eval.ExpectedPaths) == 0 {
+			return fmt.Errorf("answerable case %s has no relevant paths", eval.ID)
+		}
+		if !*eval.Answerable && (len(eval.ExpectedPaths) != 0 ||
+			len(eval.MinimumEvidencePaths) != 0 || len(eval.ExpectedCitations) != 0) {
+			return fmt.Errorf("unanswerable case %s declares expected evidence", eval.ID)
+		}
+		for _, path := range append(
+			append([]string(nil), eval.MinimumEvidencePaths...),
+			eval.ExpectedCitations...,
+		) {
+			if !contains(eval.ExpectedPaths, path) {
+				return fmt.Errorf("case %s evidence path %q is not graded relevant", eval.ID, path)
+			}
+		}
+		for _, path := range eval.HardNegativePaths {
+			if contains(eval.ExpectedPaths, path) {
+				return fmt.Errorf("case %s marks %q both relevant and hard-negative", eval.ID, path)
+			}
+		}
+		for path, grade := range eval.GradedRelevantPaths {
+			if !contains(eval.ExpectedPaths, path) || grade < 1 || grade > 3 {
+				return fmt.Errorf("case %s has invalid graded relevance for %q", eval.ID, path)
+			}
+		}
+	}
+	return nil
+}
+
+func validateEvalPath(value string) error {
+	if value == "" || filepath.IsAbs(filepath.FromSlash(value)) {
+		return errors.New("evaluation paths must be nonempty project-relative paths")
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.ReplaceAll(value, "\\", "/"))))
+	if clean != value || clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("unsafe evaluation path %q", value)
+	}
+	return nil
+}
+
+func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (BenchmarkReport, error) {
+	if mode != "quick" && mode != "full" {
+		return BenchmarkReport{}, errors.New("benchmark mode must be quick or full")
+	}
+	cases, err := LoadEvalCases(filepath.Join(assetRoot, "evals", "conformance", "cases.json"))
+	if err != nil {
+		return BenchmarkReport{}, err
+	}
+	profileBody, err := os.ReadFile(filepath.Join(assetRoot, "profiles", "balanced-v1.json"))
+	if err != nil {
+		return BenchmarkReport{}, err
+	}
+	var profile RetrievalProfile
+	if err := decodeStrict(profileBody, &profile); err != nil {
+		return BenchmarkReport{}, err
+	}
+	rows := profile.EffectiveProfiles
+	if mode == "quick" {
+		rows = nil
+		for _, row := range profile.EffectiveProfiles {
+			if row.Requires.Embedding == nil && row.Requires.Reranker == nil {
+				rows = []EffectiveProfile{row}
+				break
+			}
+		}
+		if len(rows) != 1 {
+			return BenchmarkReport{}, errors.New(
+				"packaged profile lacks one model-free quick-benchmark row")
+		}
+	}
+	report := BenchmarkReport{
+		SchemaVersion: 1, Mode: mode, Suite: "packaged-conformance-v1", Passed: true,
+	}
+	for _, row := range rows {
+		temp, err := os.MkdirTemp("", "re-discipline-conformance-*")
+		if err != nil {
+			return BenchmarkReport{}, err
+		}
+		func() {
+			defer os.RemoveAll(temp)
+			fixture := filepath.Join(assetRoot, "evals", "conformance", "fixture")
+			if err = copyTree(fixture, temp); err != nil {
+				return
+			}
+			profileTarget := filepath.Join(temp, ".re-discipline", "settings", "retrieval-profile.json")
+			if err = AtomicWrite(profileTarget, profileBody, 0o600); err != nil {
+				return
+			}
+			var service *Service
+			service, err = NewService(ServiceOptions{
+				ProjectRoot: temp, AssetRoot: assetRoot,
+				CacheRoot:            filepath.Join(temp, ".re-discipline", "cache", "knowledge"),
+				EffectiveProfileName: row.Name,
+			})
+			if err != nil {
+				return
+			}
+			var benchmark ProfileBenchmark
+			benchmark, err = benchmarkCases(ctx, service, row, cases)
+			if err != nil {
+				return
+			}
+			report.Profiles = append(report.Profiles, benchmark)
+			report.Passed = report.Passed && benchmark.Passed
+		}()
+		if err != nil {
+			return BenchmarkReport{}, err
+		}
+	}
+	if mode == "full" && len(report.Profiles) > 1 {
+		baselineIndex := -1
+		for index, row := range rows {
+			if row.Requires.Embedding == nil && row.Requires.Reranker == nil {
+				baselineIndex = index
+				break
+			}
+		}
+		if baselineIndex < 0 {
+			return BenchmarkReport{}, errors.New(
+				"packaged benchmark lacks a model-free lexical baseline")
+		}
+		baseline := report.Profiles[baselineIndex].HoldoutMetrics
+		report.Profiles[baselineIndex].NonInferiorToLexical = true
+		for index := range report.Profiles {
+			if index == baselineIndex {
+				continue
+			}
+			holdout := report.Profiles[index].HoldoutMetrics
+			nonInferior := holdout.RecallAtK >= baseline.RecallAtK &&
+				holdout.NDCG+0.02 >= baseline.NDCG &&
+				holdout.CompleteEvidenceCoverage >= baseline.CompleteEvidenceCoverage &&
+				holdout.CitationRecall >= baseline.CitationRecall &&
+				holdout.AuthorityViolations <= baseline.AuthorityViolations
+			report.Profiles[index].NonInferiorToLexical = nonInferior
+			if !nonInferior {
+				report.Profiles[index].Passed = false
+				report.Passed = false
+			}
+		}
+	}
+	return report, nil
+}
+
+func benchmarkCases(
+	ctx context.Context,
+	service *Service,
+	row EffectiveProfile,
+	cases []EvalCase,
+) (ProfileBenchmark, error) {
+	generation, _, selected, _, err := service.ensure(ctx)
+	if err != nil {
+		return ProfileBenchmark{}, err
+	}
+	outcomes := make([]CaseOutcome, 0, len(cases))
+	passed := true
+	for _, eval := range cases {
+		outcome, err := runEvaluationCase(ctx, eval, eval.TokenBudget, service.Search)
+		if err != nil {
+			return ProfileBenchmark{}, fmt.Errorf("case %s: %w", eval.ID, err)
+		}
+		outcomes = append(outcomes, outcome)
+		passed = passed && evaluationOutcomePassed(outcome)
+	}
+	contextPackCases, contextPackRoles, err := evaluateContextPackCases(
+		ctx, service, cases, 0,
+	)
+	if err != nil {
+		return ProfileBenchmark{}, err
+	}
+	contextPackPassed := contextPackOutcomesPassed(contextPackCases) &&
+		contains(contextPackRoles, "manager") &&
+		contains(contextPackRoles, "drafter")
+	passed = passed && contextPackPassed
+	metrics := calculateMetrics(outcomes, cases)
+	developmentOutcomes, developmentCases := filterEvalSplit(outcomes, cases, "development")
+	holdoutOutcomes, holdoutCases := filterEvalSplit(outcomes, cases, "holdout")
+	holdoutMetrics := calculateMetrics(holdoutOutcomes, holdoutCases)
+	metricsBySplit := map[string]QualityMetrics{
+		"development": calculateMetrics(developmentOutcomes, developmentCases),
+		"holdout":     holdoutMetrics,
+	}
+	metricsByBudget := map[string]QualityMetrics{}
+	qualityMetricsByBudget := map[string]QualityMetrics{}
+	casesByBudget := map[string][]CaseOutcome{}
+	contextPacksByBudget := map[string][]ContextPackOutcome{}
+	for _, budget := range []int{512, 1024, 2048, 4096} {
+		budgetOutcomes := make([]CaseOutcome, 0, len(cases))
+		for _, eval := range cases {
+			outcome, err := runEvaluationCase(ctx, eval, budget, service.Search)
+			if err != nil {
+				return ProfileBenchmark{}, fmt.Errorf(
+					"case %s at budget %d: %w", eval.ID, budget, err)
+			}
+			budgetOutcomes = append(budgetOutcomes, outcome)
+			passed = passed && evaluationOutcomePassed(outcome)
+		}
+		key := fmt.Sprintf("%d", budget)
+		casesByBudget[key] = budgetOutcomes
+		metricsByBudget[key] = calculateMetrics(budgetOutcomes, cases)
+		qualityMetricsByBudget[key] = applicableMetrics(budgetOutcomes, cases)
+		if hasApplicableQualityGate(budgetOutcomes) {
+			passed = passed && hardMetricsPassed(qualityMetricsByBudget[key])
+		}
+		contextOutcomes, roles, err := evaluateContextPackCases(
+			ctx, service, cases, budget,
+		)
+		if err != nil {
+			return ProfileBenchmark{}, fmt.Errorf(
+				"context packs at budget %d: %w", budget, err)
+		}
+		contextPacksByBudget[key] = contextOutcomes
+		contextBudgetPassed := contextPackOutcomesPassed(contextOutcomes) &&
+			contains(roles, "manager") && contains(roles, "drafter")
+		contextPackPassed = contextPackPassed && contextBudgetPassed
+		passed = passed && contextBudgetPassed
+	}
+	digestOutcomes := append([]CaseOutcome(nil), outcomes...)
+	for index := range digestOutcomes {
+		digestOutcomes[index].LatencyMillis = 0
+	}
+	digestBudgets := map[string]QualityMetrics{}
+	digestQualityBudgets := map[string]QualityMetrics{}
+	for key, value := range metricsByBudget {
+		digestBudgets[key] = metricsWithoutLatency(value)
+		digestQualityBudgets[key] =
+			metricsWithoutLatency(qualityMetricsByBudget[key])
+	}
+	digestBudgetCases := map[string][]CaseOutcome{}
+	for key, values := range casesByBudget {
+		copied := append([]CaseOutcome(nil), values...)
+		for index := range copied {
+			copied[index].LatencyMillis = 0
+		}
+		digestBudgetCases[key] = copied
+	}
+	semanticRow := cloneEffectiveProfile(row)
+	semanticRow.Benchmark = BenchmarkEvidence{Suite: row.Benchmark.Suite}
+	evalDigest, _ := CanonicalDigest(cases)
+	digestInput := struct {
+		Suite                  string                          `json:"suite"`
+		EffectiveProfile       EffectiveProfile                `json:"effectiveProfile"`
+		EvalDigest             string                          `json:"evalDigest"`
+		CorpusFingerprint      string                          `json:"corpusFingerprint"`
+		ParserVersion          string                          `json:"parserVersion"`
+		ChunkerVersion         string                          `json:"chunkerVersion"`
+		Runtime                RuntimeContractIdentity         `json:"runtime"`
+		Models                 []ModelIdentity                 `json:"models"`
+		Cases                  []CaseOutcome                   `json:"cases"`
+		Metrics                QualityMetrics                  `json:"metrics"`
+		MetricsBySplit         map[string]QualityMetrics       `json:"metricsBySplit"`
+		MetricsByBudget        map[string]QualityMetrics       `json:"metricsByBudget"`
+		QualityMetricsByBudget map[string]QualityMetrics       `json:"qualityMetricsByBudget"`
+		CasesByBudget          map[string][]CaseOutcome        `json:"casesByBudget"`
+		ContextPackCases       []ContextPackOutcome            `json:"contextPackCases"`
+		ContextPacksByBudget   map[string][]ContextPackOutcome `json:"contextPacksByBudget"`
+		ContextPackRoles       []string                        `json:"contextPackRoles"`
+	}{
+		"packaged-conformance-v1", semanticRow, evalDigest,
+		generation.CorpusFingerprint, ParserVersion, ChunkerVersion,
+		RuntimeContract(selected.Runtime), selected.Models, digestOutcomes,
+		metricsWithoutLatency(metrics),
+		map[string]QualityMetrics{
+			"development": metricsWithoutLatency(metricsBySplit["development"]),
+			"holdout":     metricsWithoutLatency(metricsBySplit["holdout"]),
+		},
+		digestBudgets, digestQualityBudgets, digestBudgetCases,
+		contextPackOutcomesForDigest(contextPackCases),
+		contextPackBudgetsForDigest(contextPacksByBudget), contextPackRoles,
+	}
+	digest, err := CanonicalDigest(digestInput)
+	if err != nil {
+		return ProfileBenchmark{}, err
+	}
+	verified := digest == row.Benchmark.Digest
+	return ProfileBenchmark{
+		ProfileName: row.Name, DeclaredDigest: row.Benchmark.Digest,
+		ComputedDigest: digest, DigestVerified: verified,
+		Passed: passed && verified && metrics.AuthorityViolations == 0 &&
+			metrics.CitationViolations == 0 && metrics.HardNegativeHits == 0,
+		Cases: outcomes, CasesByBudget: casesByBudget,
+		ContextPackCases:     contextPackCases,
+		ContextPacksByBudget: contextPacksByBudget,
+		ContextPackRoles:     contextPackRoles,
+		ContextPackPassed:    contextPackPassed,
+		Metrics:              metrics, HoldoutMetrics: holdoutMetrics,
+		MetricsBySplit: metricsBySplit, MetricsByBudget: metricsByBudget,
+		QualityMetricsByBudget: qualityMetricsByBudget,
+	}, nil
+}
+
+func runEvaluationCase(
+	ctx context.Context,
+	eval EvalCase,
+	tokenBudget int,
+	search func(context.Context, SearchOptions) (SearchResponse, error),
+) (CaseOutcome, error) {
+	options := SearchOptions{
+		Query: eval.Query, QueryClass: eval.QueryClass,
+		AllowedTiers: eval.AllowedTiers, Limit: 20, TokenBudget: tokenBudget,
+	}
+	started := time.Now()
+	first, err := search(ctx, options)
+	if err != nil {
+		return CaseOutcome{}, err
+	}
+	second, err := search(ctx, options)
+	if err != nil {
+		return CaseOutcome{}, err
+	}
+	outcome := CaseOutcome{CaseID: eval.ID, Split: eval.Split, Topic: eval.Topic}
+	seenPaths := map[string]bool{}
+	seenRelevant := map[string]bool{}
+	seenPassages := map[string]bool{}
+	foundCitations := map[string]bool{}
+	hardNegatives := map[string]bool{}
+	citationMetadataSafe := true
+	authoritySafe := true
+	for _, result := range first.Results {
+		path := result.Citation.Path
+		outcome.Paths = append(outcome.Paths, path)
+		outcome.Tiers = append(outcome.Tiers, result.Citation.Tier)
+		outcome.ChunkIDs = append(outcome.ChunkIDs, result.ChunkID)
+		outcome.ContentHashes = append(outcome.ContentHashes, result.Citation.ContentHash)
+		if !seenPaths[path] {
+			seenPaths[path] = true
+			outcome.ReturnedUniquePaths++
+		}
+		if contains(eval.ExpectedPaths, path) && !seenRelevant[path] {
+			seenRelevant[path] = true
+			outcome.RelevantPaths = append(outcome.RelevantPaths, path)
+			outcome.RelevantRanks = append(outcome.RelevantRanks, len(outcome.Paths))
+			outcome.RelevantTokens += EstimateTokens(result.Passage)
+		}
+		if contains(eval.ExpectedCitations, path) {
+			foundCitations[path] = true
+		}
+		if contains(eval.HardNegativePaths, path) {
+			hardNegatives[path] = true
+		}
+		if seenPassages[result.Citation.ContentHash] {
+			outcome.DuplicateTokens += EstimateTokens(result.Passage)
+		}
+		seenPassages[result.Citation.ContentHash] = true
+		if result.Citation.Path == "" || result.Citation.StartLine < 1 ||
+			result.Citation.EndLine < result.Citation.StartLine ||
+			len(result.Citation.ContentHash) != 64 ||
+			!strings.HasPrefix(result.Citation.URI,
+				"re-discipline://"+first.Metadata.Generation+"/chunks/") {
+			citationMetadataSafe = false
+		}
+		if contains(eval.ForbiddenTiers, result.Citation.Tier) {
+			authoritySafe = false
+		}
+	}
+	outcome.HardNegativeHits = mapKeysSorted(hardNegatives)
+	outcome.ExpectedCitationsFound = mapKeysSorted(foundCitations)
+	outcome.AuthoritySafe = authoritySafe && len(outcome.HardNegativeHits) == 0
+	outcome.CompleteEvidence = true
+	for _, expected := range eval.MinimumEvidencePaths {
+		if !seenPaths[expected] {
+			outcome.CompleteEvidence = false
+		}
+	}
+	if *eval.Answerable {
+		outcome.ExpectedFound = len(outcome.RelevantPaths) > 0 && outcome.CompleteEvidence
+		outcome.AbstentionCorrect = len(first.Results) > 0
+	} else {
+		outcome.ExpectedFound = len(first.Results) == 0
+		outcome.CompleteEvidence = len(first.Results) == 0
+		outcome.AbstentionCorrect = len(first.Results) == 0
+	}
+	outcome.CitationMetadataSafe = citationMetadataSafe
+	outcome.CitationSafe = citationMetadataSafe
+	for _, expected := range eval.ExpectedCitations {
+		if !foundCitations[expected] {
+			outcome.CitationSafe = false
+		}
+	}
+	outcome.CorpusMatched = eval.CorpusSnapshot == "fixture:packaged-conformance-v1" ||
+		eval.CorpusSnapshot == first.Metadata.CorpusFingerprint
+	outcome.EstimatedTokens = first.EstimatedTokens
+	outcome.ReturnedTokens = first.EstimatedTokens
+	outcome.BudgetSafe = first.EstimatedTokens <= tokenBudget
+	outcome.ReplayIdentical = stableJSON(first) == stableJSON(second)
+	outcome.MinimumTokenBudget = eval.TokenBudget
+	outcome.QualityGateApplicable = tokenBudget >= eval.TokenBudget
+	outcome.SafetyPassed = outcome.AuthoritySafe &&
+		outcome.CitationMetadataSafe && outcome.CorpusMatched &&
+		outcome.BudgetSafe && outcome.ReplayIdentical &&
+		outcome.StaleResults == 0
+	outcome.QualityPassed = !outcome.QualityGateApplicable ||
+		(outcome.ExpectedFound && outcome.CompleteEvidence &&
+			outcome.CitationSafe && outcome.AbstentionCorrect)
+	outcome.GatePassed = outcome.SafetyPassed && outcome.QualityPassed
+	outcome.LatencyMillis = time.Since(started).Milliseconds()
+	return outcome, nil
+}
+
+func evaluateContextPackCases(
+	ctx context.Context,
+	service *Service,
+	cases []EvalCase,
+	tokenBudget int,
+) ([]ContextPackOutcome, []string, error) {
+	_, _, selected, _, err := service.ensure(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	settings := service.effectiveSettings()
+	outcomes := make([]ContextPackOutcome, 0, len(cases))
+	roleSet := map[string]bool{}
+	for _, eval := range cases {
+		budget := tokenBudget
+		if budget == 0 {
+			budget = eval.TokenBudget
+		}
+		outcome := runContextPackCase(
+			ctx, service, selected, settings, eval, budget,
+		)
+		outcomes = append(outcomes, outcome)
+		roleSet[eval.Role] = true
+	}
+	return outcomes, mapKeysSorted(roleSet), nil
+}
+
+func runContextPackCase(
+	ctx context.Context,
+	service *Service,
+	selected SelectedProfile,
+	settings KnowledgeSettings,
+	eval EvalCase,
+	tokenBudget int,
+) ContextPackOutcome {
+	roleCeiling := settings.Budgets.ManagerContextTokens
+	if eval.Role == "drafter" {
+		roleCeiling = settings.Budgets.DrafterContextTokens
+	}
+	effectiveBudget := tokenBudget
+	if effectiveBudget > roleCeiling {
+		effectiveBudget = roleCeiling
+	}
+	requiredPaths := SortedUnique(append(
+		append([]string(nil), eval.MinimumEvidencePaths...),
+		eval.ExpectedCitations...,
+	))
+	outcome := ContextPackOutcome{
+		CaseID: eval.ID, Split: eval.Split, Topic: eval.Topic, Role: eval.Role,
+		RequestedTokenBudget: tokenBudget, EffectiveTokenBudget: effectiveBudget,
+		RoleTokenCeiling: roleCeiling,
+		MaxPassages:      selected.Effective.Packing.MaxPassages,
+		MaxBytes:         selected.Effective.Packing.MaxBytes,
+		RequiredPaths:    requiredPaths,
+		Paths:            []string{}, Tiers: []string{},
+		RequiredPathsFound:    []string{},
+		MinimumTokenBudget:    eval.TokenBudget,
+		QualityGateApplicable: tokenBudget >= eval.TokenBudget,
+	}
+	injectedRequired := requiredPaths
+	if !outcome.QualityGateApplicable {
+		// Below a case's declared evidence budget, measure safety and packing
+		// without forcing evidence that is explicitly known not to fit.
+		injectedRequired = nil
+	}
+	first, err := service.ContextPackRequired(
+		ctx, eval.Query, eval.Role, eval.AllowedTiers,
+		tokenBudget, injectedRequired,
+	)
+	if err != nil {
+		outcome.Error = err.Error()
+		return outcome
+	}
+	second, err := service.ContextPackRequired(
+		ctx, eval.Query, eval.Role, eval.AllowedTiers,
+		tokenBudget, injectedRequired,
+	)
+	if err != nil {
+		outcome.Error = err.Error()
+		return outcome
+	}
+	body, err := json.Marshal(first)
+	if err != nil {
+		outcome.Error = err.Error()
+		return outcome
+	}
+	outcome.PackID = first.PackID
+	outcome.Digest = first.Digest
+	outcome.Generation = first.Generation.ID
+	outcome.EffectiveProfile = first.EffectiveProfile
+	outcome.PassageCount = len(first.Passages)
+	outcome.SerializedBytes = len(body)
+	outcome.EstimatedTokens = first.EstimatedTokens
+	outcome.ReplayIdentical = stableJSON(first) == stableJSON(second)
+	outcome.RoleCeilingSafe =
+		first.TokenBudget == effectiveBudget &&
+			first.TokenBudget <= roleCeiling
+	outcome.PassageCapSafe = len(first.Passages) <= outcome.MaxPassages
+	outcome.ByteCapSafe = len(body) <= outcome.MaxBytes
+	outcome.TokenAccountingSafe =
+		EstimateTokens(string(body)) == first.EstimatedTokens
+	outcome.BudgetSafe =
+		first.EstimatedTokens <= first.TokenBudget &&
+			first.TokenBudget <= effectiveBudget
+	outcome.ProfilePinned =
+		first.EffectiveProfile == selected.EffectiveIdentity
+	outcome.GenerationPinned = first.Generation.ID != ""
+	allowed := SortedUnique(eval.AllowedTiers)
+	outcome.AllowedTiersSafe = stableJSON(first.AllowedTiers) == stableJSON(allowed)
+	foundPaths := map[string]bool{}
+	expectedFound := false
+	for _, passage := range first.Passages {
+		outcome.Paths = append(outcome.Paths, passage.Citation.Path)
+		outcome.Tiers = append(outcome.Tiers, passage.Citation.Tier)
+		foundPaths[passage.Citation.Path] = true
+		if contains(eval.ExpectedPaths, passage.Citation.Path) {
+			expectedFound = true
+		}
+		if !contains(allowed, passage.Citation.Tier) ||
+			!strings.HasPrefix(
+				passage.Citation.URI,
+				"re-discipline://"+first.Generation.ID+"/",
+			) {
+			outcome.AllowedTiersSafe = false
+			outcome.GenerationPinned = false
+		}
+	}
+	for _, required := range requiredPaths {
+		if foundPaths[required] {
+			outcome.RequiredPathsFound = append(
+				outcome.RequiredPathsFound, required)
+		}
+	}
+	outcome.RequiredPathsFound = SortedUnique(outcome.RequiredPathsFound)
+	outcome.RequiredEvidencePresent =
+		len(outcome.RequiredPathsFound) == len(requiredPaths)
+	if eval.Answerable != nil && *eval.Answerable {
+		outcome.ExpectedEvidenceFound = expectedFound
+		outcome.AbstentionCorrect = len(first.Passages) > 0
+	} else {
+		outcome.ExpectedEvidenceFound = len(first.Passages) == 0
+		outcome.AbstentionCorrect = len(first.Passages) == 0
+	}
+	if _, err := VerifyContextPackValueExpected(
+		first, first.Digest, first.PackID,
+	); err == nil {
+		outcome.VerificationPassed = true
+	} else {
+		outcome.Error = err.Error()
+	}
+	outcome.SafetyPassed =
+		outcome.RoleCeilingSafe && outcome.AllowedTiersSafe &&
+			outcome.PassageCapSafe && outcome.ByteCapSafe &&
+			outcome.TokenAccountingSafe && outcome.BudgetSafe &&
+			outcome.GenerationPinned && outcome.ProfilePinned &&
+			outcome.VerificationPassed && outcome.ReplayIdentical
+	outcome.QualityPassed = !outcome.QualityGateApplicable ||
+		(outcome.RequiredEvidencePresent &&
+			outcome.ExpectedEvidenceFound && outcome.AbstentionCorrect)
+	outcome.Passed = outcome.SafetyPassed && outcome.QualityPassed
+	return outcome
+}
+
+func evaluationOutcomePassed(outcome CaseOutcome) bool {
+	return outcome.GatePassed
+}
+
+func contextPackOutcomesPassed(outcomes []ContextPackOutcome) bool {
+	if len(outcomes) == 0 {
+		return false
+	}
+	for _, outcome := range outcomes {
+		if !outcome.Passed {
+			return false
+		}
+	}
+	return true
+}
+
+func contextPackOutcomesForDigest(
+	outcomes []ContextPackOutcome,
+) []ContextPackOutcome {
+	normalized := append([]ContextPackOutcome(nil), outcomes...)
+	for index := range normalized {
+		normalized[index].PackID = ""
+		normalized[index].Digest = ""
+		normalized[index].Generation = ""
+	}
+	return normalized
+}
+
+func contextPackBudgetsForDigest(
+	input map[string][]ContextPackOutcome,
+) map[string][]ContextPackOutcome {
+	normalized := make(map[string][]ContextPackOutcome, len(input))
+	for budget, outcomes := range input {
+		normalized[budget] = contextPackOutcomesForDigest(outcomes)
+	}
+	return normalized
+}
+
+func applicableMetrics(
+	outcomes []CaseOutcome,
+	cases []EvalCase,
+) QualityMetrics {
+	applicableOutcomes := []CaseOutcome{}
+	applicableCases := []EvalCase{}
+	for index, outcome := range outcomes {
+		if outcome.QualityGateApplicable {
+			applicableOutcomes = append(applicableOutcomes, outcome)
+			applicableCases = append(applicableCases, cases[index])
+		}
+	}
+	return calculateMetrics(applicableOutcomes, applicableCases)
+}
+
+func calculateMetrics(outcomes []CaseOutcome, cases []EvalCase) QualityMetrics {
+	var expected, found, returned, relevant, totalTokens, relevantTokens, duplicateTokens int
+	var expectedCitations, foundCitations, returnedCitations, staleResults int
+	var reciprocal, ndcg float64
+	violations, citationViolations, hardNegativeHits, replay := 0, 0, 0, 0
+	completeEvidence, abstentionCorrect, budgetSafe, exactCases, exactHits := 0, 0, 0, 0, 0
+	latencies := make([]int64, 0, len(outcomes))
+	for index, outcome := range outcomes {
+		eval := cases[index]
+		expected += len(eval.ExpectedPaths)
+		found += len(outcome.RelevantPaths)
+		returned += outcome.ReturnedUniquePaths
+		relevant += len(outcome.RelevantPaths)
+		totalTokens += outcome.ReturnedTokens
+		relevantTokens += outcome.RelevantTokens
+		duplicateTokens += outcome.DuplicateTokens
+		expectedCitations += len(eval.ExpectedCitations)
+		foundCitations += len(outcome.ExpectedCitationsFound)
+		returnedCitations += outcome.ReturnedUniquePaths
+		staleResults += outcome.StaleResults
+		if eval.QueryClass == "exact" && *eval.Answerable {
+			exactCases++
+			if len(outcome.RelevantRanks) > 0 {
+				exactHits++
+				reciprocal += 1.0 / float64(outcome.RelevantRanks[0])
+			}
+		}
+		if outcome.CompleteEvidence {
+			completeEvidence++
+		}
+		if outcome.AbstentionCorrect {
+			abstentionCorrect++
+		}
+		if outcome.BudgetSafe {
+			budgetSafe++
+		}
+		if !outcome.AuthoritySafe {
+			violations++
+		}
+		if !outcome.CitationSafe {
+			citationViolations++
+		}
+		hardNegativeHits += len(outcome.HardNegativeHits)
+		if outcome.ReplayIdentical {
+			replay++
+		}
+		grades := make([]int, 0, len(eval.ExpectedPaths))
+		for _, path := range eval.ExpectedPaths {
+			grade := eval.GradedRelevantPaths[path]
+			if grade == 0 {
+				grade = 1
+			}
+			grades = append(grades, grade)
+		}
+		var dcg float64
+		for rankIndex, rank := range outcome.RelevantRanks {
+			path := outcome.RelevantPaths[rankIndex]
+			grade := eval.GradedRelevantPaths[path]
+			if grade == 0 {
+				grade = 1
+			}
+			dcg += float64((int64(1)<<grade)-1) / math.Log2(float64(rank)+1)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(grades)))
+		var ideal float64
+		for rank, grade := range grades {
+			ideal += float64((int64(1)<<grade)-1) / math.Log2(float64(rank+2))
+		}
+		if ideal > 0 {
+			ndcg += dcg / ideal
+		} else if len(outcome.Paths) == 0 {
+			ndcg += 1
+		}
+		latencies = append(latencies, outcome.LatencyMillis)
+	}
+	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+	metrics := QualityMetrics{
+		AuthorityViolations: violations, CitationViolations: citationViolations,
+		HardNegativeHits: hardNegativeHits,
+	}
+	if expected > 0 {
+		metrics.RecallAtK = float64(found) / float64(expected)
+		metrics.SupportingEvidenceRecall = metrics.RecallAtK
+	}
+	if returned > 0 {
+		metrics.PrecisionAtK = float64(relevant) / float64(returned)
+	}
+	if len(outcomes) > 0 {
+		if exactCases > 0 {
+			metrics.MeanReciprocalRank = reciprocal / float64(exactCases)
+			metrics.ExactIdentifierHitRate = float64(exactHits) / float64(exactCases)
+		}
+		metrics.NDCG = ndcg / float64(len(outcomes))
+		metrics.CompleteEvidenceCoverage = float64(completeEvidence) / float64(len(outcomes))
+		metrics.AbstentionAccuracy = float64(abstentionCorrect) / float64(len(outcomes))
+		metrics.BudgetComplianceRate = float64(budgetSafe) / float64(len(outcomes))
+		metrics.AuthorityViolationRate = float64(violations) / float64(len(outcomes))
+		metrics.DeterministicReplayRate = float64(replay) / float64(len(outcomes))
+		metrics.P50LatencyMillis = percentileMillis(latencies, 0.50)
+		metrics.P95LatencyMillis = percentileMillis(latencies, 0.95)
+	}
+	if expectedCitations > 0 {
+		metrics.CitationRecall = float64(foundCitations) / float64(expectedCitations)
+	}
+	if returnedCitations > 0 {
+		metrics.CitationPrecision = float64(foundCitations) / float64(returnedCitations)
+		metrics.StaleResultRate = float64(staleResults) / float64(returnedCitations)
+	}
+	if totalTokens > 0 {
+		metrics.RelevantTokenRatio = float64(relevantTokens) / float64(totalTokens)
+		metrics.DuplicateTokenRatio = float64(duplicateTokens) / float64(totalTokens)
+	}
+	return metrics
+}
+
+func metricsWithoutLatency(metrics QualityMetrics) QualityMetrics {
+	metrics.P50LatencyMillis = 0
+	metrics.P95LatencyMillis = 0
+	return metrics
+}
+
+func filterEvalSplit(
+	outcomes []CaseOutcome,
+	cases []EvalCase,
+	split string,
+) ([]CaseOutcome, []EvalCase) {
+	selectedOutcomes := []CaseOutcome{}
+	selectedCases := []EvalCase{}
+	for index, eval := range cases {
+		if eval.Split == split {
+			selectedOutcomes = append(selectedOutcomes, outcomes[index])
+			selectedCases = append(selectedCases, eval)
+		}
+	}
+	return selectedOutcomes, selectedCases
+}
+
+func mapKeysSorted(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func percentileMillis(values []int64, quantile float64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	index := int(math.Ceil(float64(len(values))*quantile)) - 1
+	if index < 0 {
+		index = 0
+	}
+	return values[index]
+}
+
+func copyTree(source, target string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(target, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0o700)
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("fixture contains unsupported file type: %s", path)
+		}
+		input, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	})
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (service *Service) DeterministicReplay(
+	ctx context.Context,
+	options SearchOptions,
+) (map[string]any, error) {
+	first, err := service.Search(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	second, err := service.Search(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	firstDigest, _ := CanonicalDigest(first)
+	secondDigest, _ := CanonicalDigest(second)
+	return map[string]any{
+		"identical":   stableJSON(first) == stableJSON(second),
+		"firstDigest": firstDigest, "secondDigest": secondDigest,
+		"replayHandle": first.Metadata.DeterministicReplay,
+	}, nil
+}
+
+func VerifyContextPack(path string, expected ...string) (map[string]any, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > 262144 {
+		return nil, errors.New("context pack file has unsafe type or size")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var pack ContextPack
+	if err := decodeStrict(body, &pack); err != nil {
+		return nil, err
+	}
+	expectedDigest, expectedID := "", ""
+	if len(expected) > 0 {
+		expectedDigest = expected[0]
+	}
+	if len(expected) > 1 {
+		expectedID = expected[1]
+	}
+	if len(expected) > 2 {
+		return nil, errors.New("too many expected context-pack identities")
+	}
+	return VerifyContextPackValueExpected(pack, expectedDigest, expectedID)
+}
+
+func VerifyContextPackValue(pack ContextPack) (map[string]any, error) {
+	return VerifyContextPackValueExpected(pack, "", "")
+}
+
+func VerifyContextPackValueExpected(
+	pack ContextPack,
+	expectedDigest string,
+	expectedID string,
+) (map[string]any, error) {
+	if pack.SchemaVersion != 1 || pack.PackID == "" || pack.Digest == "" {
+		return nil, errors.New("context pack identity is missing")
+	}
+	claimedDigest, claimedID := pack.Digest, pack.PackID
+	if expectedDigest != "" {
+		if !sha256IdentityRE.MatchString(expectedDigest) {
+			return nil, errors.New("expected context-pack digest is malformed")
+		}
+		if expectedID == "" {
+			expectedID = "context-" + strings.TrimPrefix(expectedDigest, "sha256:")[:20]
+		}
+		if claimedDigest != expectedDigest || claimedID != expectedID {
+			return nil, errors.New(
+				"context pack does not match the independently expected manager identity")
+		}
+	} else if expectedID != "" {
+		return nil, errors.New("expected pack ID requires an expected digest")
+	}
+	pack.Digest, pack.PackID = "", ""
+	computed, err := CanonicalDigest(pack)
+	if err != nil {
+		return nil, err
+	}
+	computedID := "context-" + strings.TrimPrefix(computed, "sha256:")[:20]
+	valid := claimedDigest == computed && claimedID == computedID
+	if !valid {
+		return nil, errors.New("context pack digest or pack ID mismatch")
+	}
+	pack.Digest, pack.PackID = claimedDigest, claimedID
+	if err := validateContextPackSemantics(pack); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"valid": true, "packId": claimedID, "digest": claimedDigest,
+		"generation": pack.Generation, "effectiveProfile": pack.EffectiveProfile,
+	}, nil
+}
+
+func validateContextPackSemantics(pack ContextPack) error {
+	if len([]byte(pack.Query)) < 1 || len([]byte(pack.Query)) > 2000 {
+		return errors.New("context pack query is invalid")
+	}
+	if pack.Role != "manager" && pack.Role != "drafter" {
+		return errors.New("context pack role is invalid")
+	}
+	maximumBudget := 8192
+	if pack.Role == "drafter" {
+		maximumBudget = 4096
+	}
+	if pack.TokenBudget < 512 || pack.TokenBudget > maximumBudget ||
+		pack.EstimatedTokens < 1 || pack.EstimatedTokens > pack.TokenBudget {
+		return errors.New("context pack token bounds are invalid")
+	}
+	tiers, err := ValidateTierList(pack.AllowedTiers)
+	if err != nil || len(tiers) != len(pack.AllowedTiers) {
+		return errors.New("context pack epistemic tiers are invalid or repeated")
+	}
+	if strings.TrimSpace(pack.RequestedProfile) == "" ||
+		strings.TrimSpace(pack.EffectiveProfile) == "" {
+		return errors.New("context pack profile identities are missing")
+	}
+	laneSet := map[string]bool{}
+	for _, lane := range pack.ActiveLanes {
+		switch lane {
+		case "exact", "fts", "graph", "dense", "rerank":
+		default:
+			return fmt.Errorf("context pack has invalid active lane %q", lane)
+		}
+		if laneSet[lane] {
+			return errors.New("context pack repeats an active lane")
+		}
+		laneSet[lane] = true
+	}
+	if !laneSet["exact"] || !laneSet["fts"] || !laneSet["graph"] ||
+		laneSet["rerank"] && !laneSet["dense"] {
+		return errors.New("context pack active-lane shape is invalid")
+	}
+	if laneSet["dense"] && len(pack.Models) == 0 ||
+		laneSet["rerank"] && len(pack.Models) < 2 ||
+		!laneSet["dense"] && len(pack.Models) != 0 {
+		return errors.New("context pack model set disagrees with active lanes")
+	}
+	modelIDs := map[string]bool{}
+	for _, identity := range pack.Models {
+		separator := strings.LastIndex(identity, "@")
+		if separator < 1 || separator == len(identity)-1 {
+			return errors.New("context pack contains an invalid model identity")
+		}
+		modelID, revision := identity[:separator], identity[separator+1:]
+		if !profileIdentityRE.MatchString(modelID) ||
+			!modelRevisionRE.MatchString(revision) || modelIDs[modelID] {
+			return errors.New("context pack contains an invalid model identity")
+		}
+		modelIDs[modelID] = true
+	}
+	if pack.FallbackReason != nil &&
+		(strings.TrimSpace(*pack.FallbackReason) == "" ||
+			len([]byte(*pack.FallbackReason)) > 1000) {
+		return errors.New("context pack fallback reason is invalid")
+	}
+	generationID := pack.Generation.ID
+	if !strings.HasPrefix(generationID, "generation-") ||
+		len(generationID) != len("generation-")+20 ||
+		!hexDigestRE.MatchString(strings.Repeat("0", 44)+
+			strings.TrimPrefix(generationID, "generation-")) ||
+		!sha256IdentityRE.MatchString(pack.Generation.CorpusFingerprint) ||
+		!sha256IdentityRE.MatchString(pack.Generation.ModelFingerprint) ||
+		!sha256IdentityRE.MatchString(pack.Generation.RuntimeFingerprint) ||
+		strings.TrimSpace(pack.Generation.Project) == "" ||
+		strings.TrimSpace(pack.Generation.Worktree) == "" ||
+		pack.Generation.GitRevision == "" ||
+		pack.Generation.DirtyFingerprint == "" ||
+		pack.Generation.ParserVersion == "" ||
+		pack.Generation.ChunkerVersion == "" {
+		return errors.New("context pack generation identity is invalid")
+	}
+	if _, err := time.Parse(time.RFC3339, pack.Generation.CreatedAt); err != nil {
+		return errors.New("context pack generation createdAt is malformed")
+	}
+	requiredOmissions := map[string]bool{
+		"candidatePassages": true, "budget": true, "documentCap": true,
+		"resultLimit": true, "staleSource": true,
+	}
+	if len(pack.Omitted) != len(requiredOmissions) {
+		return errors.New("context pack omission counters have unsupported fields")
+	}
+	for key, value := range pack.Omitted {
+		if !requiredOmissions[key] || value < 0 {
+			return errors.New("context pack omission counters are invalid")
+		}
+	}
+	if len(pack.Passages) > 50 {
+		return errors.New("context pack passage cardinality is invalid")
+	}
+	seenChunks, seenHandles := map[string]bool{}, map[string]bool{}
+	for _, result := range pack.Passages {
+		if result.ChunkID == "" || seenChunks[result.ChunkID] ||
+			result.Passage == "" {
+			return errors.New("context pack passage identity is invalid or repeated")
+		}
+		seenChunks[result.ChunkID] = true
+		citation := result.Citation
+		if err := validateEvalPath(citation.Path); err != nil ||
+			citation.StartLine < 1 || citation.EndLine < citation.StartLine ||
+			!hexDigestRE.MatchString(citation.SourceHash) ||
+			!hexDigestRE.MatchString(citation.PassageHash) ||
+			citation.PassageHash != SHA256String(result.Passage) ||
+			!AllowedTiers[citation.Tier] || !contains(tiers, citation.Tier) {
+			return errors.New("context pack passage citation is invalid")
+		}
+		prefix := "re-discipline://" + generationID + "/"
+		if !strings.HasPrefix(citation.URI, prefix+"chunks/") &&
+			!strings.HasPrefix(citation.URI, prefix+"sources/") {
+			return errors.New("context pack citation belongs to another generation")
+		}
+		if seenHandles[citation.URI] {
+			return errors.New("context pack citation handles are repeated")
+		}
+		seenHandles[citation.URI] = true
+	}
+	body, err := json.Marshal(pack)
+	if err != nil {
+		return err
+	}
+	if len(body) > 262144 || EstimateTokens(string(body)) != pack.EstimatedTokens ||
+		pack.EstimatedTokens > pack.TokenBudget {
+		return errors.New("context pack serialized token or byte accounting is invalid")
+	}
+	return nil
+}
+
+type CalibrationCandidate struct {
+	Identity              string         `json:"identity"`
+	Weights               map[string]int `json:"weights"`
+	DevelopmentHit        int            `json:"developmentHits"`
+	HoldoutHit            int            `json:"holdoutHits"`
+	DevelopmentMetrics    QualityMetrics `json:"developmentMetrics"`
+	HoldoutMetrics        QualityMetrics `json:"holdoutMetrics"`
+	Violations            int            `json:"violations"`
+	HardGatesPassed       bool           `json:"hardGatesPassed"`
+	NonInferiorToBaseline bool           `json:"nonInferiorToBaseline"`
+	Pareto                bool           `json:"pareto"`
+	BenchmarkDigest       string         `json:"benchmarkDigest,omitempty"`
+}
+
+type CalibrationReport struct {
+	SchemaVersion     int                     `json:"schemaVersion"`
+	RunID             string                  `json:"runId"`
+	BaseProfile       string                  `json:"baseProfile"`
+	ActiveBefore      string                  `json:"activeBefore"`
+	ActiveAfter       string                  `json:"activeAfter"`
+	EvalDigest        string                  `json:"evalDigest"`
+	CorpusFingerprint string                  `json:"corpusFingerprint"`
+	ModelFingerprint  string                  `json:"modelFingerprint"`
+	RuntimeContract   RuntimeContractIdentity `json:"runtimeContract"`
+	Candidates        []CalibrationCandidate  `json:"candidates"`
+	ParetoFrontier    []CalibrationCandidate  `json:"paretoFrontier"`
+	Recommended       CalibrationCandidate    `json:"recommended"`
+	CandidatePath     string                  `json:"candidatePath"`
+	CandidateDigest   string                  `json:"candidateDigest"`
+	Activated         bool                    `json:"activated"`
+}
+
+func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error) {
+	cases, err := service.loadProjectEvalCases()
+	if err != nil {
+		return CalibrationReport{}, err
+	}
+	developmentCases, holdoutCases := splitEvalCases(cases)
+	if len(developmentCases) == 0 || len(holdoutCases) == 0 {
+		return CalibrationReport{}, errors.New(
+			"calibration requires topic-isolated development and holdout cases")
+	}
+	generation, _, selected, _, err := service.ensure(ctx)
+	if err != nil {
+		return CalibrationReport{}, err
+	}
+	before := selected.EffectiveIdentity
+	evalDigest, _ := CanonicalDigest(cases)
+	baselineRetriever := Retriever{
+		Boundary: service.Boundary, Generation: generation, Profile: selected,
+	}
+	_, baselineHoldoutMetrics, err := evaluateRetrieverCases(
+		ctx, baselineRetriever, holdoutCases)
+	if err != nil {
+		return CalibrationReport{}, fmt.Errorf(
+			"evaluate active holdout baseline: %w", err)
+	}
+	candidates := []CalibrationCandidate{}
+	rowsByIdentity := map[string]EffectiveProfile{}
+	for _, exact := range []int{6, 8, 10} {
+		for _, fts := range []int{4, 6, 8} {
+			for _, graph := range []int{1, 2, 3} {
+				for _, dense := range []int{2, 4, 6} {
+					row := cloneEffectiveProfile(selected.Effective)
+					row.Weights = map[string]int{
+						"exact": exact, "fts": fts, "graph": graph, "dense": dense,
+					}
+					candidateProfile, err := selectedForRow(
+						service.ProfileCatalog.ProfileID, row, selected.Runtime, selected.Models,
+					)
+					if err != nil {
+						return CalibrationReport{}, err
+					}
+					retriever := Retriever{
+						Boundary: service.Boundary, Generation: generation, Profile: candidateProfile,
+					}
+					outcomes, metrics, err := evaluateRetrieverCases(ctx, retriever, developmentCases)
+					if err != nil {
+						return CalibrationReport{}, err
+					}
+					hits := relevantPathHits(outcomes)
+					candidate := CalibrationCandidate{
+						Identity: candidateProfile.EffectiveIdentity,
+						Weights:  cloneWeights(row.Weights), DevelopmentHit: hits,
+						DevelopmentMetrics: metrics,
+						Violations: metrics.AuthorityViolations + metrics.CitationViolations +
+							metrics.HardNegativeHits,
+						HardGatesPassed: hardMetricsPassed(metrics),
+					}
+					candidates = append(candidates, candidate)
+					rowsByIdentity[candidate.Identity] = row
+				}
+			}
+		}
+	}
+	frontierIndexes := paretoFrontierIndexes(candidates)
+	if len(frontierIndexes) == 0 {
+		return CalibrationReport{}, errors.New("no calibration candidate passed hard gates")
+	}
+	for _, index := range frontierIndexes {
+		row := rowsByIdentity[candidates[index].Identity]
+		candidateProfile, err := selectedForRow(
+			service.ProfileCatalog.ProfileID, row, selected.Runtime, selected.Models,
+		)
+		if err != nil {
+			return CalibrationReport{}, err
+		}
+		retriever := Retriever{
+			Boundary: service.Boundary, Generation: generation, Profile: candidateProfile,
+		}
+		outcomes, metrics, err := evaluateRetrieverCases(ctx, retriever, holdoutCases)
+		if err != nil {
+			return CalibrationReport{}, err
+		}
+		candidates[index].HoldoutHit = relevantPathHits(outcomes)
+		candidates[index].HoldoutMetrics = metrics
+		candidates[index].Pareto = true
+		candidates[index].HardGatesPassed =
+			candidates[index].HardGatesPassed && hardMetricsPassed(metrics)
+		candidates[index].NonInferiorToBaseline =
+			calibrationNonInferior(metrics, baselineHoldoutMetrics)
+		candidates[index].Violations +=
+			metrics.AuthorityViolations + metrics.CitationViolations +
+				metrics.HardNegativeHits
+		benchmarkDigest, _ := calibrationBenchmarkDigest(
+			candidates[index].Identity,
+			evalDigest,
+			generation.CorpusFingerprint,
+			candidates[index].DevelopmentMetrics,
+			candidates[index].HoldoutMetrics,
+			baselineHoldoutMetrics,
+		)
+		candidates[index].BenchmarkDigest = benchmarkDigest
+	}
+	frontier := []CalibrationCandidate{}
+	for _, index := range frontierIndexes {
+		if candidates[index].HardGatesPassed &&
+			candidates[index].NonInferiorToBaseline {
+			frontier = append(frontier, candidates[index])
+		}
+	}
+	if len(frontier) == 0 {
+		return CalibrationReport{}, errors.New("no Pareto finalist passed frozen holdout hard gates")
+	}
+	sort.Slice(frontier, func(i, j int) bool {
+		return calibrationCandidateLess(frontier[i], frontier[j])
+	})
+	recommended := frontier[0]
+	runID := nowRunID("calibration")
+	runDir, err := containedOutputPath(
+		filepath.Dir(service.Index.CacheRoot),
+		filepath.Join("calibration", runID),
+	)
+	if err != nil {
+		return CalibrationReport{}, err
+	}
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return CalibrationReport{}, err
+	}
+	candidateProfile := cloneRetrievalProfile(service.ProfileCatalog)
+	candidateProfile.BaseProfile = service.ProfileCatalog.ProfileID
+	candidateProfile.Approval = nil
+	candidateProfile.ProfileID = "project:candidate-" +
+		strings.TrimPrefix(strings.SplitN(recommended.Identity, "@", 2)[1], "sha256:")[:16]
+	for index := range candidateProfile.EffectiveProfiles {
+		if candidateProfile.EffectiveProfiles[index].Name == selected.Effective.Name {
+			candidateProfile.EffectiveProfiles[index].Weights = cloneWeights(recommended.Weights)
+			candidateProfile.EffectiveProfiles[index].Benchmark = BenchmarkEvidence{
+				Suite: "project-calibration-v1", Digest: recommended.BenchmarkDigest,
+				Status: "passed", EvaluatedAt: RFC3339UTC(time.Now()),
+				EvalFingerprint: evalDigest, CorpusFingerprint: generation.CorpusFingerprint,
+				ModelFingerprint: mustDigest(service.ModelManifest.Models),
+			}
+			runtimeDigest, _ := CanonicalDigest(RuntimeContract(selected.Runtime))
+			candidateProfile.EffectiveProfiles[index].Benchmark.RuntimeFingerprint = runtimeDigest
+		}
+	}
+	if err := ValidateProfile(candidateProfile); err != nil {
+		return CalibrationReport{}, fmt.Errorf("candidate capability matrix is invalid: %w", err)
+	}
+	candidatePath := filepath.Join(runDir, "candidate-profile.json")
+	if err := AtomicWriteJSON(candidatePath, candidateProfile, 0o600); err != nil {
+		return CalibrationReport{}, err
+	}
+	candidateBody, err := os.ReadFile(candidatePath)
+	if err != nil {
+		return CalibrationReport{}, err
+	}
+	candidateDigest := "sha256:" + SHA256Bytes(candidateBody)
+	afterSelected, err := service.selectProfile(generation.Runtime)
+	if err != nil || afterSelected.EffectiveIdentity != before {
+		return CalibrationReport{}, errors.New("active profile changed during calibration")
+	}
+	report := CalibrationReport{
+		SchemaVersion: 1, RunID: runID, BaseProfile: service.ProfileCatalog.ProfileID,
+		ActiveBefore: before, ActiveAfter: before, EvalDigest: evalDigest,
+		CorpusFingerprint: generation.CorpusFingerprint,
+		ModelFingerprint:  mustDigest(service.ModelManifest.Models),
+		RuntimeContract:   RuntimeContract(selected.Runtime),
+		Candidates:        candidates, ParetoFrontier: frontier, Recommended: recommended,
+		CandidatePath: filepath.ToSlash(candidatePath), CandidateDigest: candidateDigest,
+		Activated: false,
+	}
+	if err := AtomicWriteJSON(filepath.Join(runDir, "report.json"), report, 0o600); err != nil {
+		return CalibrationReport{}, err
+	}
+	return report, nil
+}
+
+func calibrationBenchmarkDigest(
+	identity string,
+	evalDigest string,
+	corpusFingerprint string,
+	development QualityMetrics,
+	holdout QualityMetrics,
+	baselineHoldout QualityMetrics,
+) (string, error) {
+	return CanonicalDigest(struct {
+		Suite           string         `json:"suite"`
+		Identity        string         `json:"identity"`
+		EvalDigest      string         `json:"evalDigest"`
+		Corpus          string         `json:"corpusFingerprint"`
+		Development     QualityMetrics `json:"development"`
+		Holdout         QualityMetrics `json:"holdout"`
+		BaselineHoldout QualityMetrics `json:"baselineHoldout"`
+	}{
+		"project-calibration-v1", identity, evalDigest, corpusFingerprint,
+		metricsWithoutLatency(development), metricsWithoutLatency(holdout),
+		metricsWithoutLatency(baselineHoldout),
+	})
+}
+
+func calibrationNonInferior(
+	candidate QualityMetrics,
+	baseline QualityMetrics,
+) bool {
+	return candidate.RecallAtK >= baseline.RecallAtK &&
+		candidate.NDCG >= baseline.NDCG &&
+		candidate.CompleteEvidenceCoverage >= baseline.CompleteEvidenceCoverage &&
+		candidate.CitationRecall >= baseline.CitationRecall &&
+		candidate.AuthorityViolations <= baseline.AuthorityViolations
+}
+
+func splitEvalCases(cases []EvalCase) ([]EvalCase, []EvalCase) {
+	development := []EvalCase{}
+	holdout := []EvalCase{}
+	for _, eval := range cases {
+		if eval.Split == "development" {
+			development = append(development, eval)
+		} else if eval.Split == "holdout" {
+			holdout = append(holdout, eval)
+		}
+	}
+	return development, holdout
+}
+
+func evaluateRetrieverCases(
+	ctx context.Context,
+	retriever Retriever,
+	cases []EvalCase,
+) ([]CaseOutcome, QualityMetrics, error) {
+	outcomes := make([]CaseOutcome, 0, len(cases))
+	for _, eval := range cases {
+		outcome, err := runEvaluationCase(ctx, eval, eval.TokenBudget, retriever.Search)
+		if err != nil {
+			return nil, QualityMetrics{}, fmt.Errorf("case %s: %w", eval.ID, err)
+		}
+		outcomes = append(outcomes, outcome)
+	}
+	return outcomes, calculateMetrics(outcomes, cases), nil
+}
+
+func relevantPathHits(outcomes []CaseOutcome) int {
+	hits := 0
+	for _, outcome := range outcomes {
+		hits += len(outcome.RelevantPaths)
+	}
+	return hits
+}
+
+func hardMetricsPassed(metrics QualityMetrics) bool {
+	return metrics.AuthorityViolations == 0 && metrics.CitationViolations == 0 &&
+		metrics.HardNegativeHits == 0 && metrics.StaleResultRate == 0 &&
+		metrics.BudgetComplianceRate == 1 && metrics.DeterministicReplayRate == 1 &&
+		metrics.AbstentionAccuracy == 1
+}
+
+func hasApplicableQualityGate(outcomes []CaseOutcome) bool {
+	for _, outcome := range outcomes {
+		if outcome.QualityGateApplicable {
+			return true
+		}
+	}
+	return false
+}
+
+func paretoFrontierIndexes(candidates []CalibrationCandidate) []int {
+	frontier := []int{}
+	for index, candidate := range candidates {
+		if !candidate.HardGatesPassed {
+			continue
+		}
+		dominated := false
+		for otherIndex, other := range candidates {
+			if otherIndex != index && other.HardGatesPassed &&
+				developmentDominates(other.DevelopmentMetrics, candidate.DevelopmentMetrics) {
+				dominated = true
+				break
+			}
+		}
+		if !dominated {
+			frontier = append(frontier, index)
+		}
+	}
+	return frontier
+}
+
+func developmentDominates(left, right QualityMetrics) bool {
+	notWorse := left.RecallAtK >= right.RecallAtK &&
+		left.NDCG >= right.NDCG &&
+		left.CompleteEvidenceCoverage >= right.CompleteEvidenceCoverage &&
+		left.CitationRecall >= right.CitationRecall &&
+		left.RelevantTokenRatio >= right.RelevantTokenRatio &&
+		left.DuplicateTokenRatio <= right.DuplicateTokenRatio
+	strict := left.RecallAtK > right.RecallAtK ||
+		left.NDCG > right.NDCG ||
+		left.CompleteEvidenceCoverage > right.CompleteEvidenceCoverage ||
+		left.CitationRecall > right.CitationRecall ||
+		left.RelevantTokenRatio > right.RelevantTokenRatio ||
+		left.DuplicateTokenRatio < right.DuplicateTokenRatio
+	return notWorse && strict
+}
+
+func calibrationCandidateLess(left, right CalibrationCandidate) bool {
+	for _, pair := range [][2]float64{
+		{left.HoldoutMetrics.CompleteEvidenceCoverage, right.HoldoutMetrics.CompleteEvidenceCoverage},
+		{left.HoldoutMetrics.RecallAtK, right.HoldoutMetrics.RecallAtK},
+		{left.HoldoutMetrics.NDCG, right.HoldoutMetrics.NDCG},
+		{left.DevelopmentMetrics.RecallAtK, right.DevelopmentMetrics.RecallAtK},
+		{left.DevelopmentMetrics.RelevantTokenRatio, right.DevelopmentMetrics.RelevantTokenRatio},
+	} {
+		if pair[0] != pair[1] {
+			return pair[0] > pair[1]
+		}
+	}
+	if left.HoldoutMetrics.DuplicateTokenRatio != right.HoldoutMetrics.DuplicateTokenRatio {
+		return left.HoldoutMetrics.DuplicateTokenRatio < right.HoldoutMetrics.DuplicateTokenRatio
+	}
+	return stableJSON(left.Weights) < stableJSON(right.Weights)
+}
+
+func cloneWeights(input map[string]int) map[string]int {
+	output := make(map[string]int, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
+}
+
+func cloneEffectiveProfile(input EffectiveProfile) EffectiveProfile {
+	output := input
+	output.Lanes = append([]string(nil), input.Lanes...)
+	output.Weights = cloneWeights(input.Weights)
+	if input.Requires.Embedding != nil {
+		value := *input.Requires.Embedding
+		output.Requires.Embedding = &value
+	}
+	if input.Requires.Reranker != nil {
+		value := *input.Requires.Reranker
+		output.Requires.Reranker = &value
+	}
+	return output
+}
+
+func cloneRetrievalProfile(input RetrievalProfile) RetrievalProfile {
+	output := input
+	output.Approval = nil
+	output.EffectiveProfiles = make([]EffectiveProfile, len(input.EffectiveProfiles))
+	for index, row := range input.EffectiveProfiles {
+		output.EffectiveProfiles[index] = cloneEffectiveProfile(row)
+	}
+	return output
+}
+
+func selectedForRow(
+	requested string,
+	row EffectiveProfile,
+	runtime RuntimeIdentity,
+	models []ModelIdentity,
+) (SelectedProfile, error) {
+	requestedDigest, _ := CanonicalDigest(requested)
+	identity, err := CanonicalDigest(struct {
+		Profile EffectiveProfile
+		Runtime RuntimeContractIdentity
+		Models  []ModelIdentity
+	}{runtimeEffectiveProfile(row), RuntimeContract(runtime), models})
+	if err != nil {
+		return SelectedProfile{}, err
+	}
+	return SelectedProfile{
+		RequestedIdentity: requested + "@" + requestedDigest,
+		EffectiveIdentity: row.Name + "@" + identity,
+		Effective:         row, ActiveLanes: row.Lanes, Models: models, Runtime: runtime,
+	}, nil
+}
+
+func (service *Service) loadProjectEvalCases() ([]EvalCase, error) {
+	root := filepath.Join(service.Boundary.Root, ".re-discipline", "knowledge", "evals")
+	canonicalRoot, err := canonicalExistingPath(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.New("no ratified project evaluation cases exist")
+		}
+		return nil, err
+	}
+	if !withinRoot(service.Boundary.Root, canonicalRoot) {
+		return nil, errors.New("project evaluation root escapes the project boundary")
+	}
+	cases := []EvalCase{}
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("evaluation corpus contains a symbolic link: %s", path)
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+			return nil
+		}
+		resolved, err := canonicalExistingPath(path)
+		if err != nil {
+			return err
+		}
+		if !withinRoot(canonicalRoot, resolved) {
+			return errors.New("evaluation case file escapes the evaluation root")
+		}
+		loaded, err := LoadEvalCases(resolved)
+		if err != nil {
+			return err
+		}
+		cases = append(cases, loaded...)
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.New("no ratified project evaluation cases exist")
+		}
+		return nil, err
+	}
+	if len(cases) == 0 {
+		return nil, errors.New("no ratified project evaluation cases exist")
+	}
+	if err := ValidateEvalCorpus(cases); err != nil {
+		return nil, fmt.Errorf("combined project evaluation corpus: %w", err)
+	}
+	return cases, nil
+}
