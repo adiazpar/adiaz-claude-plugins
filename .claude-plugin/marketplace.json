@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "adiaz-claude-plugins",
-  "description": "Solo-founder product-discovery toolkit: cofounder runs a single-session founding meeting that takes you from nothing to a chosen direction and an actionable plan with a falsifiable first move.",
+  "description": "Alex Diaz's Claude Code plugins for evidence-disciplined research, shared project knowledge, and structured product discovery.",
   "owner": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
@@ -17,7 +17,7 @@
       }
     },
     {
-      "description": "Campaign and knowledge management for Claude Code and Codex with one canonical project profile, thin host adapters, evidence-gated truth, and an always-present host-neutral external-agent framework.",
+      "description": "Campaign and shared-knowledge management for Claude Code and Codex with one canonical profile, a local retrieval server, evidence-gated truth, and governed cross-agent recall.",
       "name": "re-discipline",
       "source": "./plugins/re-discipline",
       "author": {

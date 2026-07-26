@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin:linear-reranker-v1",
+  "revision": "1",
+  "license": "MIT",
+  "algorithm": "fixed-int64-linear-reranker",
+  "features": {
+    "contentExactPhraseCount": 10000,
+    "headingExactPhraseCount": 6000,
+    "pathExactPhraseCount": 4000,
+    "contentQueryTokenPresent": 1000,
+    "headingQueryTokenPresent": 1500,
+    "pathQueryTokenPresent": 1200
+  },
+  "queryTokenization": "shared modelTokens Unicode normalization contract with sorted unique unigrams",
+  "combination": "fusion-score plus reranker-score times 1000",
+  "tieBreaker": "fusion-score-desc,path-asc,start-line-asc,chunk-id-asc",
+  "arithmetic": "signed-int64",
+  "networkRequired": false
+}

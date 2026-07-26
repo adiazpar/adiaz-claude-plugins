@@ -11,12 +11,18 @@ description: >-
 A report is a draft about evidence, not the evidence itself. The manager must
 rederive every claim that could affect durable truth.
 
-## Step 1: Read Report And Primary Artifacts
+## Step 1: Read Brief, Pack, Report, And Primary Artifacts
 
-Read `active/<slug>/subagents/<workspace-id>/report.md` in full. Treat the
-directory segment as an opaque workspace key. New keys carry timestamp,
-executor, and task text; legacy task-only or provider-prefixed keys remain
-valid. Never parse, normalize, or rename either form during review.
+Read `brief.md`, its named immutable `context-pack.json`, and `report.md` in
+full. Verify the pack digest, budget, allowed tiers, corpus generation,
+requested and effective retrieval profiles, active lanes, and fallback reason.
+Treat the directory segment as an opaque workspace key. New keys carry
+timestamp, executor, and task text; legacy task-only or provider-prefixed keys
+remain valid. Never parse, normalize, or rename either form during review.
+
+Check every context-pack citation against its source path, line span, and hash.
+Treat a stale, missing, over-budget, or forbidden-tier passage as a retrieval
+defect, not support for the report.
 
 The report's confidence color is a prior, not a verdict. Follow every
 value-precise claim to the cited output, source file, capture, or primary
@@ -51,6 +57,12 @@ the claim's exact values and key terms. Classify hits as:
 Resolve contradictions at the primary-artifact layer. Do not accept or reject
 a report because two summaries use different words.
 
+When knowledge retrieval omitted a source the brief required, record a
+candidate evaluation case with the query, expected source, allowed tiers,
+effective profile, budget, and observed miss. Add it to tracked project evals
+only after a manager or user ratifies the expected evidence and hard
+negatives. A drafter never supplies its own gold label.
+
 ## Step 4: Assign Dispositions
 
 | Verdict | Condition | Action |
@@ -68,15 +80,21 @@ Present a compact table of claim, evidence class, primary artifact, conflict
 status, and proposed disposition. Obtain user approval before invoking
 `promote-truth` or `overturn`. Never edit truth directly from this skill.
 
-Treat MEMORY CANDIDATES as suggestions. Deduplicate them against checked-in
-guidance and the active host's memory policy. Persist one only when the user
-requests it and its supporting claim is DIRECT.
+Treat MEMORY CANDIDATES as suggestions. Deduplicate them against canonical
+guidance and accepted shared memory, reject secrets and private paths, and
+separate operational recall from empirical claims. Record a viable candidate
+only as a bounded proposal under `.re-discipline/memory/proposals/`, directly
+or through `recall_propose`. Never write it to accepted topics. Route later
+acceptance or rejection through `review-memory` with an explicit user
+decision.
 
 ## Step 6: Update Campaign State
 
-Record the report, review date, PROMOTE/HOLD/DROP/BLOCK outcomes, corrections,
-and any blocking uncertainty in `CAMPAIGN.md`. Keep report artifacts in place
-until closure disposition.
+Record the report, context-pack ID and digest, review date,
+PROMOTE/HOLD/DROP/BLOCK outcomes, corrections, retrieval-evaluation
+candidates, memory-proposal paths, and any blocking uncertainty in
+`CAMPAIGN.md`. Keep report and context-pack artifacts in place until closure
+disposition.
 
 Verify that every proposed promotion has a maintained source, permanent test
 and fixture, or runnable recipe. Reject a chronicle as sole empirical support,
@@ -87,5 +105,7 @@ Do not commit unless the user explicitly asks.
 ## Reference
 
 - Manager law: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.
+- Knowledge governance: `<plugin-root>/references/knowledge-governance.md`.
 - Promotion: `promote-truth`.
+- Memory decision: `review-memory`.
 - Follow-up delegation: `delegate`.

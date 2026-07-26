@@ -1,0 +1,243 @@
+name: re-discipline
+
+on:
+  push:
+    paths:
+      - ".gitattributes"
+      - ".agents/plugins/marketplace.json"
+      - ".claude-plugin/marketplace.json"
+      - ".github/workflows/re-discipline.yml"
+      - ".github/scripts/re-discipline-*"
+      - "plugins/re-discipline/**"
+      - "tests/test_re_discipline*.py"
+  pull_request:
+    paths:
+      - ".gitattributes"
+      - ".agents/plugins/marketplace.json"
+      - ".claude-plugin/marketplace.json"
+      - ".github/workflows/re-discipline.yml"
+      - ".github/scripts/re-discipline-*"
+      - "plugins/re-discipline/**"
+      - "tests/test_re_discipline*.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: re-discipline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOFLAGS: -mod=readonly
+  GOTELEMETRY: "off"
+
+jobs:
+  plugin-manifests:
+    name: Plugin and workflow manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Isolate host-native state
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p \
+            "$RUNNER_TEMP/re-discipline-claude-config" \
+            "$RUNNER_TEMP/re-discipline-codex-home"
+          printf 'CLAUDE_CONFIG_DIR=%s\n' "$RUNNER_TEMP/re-discipline-claude-config" >> "$GITHUB_ENV"
+          printf 'CODEX_HOME=%s\n' "$RUNNER_TEMP/re-discipline-codex-home" >> "$GITHUB_ENV"
+          printf 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n' >> "$GITHUB_ENV"
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: plugins/re-discipline/knowledge/go.mod
+          cache: false
+
+      - name: Validate workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/re-discipline.yml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+
+      - name: Install pinned host validators
+        run: npm install --global @anthropic-ai/claude-code@2.1.220 @openai/codex@0.145.0
+
+      - name: Validate Claude plugin manifest
+        run: claude plugin validate --strict plugins/re-discipline
+
+      - name: Validate and install Codex plugin manifest
+        shell: bash
+        run: |
+          set -eu
+          codex plugin marketplace add "$GITHUB_WORKSPACE" --json
+          codex plugin add re-discipline@adiaz-claude-plugins --json
+          codex plugin list --json
+
+  cross-platform:
+    name: ${{ matrix.os }} validation
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Isolate host-native state
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/re-discipline-claude-config" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/re-discipline-codex-home" | Out-Null
+          "CLAUDE_CONFIG_DIR=$env:RUNNER_TEMP/re-discipline-claude-config" >> $env:GITHUB_ENV
+          "CODEX_HOME=$env:RUNNER_TEMP/re-discipline-codex-home" >> $env:GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: plugins/re-discipline/knowledge/go.mod
+          cache-dependency-path: plugins/re-discipline/knowledge/go.sum
+
+      - name: Run Python contract and compatibility tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Check Go formatting
+        shell: pwsh
+        working-directory: plugins/re-discipline/knowledge
+        run: |
+          $unformatted = @(gofmt -l .)
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          if ($unformatted.Count -ne 0) {
+            $unformatted | ForEach-Object { Write-Error "gofmt required: $_" }
+            exit 1
+          }
+
+      - name: Verify Go module metadata is tidy
+        working-directory: plugins/re-discipline/knowledge
+        run: go mod tidy -diff
+
+      - name: Verify Go module checksums
+        working-directory: plugins/re-discipline/knowledge
+        run: go mod verify
+
+      - name: Run Go static analysis
+        working-directory: plugins/re-discipline/knowledge
+        run: go vet ./...
+
+      - name: Run Go unit tests
+        working-directory: plugins/re-discipline/knowledge
+        run: go test -count=1 ./...
+
+      - name: Build reproducible runtime package
+        working-directory: plugins/re-discipline/knowledge
+        run: go run ./cmd/re-discipline-knowledge-packager --output bin
+
+      - name: Verify runtime package manifest and checksums
+        working-directory: plugins/re-discipline/knowledge
+        run: go run ./cmd/re-discipline-knowledge-packager --output bin --verify
+
+      - name: Verify checked-in runtime package is current
+        shell: pwsh
+        working-directory: plugins/re-discipline/knowledge
+        run: |
+          $drift = @(git status --porcelain=v1 --untracked-files=all -- bin)
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          if ($drift.Count -ne 0) {
+            $drift | ForEach-Object { Write-Error "runtime package drift: $_" }
+            exit 1
+          }
+
+      - name: Verify POSIX executable modes
+        if: runner.os != 'Windows'
+        shell: bash
+        working-directory: plugins/re-discipline/knowledge
+        run: |
+          set -eu
+          for executable in \
+            bin/re-discipline-knowledge \
+            bin/linux-amd64/re-discipline-knowledge \
+            bin/linux-arm64/re-discipline-knowledge \
+            bin/darwin-amd64/re-discipline-knowledge \
+            bin/darwin-arm64/re-discipline-knowledge
+          do
+            test -f "$executable"
+            test -x "$executable"
+          done
+
+      - name: Run full packaged benchmark and digest gates
+        shell: pwsh
+        working-directory: plugins/re-discipline/knowledge
+        run: |
+          $goos = (go env GOOS).Trim()
+          $launcher = if ($goos -eq "windows") {
+            Join-Path "bin" "re-discipline-knowledge.exe"
+          } else {
+            Join-Path "bin" "re-discipline-knowledge"
+          }
+          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+            Write-Error "packager did not produce canonical launcher: $launcher"
+            exit 1
+          }
+          & (Resolve-Path -LiteralPath $launcher) benchmark --asset-root . --mode full
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+  race:
+    name: Go race detector
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Isolate host-native state
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/re-discipline-claude-config" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/re-discipline-codex-home" | Out-Null
+          "CLAUDE_CONFIG_DIR=$env:RUNNER_TEMP/re-discipline-claude-config" >> $env:GITHUB_ENV
+          "CODEX_HOME=$env:RUNNER_TEMP/re-discipline-codex-home" >> $env:GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: plugins/re-discipline/knowledge/go.mod
+          cache-dependency-path: plugins/re-discipline/knowledge/go.sum
+
+      - name: Run race-enabled unit tests
+        working-directory: plugins/re-discipline/knowledge
+        run: go test -race -count=1 ./...
+
+      - name: Run Go vulnerability analysis
+        working-directory: plugins/re-discipline/knowledge
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...

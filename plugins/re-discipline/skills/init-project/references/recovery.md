@@ -45,6 +45,30 @@ procedure. If no local file survives, render the neutral signature with a
 commented assignment instruction and ask for only the values required by
 current tools. Ensure the neutral file is ignored before writing values.
 
+## Recover Managed Knowledge Configuration Separately
+
+When the recovered profile contains
+`re-discipline:shared-laws v0.6.0` or newer, it declares that
+`.re-discipline/config.json`, required settings, and project host-memory policy
+files are managed:
+
+1. Restore each missing tracked file from `HEAD`, including a staged deletion.
+2. If a required file has never been tracked, render the current safe template
+   atomically and only when absent.
+3. Validate bootstrap schema, fixed relative settings paths, commented
+   knowledge policy, generated retrieval profile, and both project host
+   settings.
+4. Never overwrite a malformed existing file, downgrade a newer schema, or
+   reconstruct a machine-local grant.
+5. Report every restored path and leave the project in read-only degraded mode
+   until any malformed file is explicitly repaired.
+
+Do not inspect, copy, merge, or delete Claude or Codex native memory
+directories. Recovery restores only project-owned policy files. Explicit
+de-initialization removes or replaces the managed shared-law expectation
+marker before deleting configuration; as long as the marker survives,
+configuration deletion is treated as accidental.
+
 ## Verify
 
 - The canonical profile exists and contains confirmed identity frontmatter.
@@ -55,3 +79,6 @@ current tools. Ensure the neutral file is ignored before writing values.
 - Recovered host-specific instructions live in project-owned manager sections.
 - Legacy host profiles are deleted only after meaning preservation succeeds.
 - The report states whether recovery was exact, reconciled, or reconstructed.
+- Managed bootstrap/settings and selected host memory policy validate when the
+  recovered profile requires them.
+- No native memory directory or machine-local grant was touched.

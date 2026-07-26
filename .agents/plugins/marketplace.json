@@ -14,7 +14,11 @@
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
       },
-      "category": "Productivity"
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Re-Discipline",
+        "shortDescription": "Shared project knowledge and evidence workflow"
+      }
     }
   ]
 }

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/config.schema.json",
+  "title": "Re-Discipline bootstrap configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "settingsDirectory", "memory", "knowledge"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "settingsDirectory": {"const": "settings"},
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "writePolicy"],
+      "properties": {
+        "mode": {"enum": ["shared-only", "hybrid", "native"]},
+        "writePolicy": {"enum": ["proposal-only"]}
+      }
+    },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "profile", "settingsFile", "projectProfile"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "profile": {"const": "plugin:balanced-v1"},
+        "settingsFile": {"const": "settings/knowledge.jsonc"},
+        "projectProfile": {"const": "settings/retrieval-profile.json"}
+      }
+    }
+  }
+}

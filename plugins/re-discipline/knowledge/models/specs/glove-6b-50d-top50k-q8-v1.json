@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin:glove-6b-50d-top50k-q8-v1",
+  "revision": "1",
+  "license": "PDDL-1.0",
+  "algorithm": "mean-of-l2-normalized-glove-6b-50d-q8",
+  "dimensions": 50,
+  "tokenization": {
+    "case": "unicode-lowercase",
+    "acceptedCharacters": "unicode letters, unicode digits, underscore, hyphen, period, slash, colon, at-sign",
+    "minimumBytes": 2,
+    "maximumBytes": 200,
+    "features": ["unigram"]
+  },
+  "artifact": {
+    "path": "models/artifacts/glove-6b-50d-top50k-q8-v1.bin",
+    "sha256": "fb108eef095f00bcc06a38e10d7f9671d9e6664ab79ae8a2c1cef5b31375b2ab",
+    "format": "re-discipline-glove-q8",
+    "formatVersion": 1,
+    "vocabularySize": 50000,
+    "quantization": "per-vector-l2-normalized-signed-int8",
+    "quantizationScale": 127,
+    "tokenOrder": "ascending UTF-8 bytes"
+  },
+  "upstream": {
+    "project": "Stanford GloVe",
+    "url": "https://nlp.stanford.edu/projects/glove/",
+    "sourceArchive": "https://nlp.stanford.edu/data/glove.6B.zip",
+    "sourceArchiveSha256": "617afb2fe6cbd085c235baf7a465b96f4112bd7f7ccb2b2cbd649fed9cbcf2fb",
+    "sourceMember": "glove.6B.50d.txt",
+    "license": "PDDL-1.0",
+    "licenseUrl": "https://opendatacommons.org/licenses/pddl/1-0/"
+  },
+  "vector": {
+    "element": "signed-int32 accumulated sentence component",
+    "similarity": "signed-int64 dot product",
+    "minimumCosine": "0.30 represented as integer dot >= 32767*32767*30/100",
+    "normalization": "sum recognized Q8 token vectors plus low-amplitude signed feature-hash OOV components, then integer-L2 normalize to scale 32767 before signed-int64 dot product",
+    "oov": "FNV-1a maps each unrecognized unigram to one of 50 dimensions with magnitude 15 and a deterministic sign"
+  },
+  "networkRequired": false
+}

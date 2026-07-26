@@ -8,10 +8,12 @@ initialized before the neutral 0.2 profile topology.
 Read root and nested `AGENTS.md` files, `.codex/AGENTS.md`,
 `.codex/project-profile.md`, `.claude/CLAUDE.md`,
 `.claude/project-profile.md`, `.codex/local-paths.md`,
-`.claude/local-paths.md`, `.gitignore`, docs indexes, README files, dispatch
-scripts, campaign templates, truth files, chronicles, and git history. Search
-those sources for legacy archive semantics before treating any filesystem path
-as re-discipline state. Classify every relevant instruction as:
+`.claude/local-paths.md`, project `.codex/config.toml`, project
+`.claude/settings.json`, `.re-discipline/config.json`,
+`.re-discipline/settings/`, `.gitignore`, docs indexes, README files,
+dispatch scripts, campaign templates, truth files, chronicles, and git
+history. Search those sources for legacy archive semantics before treating any
+filesystem path as re-discipline state. Classify every relevant instruction as:
 
 - **Project fact:** identity, mission, domain, source of record, portable
   tooling, paths, or environment.
@@ -25,6 +27,10 @@ as re-discipline state. Classify every relevant instruction as:
 - **Machine-local value:** a host-neutral assignment for the untracked
   `.re-discipline/local-paths.md`.
 - **Unrelated project guidance:** preserve in place.
+
+Do not inspect or migrate machine-local Claude or Codex memory directories.
+Existing native-memory content is outside initialization scope even when the
+target project selects `shared-only`.
 
 ## Gate Legacy Archive Semantics
 
@@ -104,6 +110,8 @@ Before destructive refactoring, show:
   including conflict names but not private values.
 - Legacy archive references and active consumers, with proposed Maintain,
   Distill, or Delete dispositions.
+- Bootstrap/settings files to add or migrate, the proposed memory mode, and
+  only the native-memory fields to merge into each project host settings file.
 - Unrelated instructions that will remain unchanged.
 
 Ask only about genuine ambiguity. An explicit user request to apply an already
@@ -118,22 +126,33 @@ progress instead of claiming completion.
 
 1. Add missing epistemic directories and indexes; never overwrite a populated
    index without approval.
-2. Write `.re-discipline/project-profile.md` with one shared-law block and
+2. Add the shared knowledge topology and source-owned bootstrap/settings
+   templates. Existing projects migrate to `shared-only` only with the user's
+   explicit approval; otherwise preserve their current host behavior and
+   record `hybrid` or `native` accurately. Never infer a mode from native
+   memory directory contents.
+3. Add `.re-discipline/cache/` to `.gitignore` and keep every cache,
+   calibration run, and model artifact untracked.
+4. Write `.re-discipline/project-profile.md` with one shared-law block and
    reconciled project facts.
-3. Reconcile legacy local paths through the procedure above. Create the
+5. Reconcile legacy local paths through the procedure above. Create the
    neutral signature even when no legacy file exists.
-4. Write or update the Claude managed-adapter block and preserve or append
-   project-owned Claude notes outside it.
-5. Write or update the Codex managed-adapter block and preserve or append
-   project-owned Codex notes outside it.
-6. Move the old root drafter role to
+6. Write or update the Claude managed-adapter block and preserve or append
+   project-owned Claude notes outside it. Parse project
+   `.claude/settings.json`, preserve unrelated fields, and change only
+   `autoMemoryEnabled` for the approved mode.
+7. Write or update the Codex managed-adapter block and preserve or append
+   project-owned Codex notes outside it. Parse project `.codex/config.toml`,
+   preserve unrelated keys/comments, and merge memory fields into existing
+   tables without duplicating them.
+8. Move the old root drafter role to
    `.codex/external-drafter-contract.md` and install the root router, preserving
    unrelated root guidance outside managed markers.
-7. Always render the normalized agent core under `.re-discipline/agents/`.
+9. Always render the normalized agent core under `.re-discipline/agents/`.
    Migrate only real configured providers; do not promote disabled,
    placeholder, or unevaluated entries. Preserve each real provider as one
    config entry and exactly `profile.md`, `scorecard.md`, and `teardown.md`.
-8. Preserve each in-flight candidate under
+10. Preserve each in-flight candidate under
    `.re-discipline/agents/recruiting/<candidate>/`, using this mechanical
    mapping when the legacy names exist:
    - `CANDIDATE.md` -> `candidate.md`
@@ -143,18 +162,22 @@ progress instead of claiming completion.
    - `interview/` -> `runs/`
    Keep an existing `scorecard.md`. Validate candidate config without adding
    it to live config.
-9. Update dispatchers to read canonical `framing`. Retain legacy host paths
+11. Update dispatchers to read canonical `framing`. Retain legacy host paths
    only in explicitly labeled migration or recovery code.
-10. Replace duplicate identity prose in internal agent-loaded docs with links to
+12. Replace duplicate identity prose in internal agent-loaded docs with links to
    the canonical profile. Human-facing README files may remain self-contained
    when they do not contradict it.
-11. Compare the post-migration union against both legacy profiles. Delete
+13. Compare the post-migration union against both legacy profiles. Delete
    `.claude/project-profile.md` and `.codex/project-profile.md` only after every
    meaningful instruction has a surviving destination.
-12. Delete old root agent and recruiting directories only after their
+14. Delete old root agent and recruiting directories only after their
    normalized state and meaning are verified.
-13. Count canonical-profile lines and UTF-8 bytes. Warn above 240 lines or
+15. Count canonical-profile lines and UTF-8 bytes. Warn above 240 lines or
    16 KiB; never truncate it.
+16. Validate the bootstrap, settings, host policy, and cache exclusion, then
+    run the exact preflight, initial index, canonical-profile replay, and
+    packaged quick-smoke commands in the parent skill's Step 4. Do not run a
+    project/full benchmark or calibration during ordinary migration.
 
 Do not restructure, promote, or otherwise normalize provisional `active/`
 scratch as part of migration. Limit active-tree edits to executable path
@@ -171,4 +194,5 @@ local-path signature. Confirm that a greenfield or fully migrated project does
 not create or require a durable root-level replacement evidence directory.
 Temporary campaign evidence under `active/<slug>/evidence/` remains valid.
 Report unresolved legacy archive dependencies explicitly and do not declare
-migration complete. Do not commit unless the user asks.
+migration complete. Confirm no machine-local native memory file was read,
+written, deleted, or copied. Do not commit unless the user asks.

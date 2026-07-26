@@ -12,7 +12,7 @@ This is the single source of project identity, domain facts, and shared
 re-discipline laws. Runtime-specific bootstrap and configuration belong in
 thin manager adapters, not in a second project profile.
 
-<!-- re-discipline:shared-laws v0.5.0 -->
+<!-- re-discipline:shared-laws v0.6.0 -->
 ## Directory Means Trust
 
 | Location | Status | Treatment |
@@ -28,6 +28,11 @@ thin manager adapters, not in a second project profile.
 Use the `onboard` skill. Read `docs/INDEX.md`, the truth and history indexes,
 and each relevant active `CAMPAIGN.md`. If this profile is missing or invalid,
 use `init-project` recovery rather than guessing project identity.
+
+Project knowledge and recall are governed by `.re-discipline/config.json`.
+Accepted shared memory is recall, not empirical evidence. Pending memory
+proposals never enter normal retrieval before manager review and user
+ratification.
 
 ## The Wall
 

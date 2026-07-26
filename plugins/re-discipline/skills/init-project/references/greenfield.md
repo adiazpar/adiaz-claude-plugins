@@ -32,21 +32,43 @@ notes. Ask only when a host-specific choice cannot be discovered safely.
    profile, substituting discovered machine-local assignments. When no values
    are known, replace the placeholder with a commented instruction so the
    untracked signature still exists without inventing paths.
-4. Render `agents-README.md`, `agents-config.json`, and `dispatch.ps1` to:
+4. Add `.re-discipline/cache/` to `.gitignore`, preserving unrelated rules.
+   Render the shared-only bootstrap and documented settings:
+   - `config.json` -> `.re-discipline/config.json`
+   - `settings-README.md` -> `.re-discipline/settings/README.md`
+   - `knowledge.jsonc` -> `.re-discipline/settings/knowledge.jsonc`
+   - `retrieval-profile.json` ->
+     `.re-discipline/settings/retrieval-profile.json`
+   - `memory-INDEX.md` -> `.re-discipline/memory/INDEX.md`
+   - `knowledge-evals-README.md` ->
+     `.re-discipline/knowledge/evals/README.md`
+5. Create `.re-discipline/memory/proposals/`,
+   `.re-discipline/memory/topics/`, `.re-discipline/knowledge/evals/`, and
+   the disposable cache topology from `tree.txt`. Do not seed accepted recall,
+   proposals, or evaluation cases.
+6. Render `agents-README.md`, `agents-config.json`, and `dispatch.ps1` to:
    - `.re-discipline/agents/README.md`
    - `.re-discipline/agents/config.json`
    - `.re-discipline/agents/dispatch.ps1`
-5. Create `.re-discipline/agents/providers/` and
+7. Create `.re-discipline/agents/providers/` and
    `.re-discipline/agents/recruiting/`. Keep both empty and keep the backend
    `native`.
-6. Render `CLAUDE.md` to `.claude/CLAUDE.md`. Add discovered Claude-only notes
-   after the managed block.
-7. Render `codex-AGENTS.md` to `.codex/AGENTS.md`. Add discovered Codex-only
-   notes after the managed block.
-8. Render `external-drafter-contract.md` to
+8. Render `CLAUDE.md` to `.claude/CLAUDE.md`. Add discovered Claude-only notes
+   after the managed block. Render `claude-settings.json` to the missing
+   `.claude/settings.json`, or merge only `autoMemoryEnabled: false` into an
+   existing valid object while preserving every unrelated field.
+9. Render `codex-AGENTS.md` to `.codex/AGENTS.md`. Add discovered Codex-only
+   notes after the managed block. Render `codex-config.toml` to a missing
+   `.codex/config.toml`, or merge the shared-only memory fields into existing
+   `[features]` and `[memories]` tables without duplicating tables or changing
+   unrelated keys.
+10. Render `external-drafter-contract.md` to
    `.codex/external-drafter-contract.md`.
-9. Render root `AGENTS.md` as the role router.
-10. Render the three index templates under `docs/`.
+11. Render root `AGENTS.md` as the role router.
+12. Render the three index templates under `docs/`.
+13. Run the exact preflight, initial index, canonical-profile replay, and
+    packaged quick-smoke commands in the parent skill's Step 4. Do not run a
+    project/full benchmark or calibration implicitly.
 
 Omit legitimately empty project-owned host sections. Do not copy canonical
 laws, mission, or domain prose into a manager adapter.
@@ -59,6 +81,13 @@ laws, mission, or domain prose into a manager adapter.
 - Neither `.claude/local-paths.md` nor `.codex/local-paths.md` exists.
 - The normalized agent core always exists and its JSON parses.
 - The live config contains `backend: native` and an empty provider object.
+- The bootstrap and both strict-JSON settings parse against their packaged
+  schemas; commented `knowledge.jsonc` parses and contains local execution.
+- `memory.mode` is `shared-only` and the write policy is `proposal-only`.
+- Claude project auto memory and Codex project memory reads/writes are
+  disabled without reading or modifying either host's native memory directory.
+- Accepted memory, proposals, project evals, and disposable cache paths remain
+  separate; the cache is ignored.
 - Claude contains exactly one canonical profile import.
 - The root router and Codex manager chain resolve.
 - Neither legacy host profile exists.

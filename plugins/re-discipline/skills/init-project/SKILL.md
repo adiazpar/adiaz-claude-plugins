@@ -27,16 +27,27 @@ Every initialized project has:
 
 | Path | Purpose |
 |---|---|
+| `.re-discipline/config.json` | Small strict-JSON bootstrap, recovery, and project memory policy. |
 | `.re-discipline/project-profile.md` | Canonical shared laws, identity, and domain facts. |
 | `.re-discipline/local-paths.md` | Untracked machine-local path values shared by every manager host. |
+| `.re-discipline/settings/README.md` | Documented project-facing settings and ownership boundaries. |
+| `.re-discipline/settings/knowledge.jsonc` | Commented human-editable knowledge policy. |
+| `.re-discipline/settings/retrieval-profile.json` | Generated, accepted production retrieval profile. |
+| `.re-discipline/memory/INDEX.md` | Shared operational recall and proposal-governance contract. |
+| `.re-discipline/memory/proposals/` | Tracked provisional recall excluded from normal retrieval. |
+| `.re-discipline/memory/topics/` | Manager-reviewed and user-ratified shared recall. |
+| `.re-discipline/knowledge/evals/` | Tracked, ratified project retrieval cases. |
+| `.re-discipline/cache/` | Ignored disposable indexes and calibration output. |
 | `.re-discipline/agents/README.md` | External-provider schema and lifecycle. |
 | `.re-discipline/agents/config.json` | Only live provider roster and backend switch. |
 | `.re-discipline/agents/dispatch.ps1` | Host-neutral external-provider dispatcher. |
 | `.re-discipline/agents/providers/` | Three-file durable records for configured providers. |
 | `.re-discipline/agents/recruiting/` | Transient candidate workspaces. |
 | `.claude/CLAUDE.md` | Claude Code import adapter and project-owned Claude notes. |
+| `.claude/settings.json` | Preserved project settings with the selected Claude memory policy. |
 | `AGENTS.md` | Root manager/drafter role router. |
 | `.codex/AGENTS.md` | Codex hook/fallback adapter and project-owned Codex notes. |
+| `.codex/config.toml` | Preserved project config with the selected Codex memory policy. |
 | `.codex/external-drafter-contract.md` | Drafter restrictions and report format. |
 | `docs/INDEX.md` | Project front door. |
 
@@ -50,6 +61,24 @@ The `framing` field appears only in the canonical profile. Legacy
 `.claude/local-paths.md`, and `.codex/local-paths.md` files are migration or
 recovery input only, never steady-state output.
 
+New projects use `memory.mode: shared-only` and
+`memory.writePolicy: proposal-only`. Shared-only disables Claude Code auto
+memory in project `.claude/settings.json` and Codex memories in project
+`.codex/config.toml`. Never read, copy, delete, redirect, or migrate either
+host's machine-local native memory directory during initialization.
+
+Supported project modes are:
+
+- `shared-only`: disable native project memory reads and writes; shared
+  re-discipline memory is the project recall system.
+- `hybrid`: enable native project memory only as a private host cache while
+  re-discipline remains authoritative.
+- `native`: restore explicit host-native project behavior.
+
+Changing mode requires `init-project` resync so the bootstrap and both host
+settings are changed and verified together. A config edit alone is not
+permission to touch native memory files.
+
 ## Step 1: Detect The Mode
 
 Inspect `AGENTS.md`, `.codex/`, `.claude/`, `.re-discipline/`, `.gitignore`,
@@ -60,11 +89,13 @@ Evaluate migration and recovery gates before Initialized.
 Legacy archive semantics always override Initialized. Apply this rule even when
 normalized topology already exists.
 
-- **Initialized:** the canonical profile, `.re-discipline/local-paths.md`,
-  both current manager adapters, and normalized agent core exist; the neutral
-  local-path file is ignored and untracked; and no legacy host profile or
-  host-local path file remains; and no unresolved legacy archive semantics
-  remain. Stop unless the user requested resync or repair.
+- **Initialized:** the canonical profile, valid bootstrap and required
+  settings, `.re-discipline/local-paths.md`, selected host memory policy, both
+  current manager adapters, shared-memory/eval topology, and normalized agent
+  core exist; cache paths are ignored; the neutral local-path file is ignored
+  and untracked; and no legacy host profile or host-local path file remains;
+  and no unresolved legacy archive semantics remain. Stop unless the user
+  requested resync or repair.
 - **Migration:** legacy archive semantics, legacy profiles, duplicated host
   laws, old agent paths, old host-local path files, or a missing neutral
   local-path signature or ignore rule exists. Old re-discipline markers without
@@ -152,6 +183,57 @@ Keep the canonical profile concise and optimized for agent context. After
 writing it, count lines and UTF-8 bytes. Warn above 240 lines or 16 KiB. Never
 truncate or silently discard content to satisfy either limit.
 
+## Step 2A: Materialize Shared Knowledge Policy
+
+Render the source-owned templates to these exact paths:
+
+| Template | Project path |
+|---|---|
+| `config.json` | `.re-discipline/config.json` |
+| `settings-README.md` | `.re-discipline/settings/README.md` |
+| `knowledge.jsonc` | `.re-discipline/settings/knowledge.jsonc` |
+| `retrieval-profile.json` | `.re-discipline/settings/retrieval-profile.json` |
+| `memory-INDEX.md` | `.re-discipline/memory/INDEX.md` |
+| `knowledge-evals-README.md` | `.re-discipline/knowledge/evals/README.md` |
+
+Create `memory/proposals/`, `memory/topics/`, `knowledge/evals/`, and the
+cache topology from `tree.txt`. Add `.re-discipline/cache/` to `.gitignore`
+without replacing unrelated rules. Never add placeholder recall or eval cases
+just to track an empty directory.
+
+The bootstrap is strict JSON. Require the packaged schema, reject unknown
+fields, require repository-relative fixed settings paths, and reject a newer
+schema rather than downgrading it. `knowledge.jsonc` is the only commented
+human-editable settings file. The retrieval profile is generated strict JSON:
+initialize it from packaged `balanced-v1` and never hand-edit or silently
+promote it.
+
+Pending memory proposals are tracked but are not accepted memory. They remain
+excluded from normal orientation, search, and context packs until
+`review-memory` recommends a disposition and the user ratifies it.
+
+## Step 2B: Apply Native Memory Policy Non-Destructively
+
+For a missing `.claude/settings.json`, render `claude-settings.json`. For an
+existing valid JSON object, preserve every unrelated field and set only
+`autoMemoryEnabled`: `false` for `shared-only`, and `true` for `hybrid` or
+`native`.
+
+For a missing `.codex/config.toml`, render `codex-config.toml`. For an existing
+valid project TOML, preserve comments, tables, and unrelated keys. Merge these
+keys into existing tables rather than duplicating a TOML table:
+
+| Mode | `features.memories` | `memories.generate_memories` | `memories.use_memories` |
+|---|---:|---:|---:|
+| `shared-only` | `false` | `false` | `false` |
+| `hybrid` | `true` | `true` | `true` |
+| `native` | `true` | `true` | `true` |
+
+Do not replace a malformed host settings file. Report it, leave it
+byte-for-byte, and keep initialization incomplete until the user approves
+repair. Project Codex config is honored only for a trusted project; report
+that requirement without editing the machine-local trust store.
+
 ## Step 3: Protect Existing Instructions
 
 For a missing root `AGENTS.md`, render the router template directly. For an
@@ -166,6 +248,11 @@ Apply the same managed-block discipline to `.claude/CLAUDE.md` and
 `.codex/AGENTS.md`. A resync updates the canonical profile's marked shared-law
 block, generic adapters, routing, and normalized agent templates. It never
 overwrites project-owned facts or host notes.
+
+Treat existing `.claude/settings.json` and `.codex/config.toml` as
+project-owned containers. Change only the native-memory keys listed above,
+preserve every unrelated setting, and validate the complete result before
+replacing it atomically.
 
 Delete legacy host profiles or old agent paths only after a
 meaning-preservation gate confirms that every meaningful instruction or
@@ -210,18 +297,81 @@ After any write:
     complete.
 13. Report canonical profile line and byte counts, remaining placeholders,
     and intentional migration or recovery references.
+14. Parse `.re-discipline/config.json` against the packaged schema and verify
+    every referenced settings path stays inside `.re-discipline/`.
+15. Parse commented knowledge settings and strict retrieval-profile JSON;
+    verify the selected packaged base profile and every effective profile.
+16. Confirm the configured memory mode agrees with both preserved host
+    settings. For shared-only, require Claude `autoMemoryEnabled: false` and
+    Codex `features.memories`, `generate_memories`, and `use_memories` all
+    false.
+17. Confirm `.re-discipline/memory/proposals/`, `memory/topics/`, and
+    `knowledge/evals/` exist; pending proposals are not listed as accepted
+    topics.
+18. Confirm `.re-discipline/cache/` is ignored and no cache, model artifact,
+    benchmark run, calibration output, or machine-local grant is staged.
+19. Resolve `<knowledge-runtime>` to the installed plugin's canonical packaged
+    launcher, then run these exact initialization gates:
+
+    ```text
+    <knowledge-runtime> preflight --asset-root <plugin-root>/knowledge --project-root <project-root>
+    <knowledge-runtime> index --asset-root <plugin-root>/knowledge --project-root <project-root>
+    <knowledge-runtime> replay --asset-root <plugin-root>/knowledge --project-root <project-root> --query .re-discipline/project-profile.md --query-class exact --tiers profile --limit 3 --token-budget 512
+    <knowledge-runtime> benchmark --asset-root <plugin-root>/knowledge --mode quick
+    ```
+
+    Require preflight to report valid `shared-only` configuration without
+    indexing, index to publish one complete generation, replay to return
+    deterministic equality with a citation to the canonical profile, and the
+    packaged quick suite to pass. The packaged quick suite validates the
+    shipped baseline; it does not use or create project gold labels. A new
+    project has no ratified project eval corpus, so do not run a project
+    benchmark, full benchmark, or calibration unless the user separately
+    requests it after eval cases exist.
 
 Do not commit unless the user explicitly asks.
 
 ## Resync
 
+Resync preserves accepted project knowledge and unrelated host settings.
+
 When asked to resync, update marked shared-law, router, and manager-adapter
-blocks from current templates. Replace the three normalized agent core files
-only after preserving configured provider entries and project-owned additions.
-Leave canonical project facts, provider records, candidates, and project-owned
-host notes untouched. Never recreate legacy paths. When unresolved legacy
-archive dependencies remain, preserve the current shared-law block, report the
+blocks from current templates. Reconcile bootstrap/settings schema changes and
+the selected memory mode while preserving unrelated Claude JSON and Codex TOML
+settings. Replace the generated retrieval profile only through explicit
+profile governance or while migrating an unchanged packaged baseline; never
+overwrite an accepted project overlay silently.
+
+Replace the normalized agent core only after preserving configured providers
+and project-owned additions. Leave canonical project facts, accepted memory,
+eval cases, provider records, candidates, and project-owned host notes
+untouched. Never recreate legacy paths. When unresolved legacy archive
+dependencies remain, preserve the current shared-law block, report the
 semantic migration as incomplete, and do not claim a successful resync.
+
+## Managed Configuration Recovery
+
+The `re-discipline:shared-laws v0.6.0` marker declares that the bootstrap,
+required settings, and selected host memory policy are expected. At
+SessionStart and before knowledge-server startup:
+
+1. Locate the project root through the managed profile marker.
+2. Validate every existing managed file without modifying it.
+3. Restore a missing tracked file from `HEAD`, even when deletion is staged.
+4. If a required file has never been tracked, create the current safe
+   template atomically and only when absent.
+5. Validate the complete recovered set and fixed repository-relative paths.
+6. Verify the selected host memory policy and report every recovered path.
+
+Malformed existing files are never silently overwritten. Newer schemas are
+never downgraded. Recovery never rebuilds machine-local grants, touches native
+memory directories, runs indexing/model work, benchmarks, or calibrates.
+
+Deleting managed files while the marker remains is accidental-deletion
+recovery, not de-initialization. Explicit de-initialization is a separate
+manager-reviewed migration: remove or replace the managed expectation marker
+first, then remove managed configuration and only re-discipline-owned host
+memory fields. Preserve unrelated project instructions and settings.
 
 ## References
 

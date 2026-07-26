@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/context-pack.schema.json",
+  "title": "Re-Discipline immutable context pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "packId", "digest", "query", "generation", "role", "allowedTiers", "requestedProfile", "effectiveProfile", "activeLanes", "models", "fallbackReason", "tokenBudget", "estimatedTokens", "passages", "omitted"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "packId": {"type": "string", "pattern": "^context-[a-f0-9]{20}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "query": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "corpusFingerprint", "modelFingerprint", "runtimeFingerprint", "project", "worktree", "gitRevision", "dirtyFingerprint", "parserVersion", "chunkerVersion", "createdAt"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^generation-[a-f0-9]{20}$"},
+        "corpusFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "modelFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "runtimeFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "project": {"type": "string", "minLength": 1},
+        "worktree": {"type": "string", "minLength": 1},
+        "gitRevision": {"type": "string", "minLength": 1},
+        "dirtyFingerprint": {"type": "string", "minLength": 1},
+        "parserVersion": {"type": "string", "minLength": 1},
+        "chunkerVersion": {"type": "string", "minLength": 1},
+        "createdAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "role": {"enum": ["manager", "drafter"]},
+    "allowedTiers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset"]}
+    },
+    "requestedProfile": {"type": "string", "minLength": 1},
+    "effectiveProfile": {"type": "string", "minLength": 1},
+    "activeLanes": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {"enum": ["exact", "fts", "graph", "dense", "rerank"]}
+    },
+    "models": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?::[a-z0-9]+(?:-[a-z0-9]+)*)?@[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+      }
+    },
+    "fallbackReason": {"type": ["string", "null"]},
+    "tokenBudget": {"type": "integer", "minimum": 512, "maximum": 8192},
+    "estimatedTokens": {"type": "integer", "minimum": 1, "maximum": 8192},
+    "passages": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["chunkId", "passage", "citation"],
+        "properties": {
+          "chunkId": {"type": "string", "minLength": 1},
+          "passage": {"type": "string"},
+          "citation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "heading", "startLine", "endLine", "sourceHash", "passageHash", "tier", "uri"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1, "pattern": "^(?:[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.\\.[^/\\\\:\\x00]+)(?:/(?:[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.\\.[^/\\\\:\\x00]+))*$"},
+              "heading": {"type": "string"},
+              "startLine": {"type": "integer", "minimum": 1},
+              "endLine": {"type": "integer", "minimum": 1},
+              "sourceHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "passageHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "tier": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset"]},
+              "uri": {"type": "string", "pattern": "^re-discipline://generation-[a-f0-9]{20}/(?:chunks|sources)/.+"}
+            }
+          }
+        }
+      }
+    },
+    "omitted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidatePassages", "budget", "documentCap", "resultLimit", "staleSource"],
+      "properties": {
+        "candidatePassages": {"type": "integer", "minimum": 0},
+        "budget": {"type": "integer", "minimum": 0},
+        "documentCap": {"type": "integer", "minimum": 0},
+        "resultLimit": {"type": "integer", "minimum": 0},
+        "staleSource": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

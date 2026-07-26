@@ -4,7 +4,8 @@ description: >-
   Orient a re-discipline project at session start or when asked to get caught
   up, show current project state, or resume an active campaign. Reads the
   canonical profile, active manager adapter, truth and history indexes, active
-  campaign masterfiles, and normalized external-provider state.
+  campaign masterfiles, knowledge health, shared-memory status, and normalized
+  external-provider state.
 ---
 
 # Onboard A Re-Discipline Project
@@ -16,6 +17,9 @@ Onboarding is read-only. Directory location encodes trust:
 | `docs/truth/` | Current claims with durable verification. |
 | `docs/history/` | Retrospective provenance and leads, never current authority or sole empirical support. |
 | `active/<slug>/` | Provisional work and temporary evidence. |
+| `docs/backlog/` | Deferred intent, not completed work. |
+| `.re-discipline/memory/topics/` | Accepted operational recall, never empirical authority. |
+| `.re-discipline/memory/proposals/` | Pending proposals, excluded from ordinary retrieval. |
 | maintained source, tools, tests, fixtures, corpora, and references | Durable project assets with an active consumer or owner. |
 
 ## Step 1: Detect The Active Host
@@ -36,6 +40,12 @@ and domain facts.
 If the canonical profile is missing, stop substantive work and invoke
 `init-project` in migration or recovery mode. A legacy host profile is
 recovery input, not permission to invent a replacement.
+
+Read the small `.re-discipline/config.json` bootstrap and the documented
+project-facing settings under `.re-discipline/settings/`. Treat
+`knowledge.jsonc` as human-editable policy and `retrieval-profile.json` as a
+generated accepted profile. Report malformed or missing managed settings
+instead of guessing replacements.
 
 ## Step 2: Read The Masterfiles
 
@@ -61,7 +71,27 @@ remain valid history. Onboarding never parses, normalizes, or renames them.
 When no campaign is active, call the state a cold start and await direction.
 Do not open a campaign merely because none exists.
 
-## Step 4: Read External-Provider State
+## Step 4: Read Knowledge Status
+
+Call the knowledge server's read-only `status` operation when available.
+Report:
+
+- index health and corpus generation;
+- requested and effective retrieval profiles;
+- active retrieval lanes, local model identities, and fallback reason;
+- settings and source-policy validity;
+- latest benchmark age;
+- pending memory-proposal count.
+
+List proposal filenames to count them, but do not read their content during
+ordinary onboarding. Pending proposals are not accepted project knowledge.
+
+Run only the cheap health/freshness check. Do not build vectors, download
+models, run a full benchmark, calibrate weights, accept memory, or activate a
+profile during onboarding. If status is unavailable, state that fact and
+continue from canonical source files rather than inventing knowledge health.
+
+## Step 5: Read External-Provider State
 
 Read `.re-discipline/agents/config.json`. Its provider keys are the complete
 set of live external providers, and `backend` is the live route selected by the
@@ -72,7 +102,7 @@ List candidate directories directly under
 providers. If the normalized agent core is missing or the JSON is invalid,
 report that `init-project` resync or repair is required.
 
-## Step 5: Return One Screen
+## Step 6: Return One Screen
 
 Use this shape:
 
@@ -87,6 +117,9 @@ Active campaigns:
 - <slug>: <status>; open questions: <count>
 - none (cold start)
 
+Knowledge: <healthy|degraded|unavailable>; generation: <id|none>
+Retrieval: requested <profile>; effective <profile>; fallback: <reason|none>
+Pending memory proposals: <count>
 Delegation backend: <native|provider>
 External providers: <configured names|none>
 Recruiting candidates: <candidate names|none>
@@ -100,4 +133,5 @@ directs it.
 ## Reference
 
 - Host mapping: `<plugin-root>/references/runtime-adapters.md`.
+- Knowledge governance: `<plugin-root>/references/knowledge-governance.md`.
 - Canonical laws and project facts: `.re-discipline/project-profile.md`.

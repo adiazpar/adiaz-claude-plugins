@@ -1,0 +1,24 @@
+{
+  "$schema": "plugin://re-discipline/schemas/knowledge-settings.schema.json",
+  "schemaVersion": 1,
+  "sources": {
+    "truth": true,
+    "history": true,
+    "backlog": true,
+    "activeCampaigns": true,
+    "sharedMemory": true
+  },
+  "models": {
+    "execution": "local"
+  },
+  "telemetry": {
+    "mode": "metrics-only"
+  },
+  "budgets": {
+    "searchTokens": 1024,
+    "managerContextTokens": 2048,
+    "drafterContextTokens": 1024,
+    "maxPassages": 12,
+    "maxBytes": 32768
+  }
+}

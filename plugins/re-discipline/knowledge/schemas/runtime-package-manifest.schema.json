@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/runtime-package-manifest.schema.json",
+  "title": "Re-Discipline runtime package manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "runtime",
+    "build",
+    "targets",
+    "launchers",
+    "sharedAssets",
+    "notices"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "../schemas/runtime-package-manifest.schema.json"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "buildId"],
+      "properties": {
+        "name": {
+          "const": "re-discipline-knowledge"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "buildId": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goToolchain", "cgoEnabled", "flags", "environment", "targetOrder"],
+      "properties": {
+        "goToolchain": {
+          "type": "string",
+          "pattern": "^go[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "cgoEnabled": {
+          "const": false
+        },
+        "flags": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {
+              "const": "-trimpath"
+            },
+            {
+              "const": "-buildvcs=false"
+            },
+            {
+              "type": "string",
+              "pattern": "^-ldflags=-s -w -buildid= -X github\\.com/adiaz/re-discipline-knowledge/internal/knowledge\\.CompiledBuildID=sha256:[a-f0-9]{64}$"
+            }
+          ],
+          "items": false
+        },
+        "environment": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "prefixItems": [
+            {
+              "const": "CGO_ENABLED=0"
+            },
+            {
+              "const": "GOAMD64=v1"
+            },
+            {
+              "const": "GOARM64=v8.0"
+            },
+            {
+              "const": "GOENV=off"
+            },
+            {
+              "const": "GOEXPERIMENT="
+            },
+            {
+              "const": "GOFIPS140=off"
+            },
+            {
+              "const": "GOFLAGS=-mod=readonly"
+            },
+            {
+              "const": "GOWORK=off"
+            }
+          ],
+          "items": false
+        },
+        "targetOrder": {
+          "const": "windows-amd64,windows-arm64,linux-amd64,linux-arm64,darwin-amd64,darwin-arm64"
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "$ref": "#/$defs/platformFile"
+      }
+    },
+    "launchers": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/packageFile"
+      }
+    },
+    "sharedAssets": {
+      "description": "Runtime-loaded files shared by every native target and kept once under profiles/, models/, evals/conformance/, or schemas/.",
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/packageFile"
+      }
+    },
+    "notices": {
+      "$ref": "#/$defs/packageFile"
+    }
+  },
+  "$defs": {
+    "packageFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256", "size", "mode"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "goos": {
+          "enum": ["windows", "linux", "darwin"]
+        },
+        "goarch": {
+          "enum": ["amd64", "arm64"]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]+$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mode": {
+          "enum": ["0644", "0755"]
+        }
+      }
+    },
+    "platformFile": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/packageFile"
+        },
+        {
+          "required": ["goos", "goarch"]
+        }
+      ]
+    }
+  }
+}
