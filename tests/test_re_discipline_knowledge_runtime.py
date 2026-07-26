@@ -330,7 +330,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                 "windows",
                 "amd64",
                 "re-discipline-knowledge.exe",
-                "0755",
+                "0644",
             ),
         )
         posix_launcher = BIN_ROOT / launchers[0]["path"]
@@ -352,6 +352,11 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 posix_launcher.stat().st_mode & stat.S_IXUSR,
                 "POSIX platform launcher is not executable",
+            )
+            self.assertEqual(
+                stat.S_IMODE(windows_dispatcher.stat().st_mode),
+                0o644,
+                "Windows-only dispatcher has an unstable POSIX mode",
             )
         for row in launchers:
             path = BIN_ROOT / row["path"]
