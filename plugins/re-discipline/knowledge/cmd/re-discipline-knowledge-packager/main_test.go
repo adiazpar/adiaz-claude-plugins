@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -270,6 +271,43 @@ func TestPOSIXLauncherDispatchesEverySupportedPOSIXTarget(t *testing.T) {
 		if !contains(posixLauncher, fragment) {
 			t.Fatalf("POSIX launcher lacks %q", fragment)
 		}
+	}
+}
+
+func TestCanonicalWindowsLauncherCopyIsByteExact(t *testing.T) {
+	moduleRoot, err := findModuleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinnedGo, err := readPinnedGoVersion(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "re-discipline-knowledge.exe")
+	if err := copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo); err != nil {
+		t.Fatal(err)
+	}
+	sourceBody, err := os.ReadFile(filepath.Join(moduleRoot, "bin", "re-discipline-knowledge.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	destinationBody, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(destinationBody, sourceBody) {
+		t.Fatal("canonical Windows launcher copy was not byte-exact")
+	}
+}
+
+func TestCanonicalWindowsLauncherCopyRequiresExistingArtifact(t *testing.T) {
+	err := copyCanonicalWindowsLauncher(
+		t.TempDir(),
+		filepath.Join(t.TempDir(), "re-discipline-knowledge.exe"),
+		"go1.26.0",
+	)
+	if err == nil || !strings.Contains(err.Error(), "generate knowledge/bin on Windows first") {
+		t.Fatalf("missing canonical Windows launcher error = %v", err)
 	}
 }
 

@@ -42,6 +42,8 @@ var supportedTargets = []targetSpec{
 	{GOOS: "darwin", GOARCH: "arm64"},
 }
 
+var windowsLauncherTarget = targetSpec{GOOS: "windows", GOARCH: "amd64"}
+
 var sharedAssetRoots = []string{
 	"evals/conformance",
 	"models",
@@ -448,14 +450,7 @@ func buildPackageTree(moduleRoot, outputRoot, pinnedGo, buildID string) (package
 
 	windowsRelative := "re-discipline-knowledge.exe"
 	windowsPath := filepath.Join(outputRoot, windowsRelative)
-	if err := buildGoBinary(
-		moduleRoot,
-		windowsPath,
-		targetSpec{GOOS: "windows", GOARCH: "amd64"},
-		"./cmd/re-discipline-knowledge-launcher",
-		pinnedGo,
-		"",
-	); err != nil {
+	if err := materializeWindowsLauncher(moduleRoot, windowsPath, pinnedGo); err != nil {
 		return packageManifest{}, err
 	}
 	windowsArtifact, err := describeFile(
@@ -552,6 +547,39 @@ func buildGoBinary(
 	}
 	if err := verifyBuiltBinary(destination, target, pinnedGo, buildID); err != nil {
 		return err
+	}
+	return nil
+}
+
+func materializeWindowsLauncher(moduleRoot, destination, pinnedGo string) error {
+	if runtime.GOOS == "windows" {
+		return buildGoBinary(
+			moduleRoot,
+			destination,
+			windowsLauncherTarget,
+			"./cmd/re-discipline-knowledge-launcher",
+			pinnedGo,
+			"",
+		)
+	}
+	return copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo)
+}
+
+func copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo string) error {
+	source := filepath.Join(moduleRoot, "bin", "re-discipline-knowledge.exe")
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	if err := copyRegularFile(source, destination, 0o755); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New(
+				"canonical Windows launcher is missing; generate knowledge/bin on Windows first",
+			)
+		}
+		return fmt.Errorf("copy canonical Windows launcher: %w", err)
+	}
+	if err := verifyBuiltBinary(destination, windowsLauncherTarget, pinnedGo, ""); err != nil {
+		return fmt.Errorf("verify canonical Windows launcher: %w", err)
 	}
 	return nil
 }
