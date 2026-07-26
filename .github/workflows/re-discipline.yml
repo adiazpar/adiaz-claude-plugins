@@ -51,9 +51,11 @@ jobs:
           mkdir -p \
             "$RUNNER_TEMP/re-discipline-claude-config" \
             "$RUNNER_TEMP/re-discipline-codex-home"
-          printf 'CLAUDE_CONFIG_DIR=%s\n' "$RUNNER_TEMP/re-discipline-claude-config" >> "$GITHUB_ENV"
-          printf 'CODEX_HOME=%s\n' "$RUNNER_TEMP/re-discipline-codex-home" >> "$GITHUB_ENV"
-          printf 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n' >> "$GITHUB_ENV"
+          {
+            printf 'CLAUDE_CONFIG_DIR=%s\n' "$RUNNER_TEMP/re-discipline-claude-config"
+            printf 'CODEX_HOME=%s\n' "$RUNNER_TEMP/re-discipline-codex-home"
+            printf 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n'
+          } >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
