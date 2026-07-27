@@ -83,6 +83,17 @@ func firstSentence(value string, limit int) string {
 	return truncateRunes(value, limit-3) + "..."
 }
 
+// ClaimDigest digests what a document asserts: its claim, its confidence
+// grade, and its supersession status. Evidence prose, formatting and
+// re-verification dates are deliberately excluded, so a case pinned to this
+// value survives every edit that does not change the claim itself.
+func ClaimDigest(body, path string) string {
+	prelude := ExtractDocumentPrelude(body, path)
+	return "sha256:" + SHA256String(strings.Join([]string{
+		prelude.Claim, prelude.Confidence, prelude.Status, prelude.Correction,
+	}, "\x1f"))
+}
+
 // DocumentPrelude is the extracted epistemic header of a single document.
 type DocumentPrelude struct {
 	Title      string

@@ -115,6 +115,45 @@ func run(ctx context.Context, args []string) error {
 			}
 		}
 		return nil
+	case "pin-evals":
+		flags := flag.NewFlagSet("pin-evals", flag.ContinueOnError)
+		assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
+		projectRoot := flags.String("project-root", "", "initialized project root")
+		cacheRoot := flags.String("cache-root", "", "optional project cache root")
+		apply := flags.Bool("apply", false, "write refreshed pins back to the case files")
+		force := flags.Bool(
+			"force", false,
+			"re-stamp pins whose claim changed; re-answer each case first",
+		)
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *projectRoot == "" {
+			return fmt.Errorf("pin-evals requires --project-root")
+		}
+		asset, err := filepath.Abs(*assetRoot)
+		if err != nil {
+			return err
+		}
+		service, err := knowledge.NewService(knowledge.ServiceOptions{
+			ProjectRoot: *projectRoot, AssetRoot: asset, CacheRoot: *cacheRoot,
+		})
+		if err != nil {
+			return err
+		}
+		report, err := service.PinEvalCases(*apply, *force)
+		if err != nil {
+			return err
+		}
+		if err := printJSON(report); err != nil {
+			return err
+		}
+		if len(report.ClaimChanged) > 0 && !*force {
+			return fmt.Errorf(
+				"%d pinned document(s) changed what they claim; re-answer each case before re-stamping",
+				len(report.ClaimChanged))
+		}
+		return nil
 	case "recover":
 		flags := flag.NewFlagSet("recover", flag.ContinueOnError)
 		projectRoot := flags.String("project-root", "", "managed project root or nested path")
@@ -273,7 +312,7 @@ func printJSON(value any) error {
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: re-discipline-knowledge <serve|recover|preflight|status|index|replay|context-pack|benchmark|calibrate|promote-profile|verify-pack> [options]")
+	return fmt.Errorf("usage: re-discipline-knowledge <serve|recover|preflight|status|index|replay|context-pack|benchmark|calibrate|pin-evals|promote-profile|verify-pack> [options]")
 }
 
 func splitCSV(value string) []string {

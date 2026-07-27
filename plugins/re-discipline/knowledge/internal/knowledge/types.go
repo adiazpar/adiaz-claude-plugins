@@ -480,6 +480,25 @@ type EvalCase struct {
 	ForbiddenTiers       []string       `json:"forbiddenTiers"`
 	TokenBudget          int            `json:"tokenBudget"`
 	Answerable           *bool          `json:"answerable"`
+	// EvidencePins supersede CorpusSnapshot when present. A corpus-wide
+	// fingerprint invalidates every case on any edit anywhere, which on a
+	// corpus that changes daily means the measurement is almost never valid.
+	// A pin instead tracks the documents this case actually depends on, and
+	// gates on what those documents CLAIM rather than on their exact bytes.
+	EvidencePins []EvidencePin `json:"evidencePins,omitempty"`
+}
+
+// EvidencePin ties a case to one document it depends on.
+type EvidencePin struct {
+	Path string `json:"path"`
+	// ClaimSha256 digests the document's claim, confidence grade and
+	// supersession status. It is the gate: it changes only when what the
+	// document asserts changes, so rewording evidence prose does not
+	// invalidate a case whose ground truth still holds.
+	ClaimSha256 string `json:"claimSha256"`
+	// ContentSha256 digests the whole file. Recorded and reported as advisory
+	// drift; it never gates.
+	ContentSha256 string `json:"contentSha256,omitempty"`
 }
 
 func SHA256Bytes(data []byte) string {
