@@ -33,6 +33,12 @@ type rankedID struct {
 	score int
 }
 
+// minDistinctDocuments is how many separate documents a response tries to
+// represent before spending budget on additional chunks of ones it already
+// carries. Three is enough to show a claim, a corroborating source, and a
+// dissenting one without crowding out depth on a single-document answer.
+const minDistinctDocuments = 3
+
 type Retriever struct {
 	Boundary   Boundary
 	Generation Generation
@@ -167,6 +173,30 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 			}
 			return candidateLess(ranked[i], ranked[j])
 		})
+	}
+
+	// Promote the highest-ranked chunk of each distinct document ahead of
+	// additional chunks of documents already represented, up to
+	// minDistinctDocuments. A document whose chunks hold the top ranks would
+	// otherwise fill the whole response even when the budget allows several,
+	// and maxPerDocument cannot prevent it: that cap only binds once more than
+	// one result fits at all.
+	//
+	// This is a stable reordering rather than a second packing pass, so the
+	// omission counters below stay exact and the result stays deterministic.
+	if len(ranked) > 1 {
+		seenPath := map[string]bool{}
+		lead := make([]*candidate, 0, len(ranked))
+		rest := make([]*candidate, 0, len(ranked))
+		for _, row := range ranked {
+			if len(seenPath) < minDistinctDocuments && !seenPath[row.Chunk.Path] {
+				seenPath[row.Chunk.Path] = true
+				lead = append(lead, row)
+				continue
+			}
+			rest = append(rest, row)
+		}
+		ranked = append(lead, rest...)
 	}
 
 	replayInput := struct {

@@ -40,6 +40,19 @@ gap as an open campaign question.
 - Update verification date, scope, confidence, and verification basis.
 - Search `Depends-on` links and recheck every dependent claim.
 - Remove or retarget the entry in `docs/truth/INDEX.md`.
+- Record the supersession so retrieval can see it, on its own line:
+  - when the claim moves to a different file, write
+    `**Superseded-by:** <path>` in the old file and
+    `**Supersedes:** <old path>` in the replacement;
+  - when the claim is corrected in place, write
+    `**Supersedes:** <this path>@<old verification date>`.
+
+  Retrieval carries a document's claim and status onto every one of its
+  chunks. Without this line a passage from the middle of a corrected document
+  reaches a reader with no indication that a correction happened. Keep the
+  marker on its own line: an in-prose mention such as "supersedes the earlier
+  reading" scopes a claim rather than retiring a document, and must not be
+  read as a status.
 
 ## Step 4: Preserve The Old Claim Retrospectively
 
