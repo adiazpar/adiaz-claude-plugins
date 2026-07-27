@@ -485,10 +485,18 @@ func (service *Service) contextPackRequired(
 		return ContextPack{}, errors.New("context pack task must contain 1 to 2000 UTF-8 bytes")
 	}
 	if len(tiers) == 0 {
+		// `campaign` carries reviewed drafter findings, so a manager sees what
+		// its own campaign has already established. `draft` is deliberately
+		// absent from both sets: unreviewed drafter output must be requested
+		// by name, and that request is then visible in the pack's allowedTiers
+		// for review-subagent to check.
 		if role == "drafter" {
 			tiers = []string{"profile", "navigation", "truth", "active", "memory"}
 		} else {
-			tiers = []string{"profile", "navigation", "truth", "history", "backlog", "active", "memory"}
+			tiers = []string{
+				"profile", "navigation", "truth", "history", "backlog",
+				"active", "campaign", "memory",
+			}
 		}
 	}
 	settings := service.effectiveSettings()

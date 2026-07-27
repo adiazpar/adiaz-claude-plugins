@@ -49,7 +49,21 @@ type sourceClass struct {
 	BaseOnly  string
 	Pattern   string
 	Enabled   bool
+	// PromoteTier and PromoteMarker make a source's tier content-dependent: a
+	// file matching PromoteMarker is indexed at PromoteTier instead of Tier.
+	//
+	// This is how a drafter report moves from `draft` to `campaign` when a
+	// manager stamps it as reviewed. It is a deterministic regex evaluated at
+	// index time, not a judgement, and it fails safe: an unstamped report
+	// stays in `draft` and therefore out of every default tier set.
+	PromoteTier   string
+	PromoteMarker *regexp.Regexp
 }
+
+// reviewStampRE matches the disposition stamp review-subagent writes into a
+// report head. Line-anchored, so a mention of "Review:" in prose cannot
+// promote an unreviewed report into the retrievable tier.
+var reviewStampRE = regexp.MustCompile(`(?m)^\*\*Review:\*\*[ \t]*\S`)
 
 func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInventory, error) {
 	classes := []sourceClass{
@@ -59,6 +73,16 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		{Path: "docs/history", Tier: "history", Recursive: true, Enabled: settings.Sources.History},
 		{Path: "docs/backlog", Tier: "backlog", Recursive: true, Enabled: settings.Sources.Backlog},
 		{Path: "active", Tier: "active", Recursive: true, BaseOnly: "CAMPAIGN.md", Enabled: settings.Sources.ActiveCampaigns},
+		// Drafter reports carry a mandated section schema - VERDICT, CLAIMS,
+		// RESIDUAL UNCERTAINTIES, EVIDENCE INDEX - as markdown headings, so
+		// the chunker already partitions them along the epistemic boundary.
+		// Indexing them is what makes an in-flight campaign's own findings
+		// reachable instead of reachable only through its masterfile.
+		{
+			Path: "active", Tier: "draft", Recursive: true, BaseOnly: "report.md",
+			PromoteTier: "campaign", PromoteMarker: reviewStampRE,
+			Enabled: settings.Sources.DrafterReports,
+		},
 		{Path: ".re-discipline/memory/INDEX.md", Tier: "navigation", Enabled: settings.Sources.SharedMemory},
 		{Path: ".re-discipline/memory/topics", Tier: "memory", Recursive: true, Enabled: settings.Sources.SharedMemory},
 	}
@@ -176,13 +200,22 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			if entryInfo, infoErr := entry.Info(); infoErr == nil {
 				sourceStates[relative] = stateFromInfo(relative, entryInfo)
 			}
+			tier := class.Tier
+			if class.PromoteMarker != nil {
+				// Read only to decide the tier. A file that fails to read
+				// keeps the unpromoted tier, which is the safe direction.
+				if body, _, readErr := ReadProjectFile(boundary, relative); readErr == nil &&
+					class.PromoteMarker.Match(body) {
+					tier = class.PromoteTier
+				}
+			}
 			if existing, duplicate := candidates[relative]; duplicate &&
-				existing.Tier != class.Tier {
+				existing.Tier != tier {
 				return fmt.Errorf(
 					"source %s is assigned conflicting tiers %s and %s",
-					relative, existing.Tier, class.Tier)
+					relative, existing.Tier, tier)
 			}
-			candidates[relative] = candidate{relative, class.Tier}
+			candidates[relative] = candidate{relative, tier}
 			return nil
 		})
 		if err != nil {
@@ -344,7 +377,18 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	// status appear only in its opening section. Every later chunk would
 	// otherwise reach a caller stripped of them, so a passage from a corrected
 	// document could be served with no sign that a correction exists.
-	prelude := ExtractDocumentPrelude(body, document.Path).Render()
+	// A drafter report's header lives under different names than a truth
+	// document's - VERDICT rather than Claim, OVERALL CONFIDENCE rather than
+	// Confidence - and carries a review disposition instead of a verification
+	// date. Same renderer, same cap, different extractor.
+	var prelude string
+	switch document.Tier {
+	case "draft", "campaign":
+		prelude = ExtractReportPrelude(
+			body, document.Path, document.Tier == "campaign").Render()
+	default:
+		prelude = ExtractDocumentPrelude(body, document.Path).Render()
+	}
 
 	chunks := []Chunk{}
 	for _, sec := range sections {

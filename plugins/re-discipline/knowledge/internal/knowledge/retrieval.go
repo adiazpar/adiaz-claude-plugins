@@ -272,6 +272,7 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 				ContentHash: row.Chunk.ContentHash, SourceHash: row.DocumentHash,
 				PassageHash: row.Chunk.ContentHash, Tier: row.Chunk.Tier, URI: uri,
 				ContextHash: chunkContextHash,
+				Durability:  CitationDurability(row.Chunk.Tier),
 			},
 		}
 		// Charge the passage what it actually costs on the wire. A citation

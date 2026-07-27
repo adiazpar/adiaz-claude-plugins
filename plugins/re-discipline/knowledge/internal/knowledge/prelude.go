@@ -104,6 +104,57 @@ type DocumentPrelude struct {
 	Verified   string
 }
 
+var (
+	preludeVerdictRE    = regexp.MustCompile(`(?ms)^#{1,4}[ \t]*\d*\.?[ \t]*VERDICT\b[^\n]*\n+(.*?)(?:\n#{1,4}[ \t]|\z)`)
+	preludeOverallRE    = regexp.MustCompile(`(?mi)^#{0,4}[ \t]*\**\s*OVERALL CONFIDENCE\**[: \t]*(.*)$`)
+	preludeReviewRE     = regexp.MustCompile(`(?m)^\*\*Review:\*\*[ \t]*(.*)$`)
+	preludeVerdictLabelRE = regexp.MustCompile(
+		`^(?i)(VERDICT|DIRECT|INFERRED|CONFIRMED|REFUTED|PARTIAL)[ \t]*[:\-]+[ \t]*`)
+	preludeDispositionRE = regexp.MustCompile(`(?m)^\*\*Disposition:\*\*[ \t]*(.*)$`)
+)
+
+// ExtractReportPrelude reads a drafter report and returns its header in the
+// same shape as a truth document's, so one renderer serves both.
+//
+// A report's claim is its VERDICT, its confidence is OVERALL CONFIDENCE, and
+// its status is the manager's review disposition. An unreviewed report carries
+// a status saying so, and that status is never truncated away: a caller must
+// not be able to receive a drafter claim without learning nobody has checked
+// it.
+func ExtractReportPrelude(body, path string, reviewed bool) DocumentPrelude {
+	prelude := DocumentPrelude{Title: normalizePreludeField(titleFromMarkdown(body, path))}
+	if match := preludeVerdictRE.FindStringSubmatch(body); match != nil {
+		// A verdict usually opens with its own epistemic label. Taking the
+		// first sentence naively yields "DIRECT:" and discards the substance,
+		// so strip a leading label before splitting. The label is not lost:
+		// it is on the chunk heading and in the body.
+		verdict := preludeVerdictLabelRE.ReplaceAllString(
+			normalizePreludeField(match[1]), "")
+		prelude.Claim = firstSentence(
+			strings.TrimSpace(verdict), preludeClaimBytes)
+	}
+	if match := preludeOverallRE.FindStringSubmatch(body); match != nil {
+		confidence := normalizePreludeField(match[1])
+		if open := strings.Index(confidence, "("); open > 0 {
+			confidence = strings.TrimSpace(confidence[:open])
+		}
+		prelude.Confidence = truncateRunes(confidence, preludeConfidBytes)
+	}
+	if !reviewed {
+		prelude.Status = "UNREVIEWED - drafter claim, not evidence"
+		return prelude
+	}
+	prelude.Status = "reviewed"
+	if match := preludeDispositionRE.FindStringSubmatch(body); match != nil {
+		prelude.Correction = truncateRunes(
+			normalizePreludeField(match[1]), preludeCorrectBytes)
+	}
+	if match := preludeReviewRE.FindStringSubmatch(body); match != nil {
+		prelude.Verified = truncateRunes(normalizePreludeField(match[1]), 40)
+	}
+	return prelude
+}
+
 // ExtractDocumentPrelude reads a document body and returns its header fields.
 // Every field is optional: history, backlog, active and memory documents carry
 // no Claim block, and degrade to a title-only prelude of 8-15 tokens. path is
@@ -150,6 +201,9 @@ func (prelude DocumentPrelude) Render() string {
 	claim := prelude.Claim
 	includeConfidence := true
 	includeVerified := true
+	// An unreviewed-drafter status is load-bearing rather than informational,
+	// so it is exempt from truncation entirely. Roughly ten tokens.
+	unreviewed := strings.HasPrefix(prelude.Status, "UNREVIEWED")
 
 	for {
 		parts := make([]string, 0, 6)
@@ -185,8 +239,16 @@ func (prelude DocumentPrelude) Render() string {
 		case len(claim) > preludeClaimStepDown:
 			claim = truncateRunes(claim, len(claim)-preludeClaimStepDown)
 		default:
-			// Title alone still exceeds the cap: cut it and stop.
-			return truncateRunes(rendered, preludeMaxBytes)
+			// Title alone still exceeds the cap: cut it and stop. An
+			// unreviewed status is re-prefixed afterwards so a hard truncation
+			// can never strip the one field a caller must not miss.
+			cut := truncateRunes(rendered, preludeMaxBytes)
+			if unreviewed && !strings.Contains(cut, "UNREVIEWED") {
+				marker := "status: " + prelude.Status
+				cut = marker + " | " + truncateRunes(
+					cut, preludeMaxBytes-len(marker)-3)
+			}
+			return cut
 		}
 	}
 }
