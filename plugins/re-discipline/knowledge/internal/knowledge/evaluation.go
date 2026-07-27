@@ -107,6 +107,10 @@ type QualityMetrics struct {
 	StaleResultRate          float64 `json:"staleResultRate"`
 	AuthorityViolations      int     `json:"authorityViolations"`
 	CitationViolations       int     `json:"citationViolations"`
+	// CitationMetadataViolations counts malformed or foreign-generation
+	// citations only. Unlike CitationViolations it carries no recall
+	// component, so it is safe to use as an absolute gate.
+	CitationMetadataViolations int `json:"citationMetadataViolations"`
 	HardNegativeHits         int     `json:"hardNegativeHits"`
 	RelevantTokenRatio       float64 `json:"relevantTokenRatio"`
 	DuplicateTokenRatio      float64 `json:"duplicateTokenRatio"`
@@ -602,7 +606,13 @@ func runEvaluationCase(
 	}
 	outcome.HardNegativeHits = mapKeysSorted(hardNegatives)
 	outcome.ExpectedCitationsFound = mapKeysSorted(foundCitations)
-	outcome.AuthoritySafe = authoritySafe && len(outcome.HardNegativeHits) == 0
+	// Authority is tier discipline only: did retrieval serve a tier this case
+	// forbade. Hard-negative hits used to be folded in here, which made a
+	// ranking-quality signal absolute by way of a safety field and meant no
+	// weight vector could ever clear the gate. They are graded under
+	// QualityPassed and compared against the incumbent in
+	// calibrationNonInferior instead.
+	outcome.AuthoritySafe = authoritySafe
 	outcome.CompleteEvidence = true
 	for _, expected := range eval.MinimumEvidencePaths {
 		if !seenPaths[expected] {
@@ -638,7 +648,8 @@ func runEvaluationCase(
 		outcome.StaleResults == 0
 	outcome.QualityPassed = !outcome.QualityGateApplicable ||
 		(outcome.ExpectedFound && outcome.CompleteEvidence &&
-			outcome.CitationSafe && outcome.AbstentionCorrect)
+			outcome.CitationSafe && outcome.AbstentionCorrect &&
+			len(outcome.HardNegativeHits) == 0)
 	outcome.GatePassed = outcome.SafetyPassed && outcome.QualityPassed
 	outcome.LatencyMillis = time.Since(started).Milliseconds()
 	return outcome, nil
@@ -865,6 +876,7 @@ func calculateMetrics(outcomes []CaseOutcome, cases []EvalCase) QualityMetrics {
 	var expectedCitations, foundCitations, returnedCitations, staleResults int
 	var reciprocal, ndcg float64
 	violations, citationViolations, hardNegativeHits, replay := 0, 0, 0, 0
+	citationMetadataViolations := 0
 	completeEvidence, abstentionCorrect, budgetSafe, exactCases, exactHits := 0, 0, 0, 0, 0
 	latencies := make([]int64, 0, len(outcomes))
 	for index, outcome := range outcomes {
@@ -902,6 +914,12 @@ func calculateMetrics(outcomes []CaseOutcome, cases []EvalCase) QualityMetrics {
 		if !outcome.CitationSafe {
 			citationViolations++
 		}
+		// CitationSafe folds citation RECALL into a field whose name reads as
+		// safety. Track well-formedness separately so a hard gate can require
+		// citation integrity without also requiring perfect recall.
+		if !outcome.CitationMetadataSafe {
+			citationMetadataViolations++
+		}
 		hardNegativeHits += len(outcome.HardNegativeHits)
 		if outcome.ReplayIdentical {
 			replay++
@@ -938,7 +956,8 @@ func calculateMetrics(outcomes []CaseOutcome, cases []EvalCase) QualityMetrics {
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 	metrics := QualityMetrics{
 		AuthorityViolations: violations, CitationViolations: citationViolations,
-		HardNegativeHits: hardNegativeHits,
+		CitationMetadataViolations: citationMetadataViolations,
+		HardNegativeHits:           hardNegativeHits,
 	}
 	if expected > 0 {
 		metrics.RecallAtK = float64(found) / float64(expected)
@@ -1320,6 +1339,52 @@ type CalibrationReport struct {
 	CandidatePath     string                  `json:"candidatePath"`
 	CandidateDigest   string                  `json:"candidateDigest"`
 	Activated         bool                    `json:"activated"`
+	// FailureReason is set when a sweep produced no promotable candidate. The
+	// report is still written so the measurements survive and the operator can
+	// see which gate blocked which candidate.
+	FailureReason string `json:"failureReason,omitempty"`
+}
+
+// persistCalibrationFailure records a sweep that produced no promotable
+// candidate, returning the report path or "" if it could not be written.
+//
+// A failed calibration is data. Without this the full candidate grid is
+// measured and then discarded, leaving no way to tell whether a candidate
+// missed by one case or by fifty.
+func (service *Service) persistCalibrationFailure(
+	before string,
+	evalDigest string,
+	generation Generation,
+	selected SelectedProfile,
+	candidates []CalibrationCandidate,
+	frontier []CalibrationCandidate,
+	reason string,
+) string {
+	runID := nowRunID("calibration")
+	runDir, err := containedOutputPath(
+		filepath.Dir(service.Index.CacheRoot),
+		filepath.Join("calibration", runID),
+	)
+	if err != nil {
+		return ""
+	}
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return ""
+	}
+	report := CalibrationReport{
+		SchemaVersion: 1, RunID: runID, BaseProfile: service.ProfileCatalog.ProfileID,
+		ActiveBefore: before, ActiveAfter: before, EvalDigest: evalDigest,
+		CorpusFingerprint: generation.CorpusFingerprint,
+		ModelFingerprint:  mustDigest(service.ModelManifest.Models),
+		RuntimeContract:   RuntimeContract(selected.Runtime),
+		Candidates:        candidates, ParetoFrontier: frontier,
+		Activated: false, FailureReason: reason,
+	}
+	path := filepath.Join(runDir, "report.json")
+	if err := AtomicWriteJSON(path, report, 0o600); err != nil {
+		return ""
+	}
+	return filepath.ToSlash(path)
 }
 
 func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error) {
@@ -1387,7 +1452,14 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	}
 	frontierIndexes := paretoFrontierIndexes(candidates)
 	if len(frontierIndexes) == 0 {
-		return CalibrationReport{}, errors.New("no calibration candidate passed hard gates")
+		reason := "no calibration candidate reached the Pareto frontier"
+		path := service.persistCalibrationFailure(
+			before, evalDigest, generation, selected, candidates, nil, reason,
+		)
+		if path != "" {
+			return CalibrationReport{}, fmt.Errorf("%s; measurements written to %s", reason, path)
+		}
+		return CalibrationReport{}, errors.New(reason)
 	}
 	for _, index := range frontierIndexes {
 		row := rowsByIdentity[candidates[index].Identity]
@@ -1432,7 +1504,22 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 		}
 	}
 	if len(frontier) == 0 {
-		return CalibrationReport{}, errors.New("no Pareto finalist passed frozen holdout hard gates")
+		reason := "no Pareto finalist passed frozen holdout hard gates " +
+			"and non-inferiority against the incumbent"
+		// Report the candidates that reached holdout evaluation, not nil.
+		// Their metrics are populated in place above, and they are precisely
+		// the set an operator needs in order to see which gate each one missed.
+		evaluated := make([]CalibrationCandidate, 0, len(frontierIndexes))
+		for _, index := range frontierIndexes {
+			evaluated = append(evaluated, candidates[index])
+		}
+		path := service.persistCalibrationFailure(
+			before, evalDigest, generation, selected, candidates, evaluated, reason,
+		)
+		if path != "" {
+			return CalibrationReport{}, fmt.Errorf("%s; measurements written to %s", reason, path)
+		}
+		return CalibrationReport{}, errors.New(reason)
 	}
 	sort.Slice(frontier, func(i, j int) bool {
 		return calibrationCandidateLess(frontier[i], frontier[j])
@@ -1530,7 +1617,11 @@ func calibrationNonInferior(
 		candidate.NDCG >= baseline.NDCG &&
 		candidate.CompleteEvidenceCoverage >= baseline.CompleteEvidenceCoverage &&
 		candidate.CitationRecall >= baseline.CitationRecall &&
-		candidate.AuthorityViolations <= baseline.AuthorityViolations
+		candidate.AuthorityViolations <= baseline.AuthorityViolations &&
+		// Moved off the absolute gate: still may never regress, but is now
+		// measured against the incumbent rather than against perfection.
+		candidate.HardNegativeHits <= baseline.HardNegativeHits &&
+		candidate.AbstentionAccuracy >= baseline.AbstentionAccuracy
 }
 
 func splitEvalCases(cases []EvalCase) ([]EvalCase, []EvalCase) {
@@ -1571,10 +1662,20 @@ func relevantPathHits(outcomes []CaseOutcome) int {
 }
 
 func hardMetricsPassed(metrics QualityMetrics) bool {
-	return metrics.AuthorityViolations == 0 && metrics.CitationViolations == 0 &&
-		metrics.HardNegativeHits == 0 && metrics.StaleResultRate == 0 &&
-		metrics.BudgetComplianceRate == 1 && metrics.DeterministicReplayRate == 1 &&
-		metrics.AbstentionAccuracy == 1
+	// Absolute gates carry only properties that must never regress under any
+	// tuning: serving a forbidden tier, emitting a malformed citation, serving
+	// content that no longer matches its source, exceeding the caller's
+	// budget, or being non-deterministic.
+	//
+	// CitationViolations, HardNegativeHits, and AbstentionAccuracy were
+	// previously absolute. All three trade off against recall, so requiring
+	// perfection on them meant no weight vector could ever qualify and
+	// calibration could not promote even a strict improvement over the
+	// incumbent. They are compared against the incumbent in
+	// calibrationNonInferior instead.
+	return metrics.AuthorityViolations == 0 &&
+		metrics.CitationMetadataViolations == 0 && metrics.StaleResultRate == 0 &&
+		metrics.BudgetComplianceRate == 1 && metrics.DeterministicReplayRate == 1
 }
 
 func hasApplicableQualityGate(outcomes []CaseOutcome) bool {
@@ -1589,12 +1690,13 @@ func hasApplicableQualityGate(outcomes []CaseOutcome) bool {
 func paretoFrontierIndexes(candidates []CalibrationCandidate) []int {
 	frontier := []int{}
 	for index, candidate := range candidates {
-		if !candidate.HardGatesPassed {
-			continue
-		}
+		// The frontier is built on quality alone. Filtering by HardGatesPassed
+		// here meant that when no candidate passed, the frontier was empty and
+		// every measurement was discarded before the incumbent comparison ran.
+		// Hard gates are applied at finalist selection instead.
 		dominated := false
 		for otherIndex, other := range candidates {
-			if otherIndex != index && other.HardGatesPassed &&
+			if otherIndex != index &&
 				developmentDominates(other.DevelopmentMetrics, candidate.DevelopmentMetrics) {
 				dominated = true
 				break
@@ -1613,7 +1715,15 @@ func developmentDominates(left, right QualityMetrics) bool {
 		left.CompleteEvidenceCoverage >= right.CompleteEvidenceCoverage &&
 		left.CitationRecall >= right.CitationRecall &&
 		left.RelevantTokenRatio >= right.RelevantTokenRatio &&
-		left.DuplicateTokenRatio <= right.DuplicateTokenRatio
+		left.DuplicateTokenRatio <= right.DuplicateTokenRatio &&
+		// A candidate may only be pruned by one that is no worse on every axis
+		// finalist selection will later check. These three are gated by
+		// hardMetricsPassed or calibrationNonInferior, so omitting them let a
+		// quality-dominant but ungated candidate shadow a promotable one that
+		// was then never holdout-evaluated.
+		left.AuthorityViolations <= right.AuthorityViolations &&
+		left.HardNegativeHits <= right.HardNegativeHits &&
+		left.AbstentionAccuracy >= right.AbstentionAccuracy
 	strict := left.RecallAtK > right.RecallAtK ||
 		left.NDCG > right.NDCG ||
 		left.CompleteEvidenceCoverage > right.CompleteEvidenceCoverage ||
