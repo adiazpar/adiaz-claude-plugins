@@ -16,13 +16,36 @@ const (
 	ParserVersion  = "markdown-structure-v1"
 	// Bumped for the per-chunk document prelude. index.go forces a full
 	// rebuild when this value changes.
-	ChunkerVersion = "section-block-v2"
+	ChunkerVersion = "section-block-v3"
 	SchemaVersion  = 1
 )
 
 var AllowedTiers = map[string]bool{
 	"profile": true, "navigation": true, "truth": true, "history": true,
 	"backlog": true, "active": true, "memory": true, "asset": true,
+	// campaign: drafter reports a manager has reviewed and stamped.
+	// draft:    drafter reports nobody has reviewed yet.
+	//
+	// The split lands exactly on the review-subagent Wall, so it records a
+	// decision a manager already makes rather than introducing a new one.
+	// `draft` is in no default tier set: unreviewed drafter output must be
+	// asked for by name, and the request is visible in a pack's allowedTiers.
+	"campaign": true, "draft": true,
+}
+
+// EphemeralTiers hold content that is deleted when its campaign closes. A
+// citation into one of these is a handle to something scheduled to vanish,
+// which is categorically different from a citation into docs/.
+var EphemeralTiers = map[string]bool{
+	"active": true, "campaign": true, "draft": true,
+}
+
+// CitationDurability reports whether a tier's citations outlive their campaign.
+func CitationDurability(tier string) string {
+	if EphemeralTiers[tier] {
+		return "ephemeral"
+	}
+	return "durable"
 }
 
 type BootstrapConfig struct {
@@ -58,7 +81,11 @@ type SourceSettings struct {
 	Backlog         bool               `json:"backlog"`
 	ActiveCampaigns bool               `json:"activeCampaigns"`
 	SharedMemory    bool               `json:"sharedMemory"`
-	Additional      []AdditionalSource `json:"additional,omitempty"`
+	// DrafterReports indexes active/*/subagents/*/report.md. Reviewed reports
+	// land in the `campaign` tier; unreviewed ones in `draft`, which is in no
+	// default tier set and must be asked for by name.
+	DrafterReports bool               `json:"drafterReports"`
+	Additional     []AdditionalSource `json:"additional,omitempty"`
 }
 
 type AdditionalSource struct {
@@ -352,6 +379,11 @@ type Citation struct {
 	// omitempty for the same reason as SearchResult.DocumentContext: stored
 	// packs are re-marshalled and verified against their recorded digest.
 	ContextHash string `json:"contextHash,omitempty"`
+	// Durability says whether this handle outlives its campaign. Campaign and
+	// draft citations are deliberately mortal - close-campaign removes the
+	// directory - and an agent holding one needs to know that before relying
+	// on it. The chronicle is their durable projection, not the handle.
+	Durability string `json:"durability,omitempty"`
 }
 
 type SearchResult struct {

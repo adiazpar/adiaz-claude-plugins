@@ -18,6 +18,10 @@
         "backlog": {"type": "boolean"},
         "activeCampaigns": {"type": "boolean"},
         "sharedMemory": {"type": "boolean"},
+        "drafterReports": {
+          "description": "Index active/*/subagents/*/report.md. A report stamped as reviewed enters the campaign tier; an unstamped one enters draft, which is in no default tier set and must be requested by name.",
+          "type": "boolean"
+        },
         "additional": {
           "type": "array",
           "maxItems": 32,
