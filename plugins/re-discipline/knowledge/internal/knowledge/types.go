@@ -131,6 +131,16 @@ type BenchmarkEvidence struct {
 	CorpusFingerprint  string `json:"corpusFingerprint,omitempty"`
 	ModelFingerprint   string `json:"modelFingerprint,omitempty"`
 	RuntimeFingerprint string `json:"runtimeFingerprint,omitempty"`
+	// RatifiedHardNegativeHits and RatifiedAbstentionAccuracy record the
+	// values this profile was accepted at. calibrationNonInferior compares a
+	// candidate against the tighter of these and the incumbent's score on
+	// today's corpus, so the ratchet can tighten but never loosen.
+	//
+	// Without them the comparison re-anchors every run: a corpus edit that
+	// raises the incumbent's hard-negative count silently raises the ceiling
+	// a future candidate must clear, and the drift is never recorded.
+	RatifiedHardNegativeHits   int     `json:"ratifiedHardNegativeHits,omitempty"`
+	RatifiedAbstentionAccuracy float64 `json:"ratifiedAbstentionAccuracy,omitempty"`
 }
 
 type ModelManifest struct {

@@ -1412,6 +1412,20 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 		return CalibrationReport{}, fmt.Errorf(
 			"evaluate active holdout baseline: %w", err)
 	}
+	// Clamp the comparison floor to the tighter of the incumbent's score on
+	// today's corpus and the score it was ratified at. The incumbent's live
+	// score drifts as the corpus changes - an overturn that leaves a
+	// near-duplicate chronicle behind can raise its hard-negative count with
+	// no profile change at all - and without this clamp that drift silently
+	// raises the bar a candidate is allowed to meet.
+	ratified := selected.Effective.Benchmark
+	if ratified.RatifiedHardNegativeHits > 0 &&
+		ratified.RatifiedHardNegativeHits < baselineHoldoutMetrics.HardNegativeHits {
+		baselineHoldoutMetrics.HardNegativeHits = ratified.RatifiedHardNegativeHits
+	}
+	if ratified.RatifiedAbstentionAccuracy > baselineHoldoutMetrics.AbstentionAccuracy {
+		baselineHoldoutMetrics.AbstentionAccuracy = ratified.RatifiedAbstentionAccuracy
+	}
 	candidates := []CalibrationCandidate{}
 	rowsByIdentity := map[string]EffectiveProfile{}
 	for _, exact := range []int{6, 8, 10} {
@@ -1549,6 +1563,11 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 				Status: "passed", EvaluatedAt: RFC3339UTC(time.Now()),
 				EvalFingerprint: evalDigest, CorpusFingerprint: generation.CorpusFingerprint,
 				ModelFingerprint: mustDigest(service.ModelManifest.Models),
+				// Record what this profile was accepted at so a later
+				// calibration compares against the tighter of this and the
+				// incumbent's drifted live score.
+				RatifiedHardNegativeHits:   recommended.HoldoutMetrics.HardNegativeHits,
+				RatifiedAbstentionAccuracy: recommended.HoldoutMetrics.AbstentionAccuracy,
 			}
 			runtimeDigest, _ := CanonicalDigest(RuntimeContract(selected.Runtime))
 			candidateProfile.EffectiveProfiles[index].Benchmark.RuntimeFingerprint = runtimeDigest
