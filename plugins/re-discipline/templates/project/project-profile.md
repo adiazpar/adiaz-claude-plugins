@@ -20,7 +20,8 @@ thin manager adapters, not in a second project profile.
 | `docs/truth/` | verified current claim | Trust it only within its scope and re-verification conditions. |
 | `docs/history/` | retrospective provenance | Use for context and leads, never current authority or sole empirical support. |
 | `active/<slug>/` | provisional work and temporary evidence | Keep unresolved material here; do not present it as fact. |
-| `docs/backlog/` | deferred briefs | Treat as intent, not completed work. |
+| `active/<slug>/subagents/*/report.md` | a drafter claim | Stamped by a manager, it is a rederived finding and still not empirical support. Unstamped, nobody has checked it, and it is retrievable only when asked for by name. |
+| `docs/backlog/` | deferred briefs | Treat as intent, not completed work, and as the destination for a HOLD that outlives its campaign. |
 | maintained source, tools, tests, fixtures, corpora, and references | durable project assets | Keep only with an active consumer or owner; change only for scoped work and verify. |
 
 ## Session Start

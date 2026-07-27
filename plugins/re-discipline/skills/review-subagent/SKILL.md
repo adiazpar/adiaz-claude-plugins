@@ -68,11 +68,18 @@ negatives. A drafter never supplies its own gold label.
 | Verdict | Condition | Action |
 |---|---|---|
 | PROMOTE | DIRECT, value-precise, no unresolved conflict, with a durable verifier | Offer it to `promote-truth`. |
-| HOLD | INFERRED, one observation short, or missing a durable verifier | Keep it provisional and name the decisive observation or verifier. |
+| HOLD | INFERRED, one observation short, or missing a durable verifier | Keep it provisional, name the decisive observation or verifier, and name where it will live if the campaign closes first. |
 | DROP | Disproved or repeats a dead end | Add it to campaign dead ends with evidence. |
 | BLOCK | Conflicts with current truth or primary evidence | Stop promotion and reconcile both sides. |
 
 INFERRED claims never cross the Wall.
+
+HOLD is the disposition that loses information. PROMOTE reaches `docs/truth/`,
+DROP reaches campaign dead ends and then the chronicle, BLOCK becomes an open
+question. HOLD has no destination of its own, so a held claim survives only as
+long as its campaign does. Name a destination now - normally a
+`docs/backlog/` entry - rather than discovering at closure that the only
+record was a line in a masterfile.
 
 ## Step 5: Ratify With The User
 
@@ -88,9 +95,32 @@ or through `recall_propose`. Never write it to accepted topics. Route later
 acceptance or rejection through `review-memory` with an explicit user
 decision.
 
-## Step 6: Update Campaign State
+## Step 6: Stamp The Report And Update Campaign State
 
-Record the report, context-pack ID and digest, review date,
+Write the disposition into the head of the report you just reviewed, on its
+own lines, before recording anything elsewhere:
+
+```markdown
+**Review:** <YYYY-MM-DD> <reviewer>
+**Disposition:** PROMOTE=<n> HOLD=<n> DROP=<n> BLOCK=<n>
+**Promoted-to:** <docs/truth/... paths, or none>
+**Dropped:** <the disproved claim, one line each, or none>
+```
+
+This is the same information Step 6 already records, written where the content
+it qualifies actually lives. Without it a report chunk cannot distinguish
+three states that mean opposite things: never reviewed, reviewed and promoted,
+and reviewed and DISPROVED. The disproved case is the dangerous one - a claim
+a manager refuted otherwise sits verbatim and indistinguishable from a claim
+nobody has checked.
+
+The stamp also changes what retrieval will serve. An unstamped report is
+indexed in the `draft` tier, which is in no default tier set; a stamped one is
+indexed in `campaign` and reaches a manager's ordinary context packs. So
+stamping is what makes a reviewed finding reachable, and forgetting to stamp
+fails safe rather than silently exposing unreviewed work.
+
+Then record the report, context-pack ID and digest, review date,
 PROMOTE/HOLD/DROP/BLOCK outcomes, corrections, retrieval-evaluation
 candidates, memory-proposal paths, and any blocking uncertainty in
 `CAMPAIGN.md`. Keep report and context-pack artifacts in place until closure

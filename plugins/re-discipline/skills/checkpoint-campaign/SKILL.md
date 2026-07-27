@@ -28,7 +28,27 @@ ends with DIRECT or INFERRED labels. Update the artifact disposition manifest.
 Preserve compact source handles, reviewed report paths, and immutable
 context-pack IDs and digests instead of copying passages or spent tool output.
 
-## Step 2: Sweep Scratch Carefully
+## Step 2: Account For Unresolved Holds
+
+List every HOLD recorded since the last checkpoint and give each one a current
+destination: promoted now, written to `docs/backlog/`, still genuinely open
+with a named decisive observation, or explicitly dropped with a reason.
+
+Do this every checkpoint rather than at closure. A campaign that reaches
+closure with dozens of unexamined HOLDs is compressing months of judgement
+into a single act, performed by whoever is closing, over reports they may
+never have read. Surfacing a handful at each checkpoint is the same work
+spread across the people who actually did it.
+
+Reviewed reports are retrievable, so this is a query rather than a memory
+exercise: search the campaign tier for the campaign's own RESIDUAL
+UNCERTAINTIES and TRUTH-PROMOTION CANDIDATES.
+
+## Step 3: Sweep Scratch Carefully
+
+Never sweep `report.md`, its brief, or its context pack. Reviewed reports are
+indexed and reachable, and deleting one destroys knowledge the campaign is
+actively relying on. They are closure's decision, not a checkpoint's.
 
 Survey tracked and untracked files under the campaign. For each one-off script
 or log:
@@ -52,7 +72,7 @@ Treat every `subagents/` child name as an opaque workspace key. Preserve both
 new chronological IDs and legacy task-only or provider-prefixed names exactly
 as they are. Checkpointing never parses, normalizes, or renames them.
 
-## Step 3: Preserve Knowledge Boundaries
+## Step 4: Preserve Knowledge Boundaries
 
 Run only the cheap knowledge status and freshness check. Record a changed
 corpus generation, requested/effective profile, or fallback reason only when
@@ -62,7 +82,7 @@ Do not run a full benchmark, calibrate weights, activate a retrieval profile,
 accept memory, or copy raw conversation transcripts into durable state. Leave
 pending proposals for `review-memory`.
 
-## Step 4: Verify Cold Resume
+## Step 5: Verify Cold Resume
 
 Read the rewritten masterfile as if the session had no prior context. Confirm
 that its links resolve, its next action is executable, and every new artifact
