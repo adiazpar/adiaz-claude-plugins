@@ -24,14 +24,36 @@ For a non-trivial campaign, use `delegate` to request a bounded fresh-eyes
 closure proposal through the active host adapter. Do not hardcode a provider or
 model. The manager still ratifies the proposal.
 
-## Step 2: Ratify Findings
+## Step 2: Account For Every Finding
+
+Enumerate the campaign's own reports and confirm each recorded finding has a
+resolution. Do not reconstruct this from memory or from the masterfile alone:
+query the campaign's reports for their TRUTH-PROMOTION CANDIDATES and RESIDUAL
+UNCERTAINTIES, and read the `**Disposition:**` stamp on each report.
+
+Every PROMOTE must be promoted or explicitly declined with a reason. Every
+HOLD must reach `docs/backlog/`, be promoted now, or be explicitly dropped
+with a reason. Every DROP must appear in the chronicle's dead ends. Every
+BLOCK must be resolved or carried forward as a named open question.
+
+An unstamped report means nobody reviewed it. Review it now or record
+explicitly that its content is being discarded unreviewed - do not let it pass
+silently.
+
+This step exists because closure performs extreme compression. A campaign with
+a megabyte of reports and a nine-kilobyte chronicle is discarding most of what
+it learned, and without an enumeration nobody can see what was lost. The
+chronicle is not the archive; it is the explanation. The archive is
+`docs/truth/` for what was proven and `docs/backlog/` for what was held.
+
+## Step 3: Ratify Findings
 
 Classify every candidate through the Wall. Require both DIRECT establishment
 and a durable verifier before promotion. Present the proposed promotion,
 augmentation, overturn, hold, and dead-end list to the user. Invoke
 `promote-truth` or `overturn` only for approved findings that pass both gates.
 
-## Step 3: Disposition Artifacts
+## Step 4: Disposition Artifacts
 
 Complete the campaign manifest, then handle each artifact:
 
@@ -55,7 +77,7 @@ provenance. New chronological IDs and legacy task-only or provider-prefixed
 names are equally valid inputs. Do not normalize or rename either form before
 the campaign's final disposition removes the whole campaign.
 
-## Step 4: Write The Chronicle
+## Step 5: Write The Chronicle
 
 Resolve the plugin root from this skill's path and render
 `<plugin-root>/templates/chronicle.md` to
@@ -72,7 +94,7 @@ retrospective voice. Include:
 - deferred leads and backlog links;
 - provenance and scratch sources folded into the chronicle.
 
-## Step 5: Update Masterfiles
+## Step 6: Update Masterfiles
 
 Add the chronicle to `docs/history/INDEX.md`, remove the campaign from
 `docs/INDEX.md`, and verify `docs/truth/INDEX.md`.
@@ -87,7 +109,7 @@ Add a retrieval failure to `.re-discipline/knowledge/evals/` only after the
 manager or user ratifies its query, expected evidence, hard negatives, tier
 boundary, and token budget.
 
-## Step 6: Remove Scratch Safely
+## Step 7: Remove Scratch Safely
 
 Before recursive removal, resolve the repository root and target path. Confirm
 the target is exactly `<repo>/active/<slug>`, remains inside `<repo>/active/`,
@@ -103,7 +125,7 @@ Before removal, resolve every campaign-owned pending memory proposal or replace
 its scratch-only citation with a durable source. Do not leave accepted recall
 or an evaluation case pointing only to the campaign being deleted.
 
-## Step 7: Verify And Report
+## Step 8: Verify And Report
 
 Confirm truth links, index links, verification bases, recipes, and maintained
 source, tools, tests, fixtures, corpora, or references. Confirm

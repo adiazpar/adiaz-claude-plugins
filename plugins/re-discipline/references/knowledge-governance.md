@@ -11,6 +11,8 @@ decision, memory review, and drafter context pack.
 | `docs/truth/**` | Verified current claims within their stated scope. | Yes, when the query permits truth. |
 | `docs/history/**` | Retrospective provenance and leads. | Only when explicitly permitted. |
 | `active/*/CAMPAIGN.md` | Provisional campaign state. | Only when explicitly permitted. |
+| `active/*/subagents/*/report.md`, stamped | A drafter finding a manager rederived. Provisional, never empirical support. | Yes for a manager, labelled a reviewed drafter claim. |
+| `active/*/subagents/*/report.md`, unstamped | A drafter claim nobody has checked. | No. Tier `draft` is in no default tier set and must be requested by name. |
 | `docs/backlog/**` | Deferred intent. | Only when explicitly permitted. |
 | `.re-discipline/memory/topics/**` | Accepted operational recall, never empirical authority. | Yes, labeled as recall. |
 | `.re-discipline/memory/proposals/**` | Pending provisional proposals. | No. Review only through `review-memory`. |
@@ -21,6 +23,18 @@ Apply tier and access filters before relevance ranking. Never make truth,
 history, campaign work, backlog, or memory interchangeable through a score.
 Use source passages and citations as evidence; never cite an embedding,
 generated summary, rank, or database row as the source of a claim.
+
+A drafter report's tier is content-dependent: a report carrying a manager's
+review stamp indexes as `campaign`, an unstamped one as `draft`. The split
+records a decision `review-subagent` already makes rather than introducing a
+new one, is evaluated by line-anchored match at index time, and fails safe -
+forgetting to stamp leaves a report out of every default context pack.
+
+Campaign and draft citations are ephemeral by construction, because closure
+removes the directory. A citation into either is a handle to something
+scheduled to vanish, and the chronicle rather than the handle is its durable
+projection. Never carry an ephemeral citation into truth, accepted memory, or
+a ratified evaluation case.
 
 ## Project-Facing Settings
 

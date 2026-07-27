@@ -44,6 +44,14 @@ and do not promote it to current truth.
 
 Search truth and history for exact values, names, and key terms.
 
+Search the `campaign` tier as well. A reviewed drafter report may already have
+established this claim, or may hold a finding that contradicts it. Both are
+worth knowing before writing, and neither is visible from `docs/` alone.
+
+When this promotion resolves a claim a report recorded as HOLD, update that
+report's `**Disposition:**` stamp so the ledger and the corpus agree. A stale
+HOLD is counted again at closure and re-examined for nothing.
+
 - A contradiction blocks ordinary promotion. Use `overturn` only when DIRECT
   evidence disconfirms an existing synthesis.
 - An overlap is an augmentation, not a duplicate file.
