@@ -80,6 +80,24 @@ directly resolves.
 Re-open the finished truth file and verify every exact value against its cited
 maintained source, permanent test and fixture, or runnable recipe.
 
+When this synthesis replaces one that lived elsewhere, write
+`**Supersedes:** <old path>` on its own line, and `**Superseded-by:** <this
+path>` in the file it replaces.
+
+## Step 7: Verify The Claim Is Retrievable
+
+Search for the claim's first sentence verbatim, with `queryClass` `exact` and
+the truth tier permitted, and confirm the new path appears in the results.
+
+Admission to truth already requires that a future manager can recheck the
+claim. A claim no agent can retrieve cannot be rechecked, so an unreachable
+document fails the admission bar rather than merely being inconvenient. The
+same requirement already governs accepted memory in `review-memory`.
+
+If it does not surface, read the omission reason and act on it: shorten an
+oversized section so the claim chunk fits, split the document, or record the
+unreachability as an open campaign question. Do not continue silently.
+
 Do not commit unless the user explicitly asks.
 
 ## Reference

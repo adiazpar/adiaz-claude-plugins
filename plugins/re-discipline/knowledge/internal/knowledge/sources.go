@@ -453,16 +453,36 @@ func BuildGraphEdges(documents []SourceDocument, chunks []Chunk) []GraphEdge {
 			resolved := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(chunk.Path), filepath.FromSlash(target))))
 			add(chunk.ID, firstByPath[resolved], "link")
 		}
+		// Supersession is a relationship between documents, not a property of
+		// one. A claim that moved to a replacement leaves the old document
+		// still retrievable, so the edge is what lets a caller be told the
+		// document it is reading has been retired.
 		for _, line := range strings.Split(chunk.Content, "\n") {
-			lower := strings.ToLower(strings.TrimSpace(line))
-			if !strings.HasPrefix(lower, "depends-on:") {
+			trimmed := strings.TrimSpace(line)
+			lower := strings.ToLower(trimmed)
+			kind := ""
+			switch {
+			case strings.HasPrefix(lower, "depends-on:"):
+				kind = "depends-on"
+			case strings.HasPrefix(lower, "**superseded-by:**"),
+				strings.HasPrefix(lower, "superseded-by:"):
+				kind = "superseded-by"
+			case strings.HasPrefix(lower, "**supersedes:**"),
+				strings.HasPrefix(lower, "supersedes:"):
+				kind = "supersedes"
+			default:
 				continue
 			}
-			target := strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
-			target = strings.Trim(target, "` ")
+			target := strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[1])
+			target = strings.Trim(target, "*` ")
 			target = strings.SplitN(target, "#", 2)[0]
+			target = strings.SplitN(target, "@", 2)[0]
+			target = strings.TrimSpace(target)
+			if target == "" {
+				continue
+			}
 			resolved := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(chunk.Path), filepath.FromSlash(target))))
-			add(chunk.ID, firstByPath[resolved], "depends-on")
+			add(chunk.ID, firstByPath[resolved], kind)
 		}
 	}
 	sort.Slice(edges, func(i, j int) bool {
