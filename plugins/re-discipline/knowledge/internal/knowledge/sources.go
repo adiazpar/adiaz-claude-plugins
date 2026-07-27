@@ -340,6 +340,12 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	}
 	sections = append(sections, section{currentStart, len(lines) - 1, currentHeading})
 
+	// The document's claim, confidence, verification date and supersession
+	// status appear only in its opening section. Every later chunk would
+	// otherwise reach a caller stripped of them, so a passage from a corrected
+	// document could be served with no sign that a correction exists.
+	prelude := ExtractDocumentPrelude(body, document.Path).Render()
+
 	chunks := []Chunk{}
 	for _, sec := range sections {
 		for _, span := range splitSection(lines, sec.start, sec.end, 2200) {
@@ -353,6 +359,15 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 				Content: content, ContentHash: hash,
 			})
 		}
+	}
+	// Chunk 0 already contains the header verbatim, so attaching the prelude
+	// there would duplicate it and spend budget saying nothing new.
+	for index := range chunks {
+		if index == 0 || prelude == "" {
+			continue
+		}
+		chunks[index].Context = prelude
+		chunks[index].ContextHash = SHA256String(prelude)
 	}
 	for index := range chunks {
 		if index > 0 {
@@ -463,7 +478,12 @@ func BuildGraphEdges(documents []SourceDocument, chunks []Chunk) []GraphEdge {
 }
 
 func extractTerms(chunk Chunk) []string {
-	fields := strings.FieldsFunc(chunk.Path+"\n"+chunk.Heading+"\n"+chunk.Content, func(r rune) bool {
+	// The prelude carries the document's claim sentence, which is its best
+	// natural-language summary. Indexing it makes every chunk findable by what
+	// its document asserts, not only by the prose that happens to fall inside
+	// that chunk's line range.
+	fields := strings.FieldsFunc(chunk.Path+"\n"+chunk.Heading+"\n"+
+		chunk.Context+"\n"+chunk.Content, func(r rune) bool {
 		return !(r == '_' || r == '-' || r == '.' || r == '/' || r == ':' || r == '@' ||
 			r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')
 	})

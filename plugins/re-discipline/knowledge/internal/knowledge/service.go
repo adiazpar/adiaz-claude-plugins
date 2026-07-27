@@ -583,7 +583,8 @@ func (service *Service) contextPackRequired(
 	passages := make([]ContextPassage, 0, len(search.Results))
 	for _, result := range search.Results {
 		passages = append(passages, ContextPassage{
-			ChunkID: result.ChunkID, Passage: result.Passage, Citation: result.Citation,
+			ChunkID: result.ChunkID, Passage: result.Passage,
+			DocumentContext: result.DocumentContext, Citation: result.Citation,
 		})
 	}
 	pack := ContextPack{
