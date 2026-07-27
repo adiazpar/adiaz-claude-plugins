@@ -3101,7 +3101,7 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 			"corpusSnapshot", "expectedPaths", "minimumEvidencePaths",
 			"hardNegativePaths", "expectedCitations", "forbiddenTiers",
 			"tokenBudget", "answerable",
-		}, []string{"gradedRelevantPaths"})
+		}, []string{"gradedRelevantPaths", "evidencePins"})
 		for _, name := range []string{
 			"expectedPaths", "minimumEvidencePaths", "hardNegativePaths", "expectedCitations",
 		} {

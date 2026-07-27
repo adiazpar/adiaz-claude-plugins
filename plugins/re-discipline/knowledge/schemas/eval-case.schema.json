@@ -50,7 +50,22 @@
       "items": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset"]}
     },
     "tokenBudget": {"type": "integer", "minimum": 128, "maximum": 4096},
-    "answerable": {"type": "boolean"}
+    "answerable": {"type": "boolean"},
+    "evidencePins": {
+      "description": "Per-document pins. When present these replace corpusSnapshot for gating: claimSha256 changes only when a pinned document changes what it asserts, so editing evidence prose elsewhere in the corpus does not invalidate the case.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "claimSha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "claimSha256": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+          "contentSha256": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+        }
+      }
+    }
   },
   "allOf": [
     {

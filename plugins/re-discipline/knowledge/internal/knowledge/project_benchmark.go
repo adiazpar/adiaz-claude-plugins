@@ -232,7 +232,7 @@ func benchmarkProjectProfile(
 			budgetOutcomes := make([]CaseOutcome, 0, len(cases))
 			for _, eval := range cases {
 				outcome, runErr := runEvaluationCase(
-					ctx, eval, budget, retriever.Search)
+					ctx, eval, budget, retriever.Boundary.Root, retriever.Search)
 				if runErr != nil {
 					return ProjectProfileBenchmark{}, fmt.Errorf(
 						"case %s at budget %d: %w", eval.ID, budget, runErr)

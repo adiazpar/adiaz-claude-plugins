@@ -1,4 +1,4 @@
-package knowledge
+﻿package knowledge
 
 import (
 	"context"
@@ -233,6 +233,18 @@ func ValidateEvalCorpus(cases []EvalCase) error {
 		if eval.Answerable == nil {
 			return fmt.Errorf("case %s must declare answerable", eval.ID)
 		}
+		for _, pin := range eval.EvidencePins {
+			if err := validateEvalPath(pin.Path); err != nil {
+				return fmt.Errorf("case %s evidence pin: %w", eval.ID, err)
+			}
+			if !sha256IdentityRE.MatchString(pin.ClaimSha256) {
+				return fmt.Errorf("case %s has an invalid evidence pin digest", eval.ID)
+			}
+			if pin.ContentSha256 != "" &&
+				!sha256IdentityRE.MatchString(pin.ContentSha256) {
+				return fmt.Errorf("case %s has an invalid evidence pin content digest", eval.ID)
+			}
+		}
 		for _, paths := range [][]string{
 			eval.ExpectedPaths, eval.MinimumEvidencePaths, eval.HardNegativePaths,
 			eval.ExpectedCitations,
@@ -406,7 +418,7 @@ func benchmarkCases(
 	outcomes := make([]CaseOutcome, 0, len(cases))
 	passed := true
 	for _, eval := range cases {
-		outcome, err := runEvaluationCase(ctx, eval, eval.TokenBudget, service.Search)
+		outcome, err := runEvaluationCase(ctx, eval, eval.TokenBudget, service.Boundary.Root, service.Search)
 		if err != nil {
 			return ProfileBenchmark{}, fmt.Errorf("case %s: %w", eval.ID, err)
 		}
@@ -438,7 +450,7 @@ func benchmarkCases(
 	for _, budget := range []int{512, 1024, 2048, 4096} {
 		budgetOutcomes := make([]CaseOutcome, 0, len(cases))
 		for _, eval := range cases {
-			outcome, err := runEvaluationCase(ctx, eval, budget, service.Search)
+			outcome, err := runEvaluationCase(ctx, eval, budget, service.Boundary.Root, service.Search)
 			if err != nil {
 				return ProfileBenchmark{}, fmt.Errorf(
 					"case %s at budget %d: %w", eval.ID, budget, err)
@@ -540,10 +552,176 @@ func benchmarkCases(
 	}, nil
 }
 
+// EvalPinChange describes one pin whose document changed.
+type EvalPinChange struct {
+	CaseID     string `json:"caseId"`
+	Path       string `json:"path"`
+	Kind       string `json:"kind"`
+	OldDigest  string `json:"oldDigest,omitempty"`
+	NewDigest  string `json:"newDigest"`
+	CaseQuery  string `json:"caseQuery,omitempty"`
+	Unreadable bool   `json:"unreadable,omitempty"`
+}
+
+// EvalPinReport is the outcome of recomputing evidence pins.
+type EvalPinReport struct {
+	SchemaVersion int             `json:"schemaVersion"`
+	Cases         int             `json:"cases"`
+	Pinned        int             `json:"pinned"`
+	Added         []EvalPinChange `json:"added"`
+	ClaimChanged  []EvalPinChange `json:"claimChanged"`
+	ContentDrift  []EvalPinChange `json:"contentDrift"`
+	Applied       bool            `json:"applied"`
+}
+
+// PinEvalCases recomputes evidence pins for every project evaluation case.
+//
+// A pin whose document changed only its prose is refreshed silently. A pin
+// whose CLAIM changed is reported and, unless force is set, not written: the
+// case's ground truth may no longer hold, and re-stamping without re-answering
+// would make the evaluator assert that a rewritten document still supports the
+// original query. That is measurement capture, and it is worse than a stale
+// pin because it looks like a passing test.
+func (service *Service) PinEvalCases(apply, force bool) (EvalPinReport, error) {
+	report := EvalPinReport{SchemaVersion: 1}
+	root := filepath.Join(service.Boundary.Root, ".re-discipline", "knowledge", "evals")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return EvalPinReport{}, err
+	}
+	digestFor := map[string][2]string{}
+	resolve := func(path string) ([2]string, bool) {
+		if cached, ok := digestFor[path]; ok {
+			return cached, cached[0] != ""
+		}
+		body, readErr := os.ReadFile(
+			filepath.Join(service.Boundary.Root, filepath.FromSlash(path)))
+		if readErr != nil {
+			digestFor[path] = [2]string{}
+			return [2]string{}, false
+		}
+		pair := [2]string{ClaimDigest(string(body), path), "sha256:" + SHA256Bytes(body)}
+		digestFor[path] = pair
+		return pair, true
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+			continue
+		}
+		file := filepath.Join(root, entry.Name())
+		cases, loadErr := LoadEvalCases(file)
+		if loadErr != nil {
+			return EvalPinReport{}, loadErr
+		}
+		changed := false
+		for index := range cases {
+			eval := &cases[index]
+			report.Cases++
+			previous := map[string]EvidencePin{}
+			for _, pin := range eval.EvidencePins {
+				previous[pin.Path] = pin
+			}
+			paths := SortedUnique(append(append(append(
+				append([]string{}, eval.ExpectedPaths...),
+				eval.MinimumEvidencePaths...),
+				eval.ExpectedCitations...),
+				eval.HardNegativePaths...))
+			pins := make([]EvidencePin, 0, len(paths))
+			for _, path := range paths {
+				pair, ok := resolve(path)
+				if !ok {
+					report.ClaimChanged = append(report.ClaimChanged, EvalPinChange{
+						CaseID: eval.ID, Path: path, Kind: "unreadable",
+						CaseQuery: eval.Query, Unreadable: true,
+					})
+					if old, had := previous[path]; had {
+						pins = append(pins, old)
+					}
+					continue
+				}
+				fresh := EvidencePin{
+					Path: path, ClaimSha256: pair[0], ContentSha256: pair[1],
+				}
+				old, had := previous[path]
+				switch {
+				case !had:
+					report.Added = append(report.Added, EvalPinChange{
+						CaseID: eval.ID, Path: path, Kind: "added",
+						NewDigest: fresh.ClaimSha256, CaseQuery: eval.Query,
+					})
+				case old.ClaimSha256 != fresh.ClaimSha256:
+					report.ClaimChanged = append(report.ClaimChanged, EvalPinChange{
+						CaseID: eval.ID, Path: path, Kind: "claim-changed",
+						OldDigest: old.ClaimSha256, NewDigest: fresh.ClaimSha256,
+						CaseQuery: eval.Query,
+					})
+					if !force {
+						// Keep the ratified pin so the case reports stale
+						// rather than silently re-anchoring to a claim nobody
+						// has re-answered the query against.
+						fresh = old
+					}
+				case old.ContentSha256 != fresh.ContentSha256:
+					report.ContentDrift = append(report.ContentDrift, EvalPinChange{
+						CaseID: eval.ID, Path: path, Kind: "content-drift",
+						OldDigest: old.ContentSha256, NewDigest: fresh.ContentSha256,
+					})
+				}
+				pins = append(pins, fresh)
+				report.Pinned++
+			}
+			if !equalPins(eval.EvidencePins, pins) {
+				eval.EvidencePins = pins
+				changed = true
+			}
+		}
+		if apply && changed {
+			if err := AtomicWriteJSON(file, cases, 0o600); err != nil {
+				return EvalPinReport{}, err
+			}
+			report.Applied = true
+		}
+	}
+	return report, nil
+}
+
+func equalPins(left, right []EvidencePin) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// evidencePinsIntact reports whether every document a case depends on still
+// asserts what it asserted when the case was ratified. Returns false if any
+// pinned document is unreadable or its claim has changed.
+func evidencePinsIntact(root string, pins []EvidencePin) bool {
+	if root == "" {
+		return false
+	}
+	for _, pin := range pins {
+		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(pin.Path)))
+		if err != nil {
+			return false
+		}
+		if ClaimDigest(string(body), pin.Path) != pin.ClaimSha256 {
+			return false
+		}
+	}
+	return true
+}
+
 func runEvaluationCase(
 	ctx context.Context,
 	eval EvalCase,
 	tokenBudget int,
+	root string,
 	search func(context.Context, SearchOptions) (SearchResponse, error),
 ) (CaseOutcome, error) {
 	options := SearchOptions{
@@ -634,8 +812,17 @@ func runEvaluationCase(
 			outcome.CitationSafe = false
 		}
 	}
-	outcome.CorpusMatched = eval.CorpusSnapshot == "fixture:packaged-conformance-v1" ||
-		eval.CorpusSnapshot == first.Metadata.CorpusFingerprint
+	// Evidence pins, when declared, replace the corpus-wide fingerprint. The
+	// fingerprint invalidates every case on any edit anywhere in the corpus,
+	// so on a corpus that changes daily it reports staleness far more often
+	// than a case's ground truth actually goes stale.
+	switch {
+	case len(eval.EvidencePins) > 0:
+		outcome.CorpusMatched = evidencePinsIntact(root, eval.EvidencePins)
+	default:
+		outcome.CorpusMatched = eval.CorpusSnapshot == "fixture:packaged-conformance-v1" ||
+			eval.CorpusSnapshot == first.Metadata.CorpusFingerprint
+	}
 	outcome.EstimatedTokens = first.EstimatedTokens
 	outcome.ReturnedTokens = first.EstimatedTokens
 	outcome.BudgetSafe = first.EstimatedTokens <= tokenBudget
@@ -1663,7 +1850,7 @@ func evaluateRetrieverCases(
 ) ([]CaseOutcome, QualityMetrics, error) {
 	outcomes := make([]CaseOutcome, 0, len(cases))
 	for _, eval := range cases {
-		outcome, err := runEvaluationCase(ctx, eval, eval.TokenBudget, retriever.Search)
+		outcome, err := runEvaluationCase(ctx, eval, eval.TokenBudget, retriever.Boundary.Root, retriever.Search)
 		if err != nil {
 			return nil, QualityMetrics{}, fmt.Errorf("case %s: %w", eval.ID, err)
 		}
@@ -1876,3 +2063,4 @@ func (service *Service) loadProjectEvalCases() ([]EvalCase, error) {
 	}
 	return cases, nil
 }
+
