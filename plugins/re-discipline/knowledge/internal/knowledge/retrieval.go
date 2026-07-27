@@ -169,6 +169,19 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 		})
 	}
 
+	replayInput := struct {
+		Generation string
+		Profile    string
+		Query      string
+		Class      string
+		Tiers      []string
+		Limit      int
+		Budget     int
+	}{retriever.Generation.ID, retriever.Profile.EffectiveIdentity, options.Query,
+		options.QueryClass, tiers, options.Limit, options.TokenBudget}
+	replay, _ := CanonicalDigest(replayInput)
+	replay = compactReplayHandle(replay)
+
 	results := []SearchResult{}
 	usedTokens := 0
 	usedBytes := 0
@@ -176,6 +189,22 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	omitted := 0
 	omittedByReason := map[string]int{
 		"resultLimit": 0, "documentCap": 0, "staleSource": 0, "budget": 0,
+	}
+	// Mandatory response metadata is charged against the same token budget as
+	// the passages, so reserve it before packing. Budgeting passages against
+	// the full budget admits a passage that finalizeSearchResponse must then
+	// strip, and because the loop has already skipped every smaller candidate,
+	// the response comes back empty with budget left unspent.
+	contentBudget := options.TokenBudget - responseTokenOverhead(SearchResponse{
+		Query: options.Query, QueryClass: options.QueryClass, AllowedTiers: tiers,
+		TokenBudget: options.TokenBudget, Results: []SearchResult{},
+		Omitted: len(ranked), OmittedByReason: map[string]int{
+			"resultLimit": 0, "documentCap": 0, "staleSource": 0, "budget": len(ranked),
+		},
+		Metadata: retriever.metadata(replay),
+	})
+	if contentBudget < 0 {
+		contentBudget = 0
 	}
 	for _, row := range ranked {
 		if len(results) >= options.Limit {
@@ -193,17 +222,8 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 			omittedByReason["staleSource"]++
 			continue
 		}
-		citationTokens := 28 + EstimateTokens(row.Chunk.Path+row.Chunk.Heading)
-		tokens := EstimateTokens(row.Chunk.Content) + citationTokens
-		bytes := len([]byte(row.Chunk.Content))
-		if usedTokens+tokens > options.TokenBudget ||
-			usedBytes+bytes > retriever.Profile.Effective.Packing.MaxBytes {
-			omitted++
-			omittedByReason["budget"]++
-			continue
-		}
 		uri := "re-discipline://" + retriever.Generation.ID + "/chunks/" + row.Chunk.ID
-		results = append(results, SearchResult{
+		result := SearchResult{
 			ChunkID: row.Chunk.ID, Score: row.Fusion, Rerank: row.Rerank,
 			LaneRanks: cloneRanks(row.LaneRanks), Passage: row.Chunk.Content,
 			Citation: Citation{
@@ -212,23 +232,28 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 				ContentHash: row.Chunk.ContentHash, SourceHash: row.DocumentHash,
 				PassageHash: row.Chunk.ContentHash, Tier: row.Chunk.Tier, URI: uri,
 			},
-		})
+		}
+		// Charge the passage what it actually costs on the wire. A citation
+		// carries three content hashes, a generation URI, and JSON field names,
+		// so a fixed-constant estimate understates it badly enough that the
+		// loop admits passages finalizeSearchResponse must then strip.
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return SearchResponse{}, err
+		}
+		tokens := EstimateTokens(string(encoded)) + 1
+		bytes := len([]byte(row.Chunk.Content))
+		if usedTokens+tokens > contentBudget ||
+			usedBytes+bytes > retriever.Profile.Effective.Packing.MaxBytes {
+			omitted++
+			omittedByReason["budget"]++
+			continue
+		}
+		results = append(results, result)
 		usedTokens += tokens
 		usedBytes += bytes
 		perDocument[row.Chunk.Path]++
 	}
-	replayInput := struct {
-		Generation string
-		Profile    string
-		Query      string
-		Class      string
-		Tiers      []string
-		Limit      int
-		Budget     int
-	}{retriever.Generation.ID, retriever.Profile.EffectiveIdentity, options.Query,
-		options.QueryClass, tiers, options.Limit, options.TokenBudget}
-	replay, _ := CanonicalDigest(replayInput)
-	replay = compactReplayHandle(replay)
 	response := SearchResponse{
 		Query: options.Query, QueryClass: options.QueryClass, AllowedTiers: tiers,
 		TokenBudget: options.TokenBudget, Results: results, Omitted: omitted,
@@ -246,6 +271,31 @@ func compactReplayHandle(digest string) string {
 		value = SHA256String(digest)
 	}
 	return "replay-" + value[:20]
+}
+
+// responseTokenOverhead measures the tokens a search response consumes before
+// any passage is packed: mandatory metadata, echoed query fields, and omission
+// accounting. Callers subtract it from the caller-visible budget so the packing
+// loop only admits passages that can survive finalizeSearchResponse.
+//
+// The skeleton is measured with worst-case omission counts, because the counts
+// are serialized into the body and widen as they grow. Slight
+// under-reservation stays safe: finalizeSearchResponse remains the backstop.
+func responseTokenOverhead(skeleton SearchResponse) int {
+	skeleton.Results = []SearchResult{}
+	skeleton.EstimatedTokens = 0
+	for iteration := 0; iteration < 6; iteration++ {
+		body, err := json.Marshal(skeleton)
+		if err != nil {
+			return skeleton.TokenBudget
+		}
+		estimated := EstimateTokens(string(body))
+		if estimated == skeleton.EstimatedTokens {
+			break
+		}
+		skeleton.EstimatedTokens = estimated
+	}
+	return skeleton.EstimatedTokens
 }
 
 func finalizeSearchResponse(
