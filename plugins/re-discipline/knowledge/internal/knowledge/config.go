@@ -1064,6 +1064,12 @@ func semanticProfile(profile RetrievalProfile) RetrievalProfile {
 		row := profile.EffectiveProfiles[index]
 		row.Lanes = append([]string(nil), row.Lanes...)
 		sort.Strings(row.Lanes)
+		// Benchmark receipts and prose do not change execution, mirroring
+		// runtimeEffectiveProfile. Without this, regenerating a packaged
+		// conformance digest makes every project holding a copied profile
+		// compare unequal, get flagged unratified, and lose benchmarking -
+		// even though the two profiles are semantically identical.
+		row.Benchmark = BenchmarkEvidence{}
 		profile.EffectiveProfiles[index] = row
 	}
 	sort.Slice(profile.EffectiveProfiles, func(i, j int) bool {
