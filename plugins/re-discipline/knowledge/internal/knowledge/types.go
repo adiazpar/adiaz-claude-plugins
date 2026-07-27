@@ -14,7 +14,9 @@ import (
 const (
 	RuntimeVersion = "0.6.0"
 	ParserVersion  = "markdown-structure-v1"
-	ChunkerVersion = "section-block-v1"
+	// Bumped for the per-chunk document prelude. index.go forces a full
+	// rebuild when this value changes.
+	ChunkerVersion = "section-block-v2"
 	SchemaVersion  = 1
 )
 
@@ -274,6 +276,12 @@ type Chunk struct {
 	EndLine     int    `json:"endLine"`
 	Content     string `json:"content"`
 	ContentHash string `json:"contentHash"`
+	// Context is the document's epistemic header, recomputed per chunk. It is
+	// deliberately NOT part of Content: verifyChunk re-reads the source lines
+	// and requires an exact match, so synthesized text in Content would make
+	// every chunk fail verification and be dropped as a stale source.
+	Context     string `json:"context,omitempty"`
+	ContextHash string `json:"contextHash,omitempty"`
 	ParentID    string `json:"parentId,omitempty"`
 	PreviousID  string `json:"previousId,omitempty"`
 	NextID      string `json:"nextId,omitempty"`
@@ -341,6 +349,9 @@ type Citation struct {
 	PassageHash string `json:"passageHash"`
 	Tier        string `json:"tier"`
 	URI         string `json:"uri"`
+	// omitempty for the same reason as SearchResult.DocumentContext: stored
+	// packs are re-marshalled and verified against their recorded digest.
+	ContextHash string `json:"contextHash,omitempty"`
 }
 
 type SearchResult struct {
@@ -349,7 +360,16 @@ type SearchResult struct {
 	Rerank    int64          `json:"rerankScore,omitempty"`
 	LaneRanks map[string]int `json:"laneRanks"`
 	Passage   string         `json:"passage"`
-	Citation  Citation       `json:"citation"`
+	// DocumentContext is the epistemic header of the document this passage
+	// came from: what it claims, how strongly, when it was last verified, and
+	// whether it has been superseded. Empty for a document's opening chunk,
+	// which already contains the header.
+	//
+	// omitempty is required. Stored context packs are re-marshalled and
+	// compared against their own recorded digest, so an always-present empty
+	// field would invalidate every pack written before this field existed.
+	DocumentContext string   `json:"documentContext,omitempty"`
+	Citation        Citation `json:"citation"`
 }
 
 type RetrievalMetadata struct {
@@ -386,9 +406,13 @@ type SearchResponse struct {
 }
 
 type ContextPassage struct {
-	ChunkID  string   `json:"chunkId"`
-	Passage  string   `json:"passage"`
-	Citation Citation `json:"citation"`
+	ChunkID string `json:"chunkId"`
+	Passage string `json:"passage"`
+	// omitempty is load-bearing: MaterializeContextPackExpected re-marshals a
+	// stored pack and compares it against its own recorded digest, so a field
+	// that always serializes would invalidate every previously written pack.
+	DocumentContext string   `json:"documentContext,omitempty"`
+	Citation        Citation `json:"citation"`
 }
 
 type ContextPack struct {

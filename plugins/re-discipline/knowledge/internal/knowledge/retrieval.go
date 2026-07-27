@@ -222,15 +222,26 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 			omittedByReason["staleSource"]++
 			continue
 		}
+		// The document's epistemic header is loaded only for passages that are
+		// actually packed, so the cost is bounded by the result limit rather
+		// than by the candidate set. A chunk carrying no context is the
+		// document's opening chunk, which already contains the header.
+		var chunkContext, chunkContextHash string
+		_ = db.QueryRowContext(ctx,
+			`SELECT context,context_hash FROM chunks WHERE id=?`,
+			row.Chunk.ID).Scan(&chunkContext, &chunkContextHash)
+
 		uri := "re-discipline://" + retriever.Generation.ID + "/chunks/" + row.Chunk.ID
 		result := SearchResult{
 			ChunkID: row.Chunk.ID, Score: row.Fusion, Rerank: row.Rerank,
 			LaneRanks: cloneRanks(row.LaneRanks), Passage: row.Chunk.Content,
+			DocumentContext: chunkContext,
 			Citation: Citation{
 				Path: row.Chunk.Path, Heading: row.Chunk.Heading,
 				StartLine: row.Chunk.StartLine, EndLine: row.Chunk.EndLine,
 				ContentHash: row.Chunk.ContentHash, SourceHash: row.DocumentHash,
 				PassageHash: row.Chunk.ContentHash, Tier: row.Chunk.Tier, URI: uri,
+				ContextHash: chunkContextHash,
 			},
 		}
 		// Charge the passage what it actually costs on the wire. A citation

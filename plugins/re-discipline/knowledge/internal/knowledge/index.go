@@ -453,11 +453,15 @@ func createSchema(ctx context.Context, db *sql.DB) error {
 			path TEXT NOT NULL, tier TEXT NOT NULL, heading TEXT NOT NULL,
 			start_line INTEGER NOT NULL, end_line INTEGER NOT NULL,
 			content TEXT NOT NULL, content_hash TEXT NOT NULL,
+			context TEXT NOT NULL DEFAULT '', context_hash TEXT NOT NULL DEFAULT '',
 			parent_id TEXT, previous_id TEXT, next_id TEXT
 		)`,
 		`CREATE INDEX chunks_tier_path ON chunks(tier, path)`,
+		// context is indexed, not UNINDEXED: carrying the document's claim
+		// sentence into every chunk is what makes a chunk findable by what its
+		// document asserts rather than only by the prose inside its own span.
 		`CREATE VIRTUAL TABLE chunks_fts USING fts5(
-			chunk_id UNINDEXED, path, heading, content,
+			chunk_id UNINDEXED, path, heading, context, content,
 			tokenize='unicode61 remove_diacritics 2'
 		)`,
 		`CREATE TABLE terms (
@@ -550,15 +554,17 @@ func populateDatabase(
 	for _, chunk := range inventory.Chunks {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO chunks(
 			id,document_id,path,tier,heading,start_line,end_line,content,content_hash,
-			parent_id,previous_id,next_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			context,context_hash,
+			parent_id,previous_id,next_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			chunk.ID, chunk.DocumentID, chunk.Path, chunk.Tier, chunk.Heading,
 			chunk.StartLine, chunk.EndLine, chunk.Content, chunk.ContentHash,
+			chunk.Context, chunk.ContextHash,
 			nullable(chunk.ParentID), nullable(chunk.PreviousID), nullable(chunk.NextID)); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO chunks_fts(chunk_id,path,heading,content) VALUES(?,?,?,?)`,
-			chunk.ID, chunk.Path, chunk.Heading, chunk.Content); err != nil {
+			`INSERT INTO chunks_fts(chunk_id,path,heading,context,content) VALUES(?,?,?,?,?)`,
+			chunk.ID, chunk.Path, chunk.Heading, chunk.Context, chunk.Content); err != nil {
 			return err
 		}
 		reusedLexical := false
