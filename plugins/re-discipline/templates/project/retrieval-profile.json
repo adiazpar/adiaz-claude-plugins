@@ -1,5 +1,5 @@
 {
-  "$schema": "plugin://re-discipline/schemas/retrieval-profile.schema.json",
+  "$schema": "../schemas/retrieval-profile.schema.json",
   "schemaVersion": 1,
   "profileId": "plugin:balanced-v1",
   "description": "Offline deterministic hybrid retrieval with independently identified degraded profiles.",
@@ -27,7 +27,7 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:c580a4135c83b9adf324c12281da4be8e5a774528946e308c192ad165f59dd03",
+        "digest": "sha256:219ebdcd77104534be2cf4aa38c14c31d3694d29b39dffe6a2073dffd740ec95",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
@@ -59,7 +59,7 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:9213855a97ac07be71077fcd4ceb5fdb8b626c9d5348d895b5ccbd434543ed09",
+        "digest": "sha256:acb9ec59e3995f976596c62ad4330fb9c7d9acc5ec26a750758c8bd37a42a053",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
@@ -91,7 +91,7 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:80550165cafaacb1491a864a66297d933d63d11ed5622e5ef85ee7666da4100d",
+        "digest": "sha256:b503fb3a993e5d72717bfb3aa8245e357763ad855bec990096818926d9343c0a",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
