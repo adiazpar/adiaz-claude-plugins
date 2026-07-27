@@ -4,7 +4,7 @@
   "runtime": {
     "name": "re-discipline-knowledge",
     "version": "0.6.0",
-    "buildId": "sha256:50ab389bad7aaa467e2da19e6b50b1aca27cbbe90ca03b2790d1aa9e57d93b04"
+    "buildId": "sha256:f0160910354cb86a7ebd4acdc97cc6984bebcf1978c6a5c04fc05058207db205"
   },
   "build": {
     "goToolchain": "go1.26.5",
@@ -12,7 +12,7 @@
     "flags": [
       "-trimpath",
       "-buildvcs=false",
-      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:50ab389bad7aaa467e2da19e6b50b1aca27cbbe90ca03b2790d1aa9e57d93b04"
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:f0160910354cb86a7ebd4acdc97cc6984bebcf1978c6a5c04fc05058207db205"
     ],
     "environment": [
       "CGO_ENABLED=0",
@@ -32,8 +32,8 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:c071e330febf7e04d71c17a0630b66299cb9afce2efb0627c163bfbe17969632",
-      "size": 8115200,
+      "sha256": "sha256:579c941e110517eee798d1b7e3eb183907e0832e3086fb86b72f5eb5b715c510",
+      "size": 8120320,
       "mode": "0644"
     },
     {
@@ -41,8 +41,8 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:b82f5ac8d40fa9e1759943ef6996469cfcb03fdeafa00050f9043495913cd40d",
-      "size": 7676928,
+      "sha256": "sha256:5bbfcc8b9a6faddb9c08bd81154ef14b9215ffc137d404f281a8aaefdb08f84a",
+      "size": 7681536,
       "mode": "0644"
     },
     {
@@ -50,8 +50,8 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:f72a992de7fd66697fdd1547ccf720c13acfc02e1f518265de0fcbb2c8fa8450",
-      "size": 7884926,
+      "sha256": "sha256:43bf3790d583fc1b087e8aa50e173ad843eb5b7cf4ae673101d9396635cc3c25",
+      "size": 7893118,
       "mode": "0755"
     },
     {
@@ -59,7 +59,7 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:00047394490459cd15d1f621a8d9414248d464c5e9a9e0487042111cf889e56c",
+      "sha256": "sha256:66872afd35e880253166dc2c4a9245f9e3489147447fd5d78ded0779d60f2d84",
       "size": 7667838,
       "mode": "0755"
     },
@@ -68,8 +68,8 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:afca016da96a307551a868ea824aa7a44605e434236f99997685297dd50c516f",
-      "size": 8012784,
+      "sha256": "sha256:2794613a8268a448a651878d507712d39847fc8a7f780ceba554954a54db2b11",
+      "size": 8020976,
       "mode": "0755"
     },
     {
@@ -77,7 +77,7 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:da9eb6303c7628cfb0115899a4185a3364cc5c66fad3a192afb7f0aff3d3932a",
+      "sha256": "sha256:b809b5191ee47d133dbde5c6c05018f278e99be6bbb2b528d427b72ac18b5e02",
       "size": 7761250,
       "mode": "0755"
     }

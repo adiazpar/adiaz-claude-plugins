@@ -451,19 +451,116 @@ func nestedJSONKey(value any, target string, top bool) bool {
 
 var tomlBareKeyRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\s*\.\s*[A-Za-z0-9_-]+)*$`)
 
+// openTOMLMultiline reports the delimiter of a multi-line basic or literal
+// string opened by value and not closed on the same line.
+func openTOMLMultiline(value string) string {
+	for _, delim := range []string{`"""`, `'''`} {
+		if strings.HasPrefix(value, delim) &&
+			!strings.Contains(value[len(delim):], delim) {
+			return delim
+		}
+	}
+	return ""
+}
+
+// tomlBracketDelta counts unquoted array and inline-table nesting in text.
+func tomlBracketDelta(text string) int {
+	delta := 0
+	inBasic, inLiteral, escaped := false, false, false
+	for _, char := range text {
+		switch {
+		case escaped:
+			escaped = false
+		case inBasic && char == '\\':
+			escaped = true
+		case !inLiteral && char == '"':
+			inBasic = !inBasic
+		case !inBasic && char == '\'':
+			inLiteral = !inLiteral
+		case !inBasic && !inLiteral && (char == '[' || char == '{'):
+			delta++
+		case !inBasic && !inLiteral && (char == ']' || char == '}'):
+			delta--
+		}
+	}
+	return delta
+}
+
+// tomlCodeLines marks the lines that carry TOML structure. Interior lines of a
+// multi-line string, array, or inline table are value content, never tables,
+// assignments, or comments, so every structural scan must skip them.
+func tomlCodeLines(lines []string) ([]bool, error) {
+	code := make([]bool, len(lines))
+	delim := ""
+	depth := 0
+	for index, raw := range lines {
+		if delim != "" {
+			at := strings.Index(raw, delim)
+			if at < 0 {
+				continue
+			}
+			rest := raw[at+len(delim):]
+			delim = ""
+			depth += tomlBracketDelta(stripTOMLComment(rest))
+			if depth < 0 {
+				return nil, fmt.Errorf("unbalanced TOML brackets at line %d", index+1)
+			}
+			continue
+		}
+		if depth > 0 {
+			depth += tomlBracketDelta(stripTOMLComment(raw))
+			if depth < 0 {
+				return nil, fmt.Errorf("unbalanced TOML brackets at line %d", index+1)
+			}
+			continue
+		}
+		code[index] = true
+		line := strings.TrimSpace(stripTOMLComment(raw))
+		equal := strings.IndexByte(line, '=')
+		if equal <= 0 {
+			continue
+		}
+		value := strings.TrimSpace(line[equal+1:])
+		if opened := openTOMLMultiline(value); opened != "" {
+			delim = opened
+			continue
+		}
+		depth += tomlBracketDelta(value)
+		if depth < 0 {
+			return nil, fmt.Errorf("unbalanced TOML brackets at line %d", index+1)
+		}
+	}
+	if delim != "" {
+		return nil, fmt.Errorf("unterminated TOML multi-line string")
+	}
+	if depth != 0 {
+		return nil, fmt.Errorf("unterminated TOML array or inline table")
+	}
+	return code, nil
+}
+
 func parseTOMLKeys(body []byte) (map[string]int, map[string]string, error) {
 	keys := map[string]int{}
 	values := map[string]string{}
 	tables := map[string]int{}
 	section := ""
 	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
+	code, codeErr := tomlCodeLines(lines)
+	if codeErr != nil {
+		return nil, nil, codeErr
+	}
 	for index, raw := range lines {
+		if !code[index] {
+			continue
+		}
 		line := strings.TrimSpace(stripTOMLComment(raw))
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "[[") || !strings.HasPrefix(line, "[") &&
-			strings.HasSuffix(line, "]") {
+		// Reject arrays of tables. A non-table line that ends in "]" is an
+		// ordinary array assignment such as writable_roots = ["..."]; the
+		// assignment branch below still rejects one that has no key and value.
+		if strings.HasPrefix(line, "[[") {
 			return nil, nil, fmt.Errorf("unsupported TOML table syntax at line %d", index+1)
 		}
 		if strings.HasPrefix(line, "[") {
@@ -594,8 +691,15 @@ func reconcileCodexMemoryPolicy(body []byte, enabled bool) ([]byte, error) {
 		return body, nil
 	}
 	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
+	code, codeErr := tomlCodeLines(lines)
+	if codeErr != nil {
+		return nil, codeErr
+	}
 	currentSection := ""
 	for index, raw := range lines {
+		if !code[index] {
+			continue
+		}
 		line := strings.TrimSpace(stripTOMLComment(raw))
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			currentSection = normalizeTOMLKey(
@@ -636,7 +740,14 @@ func reconcileCodexMemoryPolicy(body []byte, enabled bool) ([]byte, error) {
 		}
 		headerIndex := -1
 		insertIndex := len(lines)
+		sectionCode, sectionErr := tomlCodeLines(lines)
+		if sectionErr != nil {
+			return nil, sectionErr
+		}
 		for index, raw := range lines {
+			if !sectionCode[index] {
+				continue
+			}
 			line := strings.TrimSpace(stripTOMLComment(raw))
 			if line == "["+section+"]" {
 				headerIndex = index
