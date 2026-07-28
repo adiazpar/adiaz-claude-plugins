@@ -37,7 +37,19 @@ type Service struct {
 	DisableRerank        bool
 	EffectiveProfileName string
 	Warnings             []string
+	pinnedGeneration     *Generation
 	telemetryMu          sync.Mutex
+}
+
+// PinGeneration freezes this service on one immutable generation. A
+// measurement run pins the generation it starts on so that publications by
+// another session cannot move the corpus underneath it, and so that the run
+// itself never reconciles the index while it is measuring. The pin is
+// process-local: it constrains this service only and never blocks a
+// concurrent publication.
+func (service *Service) PinGeneration(generation Generation) {
+	pinned := generation
+	service.pinnedGeneration = &pinned
 }
 
 func (service *Service) effectiveSettings() KnowledgeSettings {
@@ -121,6 +133,13 @@ func (service *Service) ensure(ctx context.Context) (Generation, SourceInventory
 		return Generation{}, SourceInventory{}, SelectedProfile{}, false,
 			errors.New("project knowledge server is disabled by .re-discipline/config.json")
 	}
+	if service.pinnedGeneration != nil {
+		selected, err := service.selectProfile(service.pinnedGeneration.Runtime)
+		if err != nil {
+			return Generation{}, SourceInventory{}, SelectedProfile{}, false, err
+		}
+		return *service.pinnedGeneration, SourceInventory{}, selected, false, nil
+	}
 	generation, inventory, rebuilt, err := service.Index.Ensure(ctx)
 	if err != nil {
 		return Generation{}, inventory, SelectedProfile{}, rebuilt, err
@@ -130,6 +149,38 @@ func (service *Service) ensure(ctx context.Context) (Generation, SourceInventory
 		return Generation{}, inventory, SelectedProfile{}, rebuilt, err
 	}
 	return generation, inventory, selected, rebuilt, nil
+}
+
+// leaseMeasurementGeneration ensures the index and then leases the resulting
+// generation for the whole run. Retention in a concurrently publishing
+// session skips a leased generation, so a long measurement keeps reading the
+// database it started on. The retry closes the narrow window in which another
+// session can publish enough generations to retire this one between
+// publication and the lease.
+func (service *Service) leaseMeasurementGeneration(
+	ctx context.Context,
+	purpose string,
+) (Generation, SelectedProfile, *GenerationLease, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		generation, _, selected, _, err := service.ensure(ctx)
+		if err != nil {
+			return Generation{}, SelectedProfile{}, nil, err
+		}
+		lease, err := acquireGenerationLease(
+			service.Index.CacheRoot, generation.ID, purpose)
+		if err != nil {
+			return Generation{}, SelectedProfile{}, nil, err
+		}
+		_, statErr := os.Stat(generation.Database)
+		if statErr == nil {
+			return generation, selected, lease, nil
+		}
+		lastErr = statErr
+		_ = lease.Release()
+	}
+	return Generation{}, SelectedProfile{}, nil, fmt.Errorf(
+		"lease a stable generation for %s: %w", purpose, lastErr)
 }
 
 func (service *Service) selectProfile(runtime RuntimeIdentity) (SelectedProfile, error) {
@@ -399,7 +450,8 @@ func (service *Service) search(
 	if err != nil {
 		return SearchResponse{}, err
 	}
-	if response.OmittedByReason["staleSource"] == 0 || generation.WriterContention {
+	if response.OmittedByReason["staleSource"] == 0 || generation.WriterContention ||
+		service.pinnedGeneration != nil {
 		return response, nil
 	}
 	reconciled, _, _, reconcileErr := service.Index.Reconcile(ctx)
@@ -458,7 +510,7 @@ func (service *Service) ContextPackRequired(
 	pack, err = service.contextPackRequired(
 		ctx, task, role, tiers, tokenBudget, requiredPaths,
 	)
-	if errors.Is(err, errSourceChangedAfterIndex) {
+	if errors.Is(err, errSourceChangedAfterIndex) && service.pinnedGeneration == nil {
 		if _, _, _, reconcileErr := service.Index.Reconcile(ctx); reconcileErr != nil {
 			return ContextPack{}, fmt.Errorf(
 				"context-pack source reconciliation failed: %w", reconcileErr)
@@ -688,7 +740,8 @@ func (service *Service) Read(ctx context.Context, options ReadOptions) (map[stri
 		return nil, err
 	}
 	value, err := service.readPinned(ctx, generation, selected, options)
-	if !errors.Is(err, errSourceChangedAfterIndex) || generation.WriterContention {
+	if !errors.Is(err, errSourceChangedAfterIndex) || generation.WriterContention ||
+		service.pinnedGeneration != nil {
 		return value, err
 	}
 	reconciled, _, _, reconcileErr := service.Index.Reconcile(ctx)
