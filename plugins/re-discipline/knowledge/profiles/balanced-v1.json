@@ -27,14 +27,14 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:1ac03103c4c171846e5b6e44d2a8c929d0d48355c8636213deeb66f17d8c5eb8",
+        "digest": "sha256:e1c0dea5a7f88002a3e037ce3ee1bec29184a951830b8b50a377dae42efcb56a",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
         "corpusFingerprint": "sha256:218f26f0e320200ccc40c25286facc699ab1f0aac4c14759dd2e4b1179c0459d",
         "modelFingerprint": "sha256:b03281aea63b190f059608dfc3262d65a814e32c746e5b54cd2b643f53cb8630",
         "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55",
-        "chunkerVersion": "section-block-v3",
+        "chunkerVersion": "section-block-v4",
         "parserVersion": "markdown-structure-v1"
       }
     },
@@ -61,14 +61,14 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:9497f1c2fb09a5496ffd6ae03d022ba24313319ea31fdaf4e39042f8dd0fb90e",
+        "digest": "sha256:7b6b5778bf2b75ff7af8679792b3e821f40e1fd46e6fa13257b6a8f2ccc23483",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
         "corpusFingerprint": "sha256:218f26f0e320200ccc40c25286facc699ab1f0aac4c14759dd2e4b1179c0459d",
         "modelFingerprint": "sha256:b03281aea63b190f059608dfc3262d65a814e32c746e5b54cd2b643f53cb8630",
         "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55",
-        "chunkerVersion": "section-block-v3",
+        "chunkerVersion": "section-block-v4",
         "parserVersion": "markdown-structure-v1"
       }
     },
@@ -95,14 +95,14 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:affdbde843ff78f2e2af92ccc375a632148ac93f4ffbb02172dc88704a2f754d",
+        "digest": "sha256:68b5afefa86a9899937e2f76a75b2a07c5521310be4b60e7d0e6248d26a4de30",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
         "corpusFingerprint": "sha256:218f26f0e320200ccc40c25286facc699ab1f0aac4c14759dd2e4b1179c0459d",
         "modelFingerprint": "sha256:b03281aea63b190f059608dfc3262d65a814e32c746e5b54cd2b643f53cb8630",
         "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55",
-        "chunkerVersion": "section-block-v3",
+        "chunkerVersion": "section-block-v4",
         "parserVersion": "markdown-structure-v1"
       }
     }

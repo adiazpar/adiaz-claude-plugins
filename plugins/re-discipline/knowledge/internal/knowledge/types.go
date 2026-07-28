@@ -14,9 +14,17 @@ import (
 const (
 	RuntimeVersion = "0.6.0"
 	ParserVersion  = "markdown-structure-v1"
-	// Bumped for the per-chunk document prelude. index.go forces a full
-	// rebuild when this value changes.
-	ChunkerVersion = "section-block-v3"
+	// Bumped for the per-chunk document prelude, then again for the opening
+	// chunk of an unreviewed drafter report. index.go forces a full rebuild
+	// when this value changes.
+	//
+	// The second bump does not change any chunk's content hash - the prelude
+	// is stored beside Content, never inside it - but an index built before it
+	// serves the opening chunk of an unreviewed report with no UNREVIEWED
+	// marker, which is the exact failure the change exists to close. A stale
+	// index that is merely less useful can be tolerated; one that is less safe
+	// cannot.
+	ChunkerVersion = "section-block-v4"
 	SchemaVersion  = 1
 )
 

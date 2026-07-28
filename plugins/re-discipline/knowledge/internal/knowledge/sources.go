@@ -386,14 +386,15 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	// document's - VERDICT rather than Claim, OVERALL CONFIDENCE rather than
 	// Confidence - and carries a review disposition instead of a verification
 	// date. Same renderer, same cap, different extractor.
-	var prelude string
+	var header DocumentPrelude
 	switch document.Tier {
 	case "draft", "campaign":
-		prelude = ExtractReportPrelude(
-			body, document.Path, document.Tier == "campaign").Render()
+		header = ExtractReportPrelude(
+			body, document.Path, document.Tier == "campaign")
 	default:
-		prelude = ExtractDocumentPrelude(body, document.Path).Render()
+		header = ExtractDocumentPrelude(body, document.Path)
 	}
+	prelude := header.Render()
 
 	chunks := []Chunk{}
 	for _, sec := range sections {
@@ -411,8 +412,16 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	}
 	// Chunk 0 already contains the header verbatim, so attaching the prelude
 	// there would duplicate it and spend budget saying nothing new.
+	//
+	// That reasoning holds only for a header the document actually contains.
+	// An unreviewed drafter report's status is synthesized - nothing in the
+	// body says "UNREVIEWED", because the absence of a review stamp is what
+	// makes it unreviewed - so skipping chunk 0 served the one chunk that
+	// carries the VERDICT with no sign that nobody had checked it. That is
+	// precisely the passage a reader must not receive unmarked.
+	firstChunkNeedsPrelude := strings.HasPrefix(header.Status, "UNREVIEWED")
 	for index := range chunks {
-		if index == 0 || prelude == "" {
+		if prelude == "" || (index == 0 && !firstChunkNeedsPrelude) {
 			continue
 		}
 		chunks[index].Context = prelude
