@@ -78,6 +78,10 @@ func run(ctx context.Context, args []string) error {
 		)
 		cacheRoot := flags.String("cache-root", "", "optional project cache root")
 		mode := flags.String("mode", "quick", "quick or full")
+		updateDeclared := flags.Bool(
+			"update-declared", false,
+			"maintainer only: rewrite packaged declared evidence from a full packaged run",
+		)
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -107,10 +111,15 @@ func run(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
+			if *updateDeclared {
+				if err := knowledge.UpdateDeclaredBenchmarks(asset, report); err != nil {
+					return err
+				}
+			}
 			if err := printJSON(report); err != nil {
 				return err
 			}
-			if !report.Passed {
+			if !report.Passed && !*updateDeclared {
 				return fmt.Errorf("packaged benchmark gates failed")
 			}
 		}

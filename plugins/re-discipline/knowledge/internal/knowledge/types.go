@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	RuntimeVersion = "0.6.0"
+	RuntimeVersion = "0.7.0"
 	ParserVersion  = "markdown-structure-v1"
 	// Bumped for the per-chunk document prelude, then again for the opening
 	// chunk of an unreviewed drafter report. index.go forces a full rebuild
