@@ -461,11 +461,150 @@ function Test-RetrievalProfile {
     catch {
         return $false
     }
+    # Mirror profileIdentityRE in the packaged server. A project that has ever
+    # calibrated and promoted a candidate carries "project:candidate-<hex>",
+    # not the packaged baseline identity.
     return (
         [int]$profile.schemaVersion -eq 1 -and
-        [string]$profile.profileId -eq "plugin:balanced-v1" -and
+        [string]$profile.profileId -match
+            "^[a-z0-9]+(-[a-z0-9]+)*(:[a-z0-9]+(-[a-z0-9]+)*)?$" -and
         @($profile.effectiveProfiles).Count -ge 3
     )
+}
+
+# The Get-Toml* helpers below mirror stripTOMLComment, tomlBracketDelta,
+# openTOMLMultiline, and tomlCodeLines in the packaged Go recovery scanner so
+# the hook and the server agree on which lines carry TOML structure.
+function Get-TomlCommentStripped {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Line)
+
+    $basic = $false
+    $literal = $false
+    $escaped = $false
+    for ($index = 0; $index -lt $Line.Length; $index++) {
+        $character = $Line.Substring($index, 1)
+        if ($escaped) {
+            $escaped = $false
+        }
+        elseif ($basic -and $character -eq "\") {
+            $escaped = $true
+        }
+        elseif (-not $literal -and $character -eq '"') {
+            $basic = -not $basic
+        }
+        elseif (-not $basic -and $character -eq "'") {
+            $literal = -not $literal
+        }
+        elseif (-not $basic -and -not $literal -and $character -eq "#") {
+            return $Line.Substring(0, $index)
+        }
+    }
+    return $Line
+}
+
+function Get-TomlBracketDelta {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
+
+    $delta = 0
+    $basic = $false
+    $literal = $false
+    $escaped = $false
+    for ($index = 0; $index -lt $Text.Length; $index++) {
+        $character = $Text.Substring($index, 1)
+        if ($escaped) {
+            $escaped = $false
+        }
+        elseif ($basic -and $character -eq "\") {
+            $escaped = $true
+        }
+        elseif (-not $literal -and $character -eq '"') {
+            $basic = -not $basic
+        }
+        elseif (-not $basic -and $character -eq "'") {
+            $literal = -not $literal
+        }
+        elseif (-not $basic -and -not $literal -and @("[", "{") -contains $character) {
+            $delta++
+        }
+        elseif (-not $basic -and -not $literal -and @("]", "}") -contains $character) {
+            $delta--
+        }
+    }
+    return $delta
+}
+
+function Get-TomlMultilineDelimiter {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+
+    foreach ($delimiter in @('"""', "'''")) {
+        if (
+            $Value.StartsWith($delimiter) -and
+            -not $Value.Substring($delimiter.Length).Contains($delimiter)
+        ) {
+            return $delimiter
+        }
+    }
+    return ""
+}
+
+function Get-TomlStructure {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [string[]]$Lines
+    )
+
+    $code = New-Object "bool[]" $Lines.Count
+    $continued = New-Object "bool[]" $Lines.Count
+    $delimiter = ""
+    $depth = 0
+    for ($index = 0; $index -lt $Lines.Count; $index++) {
+        $raw = [string]$Lines[$index]
+        if ($delimiter -ne "") {
+            $at = $raw.IndexOf($delimiter)
+            if ($at -lt 0) {
+                continue
+            }
+            $rest = $raw.Substring($at + $delimiter.Length)
+            $delimiter = ""
+            $depth += Get-TomlBracketDelta -Text (Get-TomlCommentStripped -Line $rest)
+            if ($depth -lt 0) {
+                return @{ Valid = $false }
+            }
+            continue
+        }
+        if ($depth -gt 0) {
+            $depth += Get-TomlBracketDelta -Text (Get-TomlCommentStripped -Line $raw)
+            if ($depth -lt 0) {
+                return @{ Valid = $false }
+            }
+            continue
+        }
+        $code[$index] = $true
+        $line = (Get-TomlCommentStripped -Line $raw).Trim()
+        $equals = $line.IndexOf("=")
+        if ($equals -gt 0) {
+            $value = $line.Substring($equals + 1).Trim()
+            $opened = Get-TomlMultilineDelimiter -Value $value
+            if ($opened -ne "") {
+                $delimiter = $opened
+                $continued[$index] = $true
+                continue
+            }
+            $depth += Get-TomlBracketDelta -Text $value
+            if ($depth -lt 0) {
+                return @{ Valid = $false }
+            }
+            if ($depth -gt 0) {
+                $continued[$index] = $true
+            }
+        }
+    }
+    if ($delimiter -ne "" -or $depth -ne 0) {
+        return @{ Valid = $false }
+    }
+    return @{ Valid = $true; Code = $code; Continued = $continued }
 }
 
 function Get-TomlBoolean {
@@ -477,8 +616,17 @@ function Get-TomlBoolean {
 
     $activeSection = ""
     $foundValues = New-Object System.Collections.Generic.List[bool]
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $candidate = ($line -replace "#.*$", "").Trim()
+    $text = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+    $lines = @([regex]::Split($text, "\r?\n"))
+    $structure = Get-TomlStructure -Lines $lines
+    if (-not $structure.Valid) {
+        return @{ Valid = $false; Value = $null }
+    }
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if (-not $structure.Code[$index]) {
+            continue
+        }
+        $candidate = (Get-TomlCommentStripped -Line $lines[$index]).Trim()
         if ($candidate -match "^\[([^\]]+)\]$") {
             $activeSection = $matches[1]
             continue
@@ -600,8 +748,15 @@ function Set-TomlBooleanField {
 
     $newline = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
     $lines = @([regex]::Split($Text, "\r?\n"))
+    $structure = Get-TomlStructure -Lines $lines
+    if (-not $structure.Valid) {
+        return @{ Valid = $false; Changed = $false; Text = $Text }
+    }
     $sectionIndexes = New-Object System.Collections.Generic.List[int]
     for ($index = 0; $index -lt $lines.Count; $index++) {
+        if (-not $structure.Code[$index]) {
+            continue
+        }
         if ($lines[$index] -match "^\s*\[([^\]]+)\]\s*(?:#.*)?$") {
             if ($Matches[1] -eq $Section) {
                 $sectionIndexes.Add($index)
@@ -634,7 +789,7 @@ function Set-TomlBooleanField {
     $start = $sectionIndexes[0]
     $end = $lines.Count
     for ($index = $start + 1; $index -lt $lines.Count; $index++) {
-        if ($lines[$index] -match "^\s*\[") {
+        if ($structure.Code[$index] -and $lines[$index] -match "^\s*\[") {
             $end = $index
             break
         }
@@ -645,7 +800,10 @@ function Set-TomlBooleanField {
         "\s*=\s*)(true|false)(\s*(?:#.*)?)$"
     )
     for ($index = $start + 1; $index -lt $end; $index++) {
-        $withoutComment = ($lines[$index] -replace "#.*$", "").Trim()
+        if (-not $structure.Code[$index]) {
+            continue
+        }
+        $withoutComment = (Get-TomlCommentStripped -Line $lines[$index]).Trim()
         if ($withoutComment -match ("^" + [regex]::Escape($Key) + "\s*=")) {
             if ($lines[$index] -notmatch $keyPattern) {
                 return @{ Valid = $false; Changed = $false; Text = $Text }
@@ -693,32 +851,35 @@ function Repair-CodexMemoryPolicy {
     )
 
     $text = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+    $lines = @([regex]::Split($text, "\r?\n"))
+    $structure = Get-TomlStructure -Lines $lines
+    if (-not $structure.Valid) {
+        $Warnings.Add(
+            ".codex/config.toml is malformed or uses unsupported syntax and was preserved"
+        )
+        return
+    }
     $activeSection = ""
-    foreach ($line in @($text -split "\r?\n")) {
-        $candidate = ($line -replace "#.*$", "").Trim()
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if (-not $structure.Code[$index]) {
+            continue
+        }
+        $candidate = (Get-TomlCommentStripped -Line $lines[$index]).Trim()
         if ([string]::IsNullOrEmpty($candidate)) {
             continue
         }
-        if ($candidate.Contains('"""') -or $candidate.Contains("'''")) {
+        $compact = $candidate -replace "\s", ""
+        if ($compact.StartsWith("[[")) {
             $Warnings.Add(
-                ".codex/config.toml is malformed or uses unsupported multiline syntax and was preserved"
+                ".codex/config.toml uses an unsupported or ambiguous table header and was preserved"
             )
             return
         }
-        $compact = $candidate -replace "\s", ""
-        $arrayTable = $compact -match "^\[\[[A-Za-z0-9_.\-]+\]\]$"
-        $regularTable = $compact -match "^\[[A-Za-z0-9_.\-]+\]$"
-        if ($arrayTable -or $regularTable) {
-            $table = if ($arrayTable) {
-                $compact.Substring(2, $compact.Length - 4)
-            }
-            else {
-                $compact.Substring(1, $compact.Length - 2)
-            }
-            $semanticTable = $table -replace "[`"']", ""
+        if ($compact -match "^\[[A-Za-z0-9_.\-]+\]$") {
+            $table = $compact.Substring(1, $compact.Length - 2)
             if (
-                $semanticTable -match "^(features|memories)(\.|$)" -and
-                ($arrayTable -or @("features", "memories") -notcontains $table)
+                $table -match "^(features|memories)(\.|$)" -and
+                @("features", "memories") -notcontains $table
             ) {
                 $Warnings.Add(
                     ".codex/config.toml uses an ambiguous alternate managed table and was preserved"
@@ -736,14 +897,20 @@ function Repair-CodexMemoryPolicy {
         }
         if ($candidate -notmatch "^([A-Za-z0-9_.\-]+)\s*=") {
             $Warnings.Add(
-                ".codex/config.toml is malformed or uses unsupported multiline syntax and was preserved"
+                ".codex/config.toml is malformed or uses unsupported syntax and was preserved"
             )
             return
         }
         $left = $Matches[1]
         $equals = $candidate.IndexOf("=")
         $right = $candidate.Substring($equals + 1).Trim()
+        $multiline = (
+            $structure.Continued[$index] -or
+            $right.StartsWith('"""') -or
+            $right.StartsWith("'''")
+        )
         if (
+            -not $multiline -and
             $right -notmatch '^"(?:[^"\\]|\\.)*"$' -and
             $right -notmatch "^'[^']*'$" -and
             $right -notmatch "^\[[^\[\]]*\]$" -and
