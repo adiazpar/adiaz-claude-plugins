@@ -24,7 +24,7 @@ import (
 const (
 	packageSchemaVersion = 1
 	runtimeName          = "re-discipline-knowledge"
-	runtimeVersion       = "0.6.0"
+	runtimeVersion       = "0.7.0"
 	runtimeBuildIDPath   = "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
 	windowsArtifactMode  = 0o644
 )
