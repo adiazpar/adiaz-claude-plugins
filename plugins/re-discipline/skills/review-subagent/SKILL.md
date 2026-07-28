@@ -120,11 +120,22 @@ indexed in `campaign` and reaches a manager's ordinary context packs. So
 stamping is what makes a reviewed finding reachable, and forgetting to stamp
 fails safe rather than silently exposing unreviewed work.
 
-Then record the report, context-pack ID and digest, review date,
-PROMOTE/HOLD/DROP/BLOCK outcomes, corrections, retrieval-evaluation
-candidates, memory-proposal paths, and any blocking uncertainty in
-`CAMPAIGN.md`. Keep report and context-pack artifacts in place until closure
-disposition.
+Then append a row to `active/<slug>/REVIEWS.md`, rendering
+`<plugin-root>/templates/campaign-reviews.md` if it does not exist yet:
+the report, context-pack ID and digest, review date, PROMOTE/HOLD/DROP/BLOCK
+outcomes, corrections, retrieval-evaluation candidates, memory-proposal paths,
+and any blocking uncertainty. Record each HOLD in its own table with the
+decisive observation still needed and the destination it will take if the
+campaign closes first.
+
+The ledger is kept out of `CAMPAIGN.md` because the two grow at different
+rates. Campaign state is rewritten every checkpoint and must stay small enough
+to re-read cold; the ledger only appends. Merging them is what turns a long
+campaign's masterfile into something too large to serve its own purpose.
+
+Update `CAMPAIGN.md` only where the review changes campaign state: a new dead
+end, a resolved open question, a changed next action. Keep report and
+context-pack artifacts in place until closure disposition.
 
 Verify that every proposed promotion has a maintained source, permanent test
 and fixture, or runnable recipe. Reject a chronicle as sole empirical support,

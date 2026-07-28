@@ -69,6 +69,11 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 	classes := []sourceClass{
 		{Path: ".re-discipline/project-profile.md", Tier: "profile", Enabled: true},
 		{Path: "docs/INDEX.md", Tier: "navigation", Enabled: true},
+		// Goals index the campaigns serving one outcome and where their
+		// durable results went. They make no claims, so they carry no
+		// epistemic weight and sit in navigation alongside the indexes. They
+		// live in docs/ because a goal outlives its campaigns.
+		{Path: "docs/goals", Tier: "navigation", Recursive: true, Enabled: true},
 		{Path: "docs/truth", Tier: "truth", Recursive: true, Enabled: settings.Sources.Truth},
 		{Path: "docs/history", Tier: "history", Recursive: true, Enabled: settings.Sources.History},
 		{Path: "docs/backlog", Tier: "backlog", Recursive: true, Enabled: settings.Sources.Backlog},
