@@ -74,7 +74,7 @@ class KnowledgeSkillContracts(unittest.TestCase):
             "frozen holdout",
             "every declared effective capability profile",
             ".re-discipline/cache/calibration/<run-id>/",
-            "do not edit `.re-discipline/settings/retrieval-profile.json`",
+            "do not edit `.re-discipline/knowledge/retrieval-profile.json`",
             "do not activate the candidate",
             "do not launch a subagent for every combination",
         ):
@@ -90,7 +90,7 @@ class KnowledgeSkillContracts(unittest.TestCase):
             "explicit user decision",
             "never let a drafter",
             "independent evidence for every declared effective fallback profile",
-            ".re-discipline/settings/retrieval-profile.json",
+            ".re-discipline/knowledge/retrieval-profile.json",
             "exact generated candidate",
             "content hash",
             "requested and effective profiles",
@@ -126,11 +126,11 @@ class KnowledgeLifecycleContracts(unittest.TestCase):
 
         for phrase in (
             ".re-discipline/config.json",
-            ".re-discipline/settings/",
-            "knowledge.jsonc",
-            "requested and effective retrieval profiles",
+            ".re-discipline/knowledge/",
+            "policy.jsonc",
+            "requested and effective profiles",
             "fallback reason",
-            "pending memory-proposal count",
+            "sanity-check the reported count",
             "do not build vectors",
             "do not",
             "calibrate weights",
@@ -212,12 +212,12 @@ class DurableKnowledgeDocumentationTests(unittest.TestCase):
         for phrase in (
             ".re-discipline/config.json",
             "strict-json bootstrap",
-            ".re-discipline/settings/readme.md",
-            ".re-discipline/settings/knowledge.jsonc",
-            ".re-discipline/settings/retrieval-profile.json",
+            ".re-discipline/knowledge/",
+            "policy.jsonc",
+            "retrieval-profile.json",
             "generated, content-hashed",
-            "keep code, model artifacts, indexes, benchmark output, memory, and "
-            "evaluation cases outside `settings/`",
+            "keep code, model artifacts, indexes, benchmark output, and memory "
+            "outside the control files",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, combined)
