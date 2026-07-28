@@ -373,7 +373,15 @@ func applyProjectNonInferiority(report *ProjectBenchmarkReport) {
 			metrics.AuthorityViolations <= baseline.AuthorityViolations
 		report.Profiles[index].NonInferiorToLexical = nonInferior
 		if !nonInferior {
-			report.Profiles[index].HardGatesPassed = false
+			// Non-inferiority is a SEPARATE axis from the absolute hard gates.
+			// A profile that passes every hard gate (safety, determinism, budget,
+			// citation integrity) but underperforms the baseline must still report
+			// hardGatesPassed=true; only nonInferiorToLexical is false. Overwriting
+			// HardGatesPassed here conflated "hard gates fail" with "hard gates pass
+			// but loses to the baseline", so every promoted-but-inferior profile
+			// looked like an absolute-gate violation to a reader and to calibration.
+			// The overall run still fails via report.Passed below, which is the
+			// correct place to reject an underperforming promoted profile.
 			report.Passed = false
 		}
 	}
