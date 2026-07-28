@@ -41,11 +41,12 @@ If the canonical profile is missing, stop substantive work and invoke
 `init-project` in migration or recovery mode. A legacy host profile is
 recovery input, not permission to invent a replacement.
 
-Read the small `.re-discipline/config.json` bootstrap and the documented
-project-facing settings under `.re-discipline/settings/`. Treat
-`knowledge.jsonc` as human-editable policy and `retrieval-profile.json` as a
-generated accepted profile. Report malformed or missing managed settings
-instead of guessing replacements.
+Read the small `.re-discipline/config.json` bootstrap. The knowledge
+system's machine-managed state lives under `.re-discipline/knowledge/`:
+`policy.jsonc` is AI-curated policy the manager edits on user request, and
+`retrieval-profile.json` is a generated accepted profile. Neither is a
+user-facing settings surface. Report malformed managed files through the
+status user block instead of guessing replacements.
 
 ## Step 2: Read The Masterfiles
 
@@ -80,52 +81,40 @@ remain valid history. Onboarding never parses, normalizes, or renames them.
 When no campaign is active, call the state a cold start and await direction.
 Do not open a campaign merely because none exists.
 
-## Step 4: Read Knowledge Status
+## Step 4: Read Knowledge And Memory State Silently
 
 Call the knowledge server's read-only `status` operation when available.
-Report:
+The response has two blocks. The `system` block is yours: read index
+health, corpus generation, requested and effective profiles, active lanes,
+fallback reason, benchmark and evidence-pin state, and campaign staleness,
+and use them to plan the session. When the last session's corpus
+generation is known - from a checkpoint, a campaign masterfile, or a
+session note - pass it to `orient` as `sinceGeneration` and use the
+document-level delta to orient yourself; an unavailable delta means the
+recorded history no longer reaches that generation, not that nothing
+changed.
 
-- index health and corpus generation;
-- requested and effective retrieval profiles;
-- active retrieval lanes, local model identities, and fallback reason;
-- settings and source-policy validity;
-- latest benchmark age, and its `actionableStaleReasons` when
-  `benchmark.staleActionable` is true;
-- evidence-pin health, but only when `pins.drifted` or `pins.broken` is above
-  zero;
-- masterfile staleness for any campaign the `campaigns` block marks `stale`;
-- pending memory-proposal count.
+None of that machinery state is narrated to the user
+(`<plugin-root>/references/reporting.md`). The `user` block is the only
+knowledge/memory text you print: its `knowledge` and `memory` lines go on
+the dashboard verbatim, and each `attention` item becomes a line under
+"Needs your attention". Benchmark staleness and evidence-pin drift are
+never onboarding news; the measurement skills handle them at their own
+gate time.
 
-Evidence pins tie an evaluation case to what its cited documents claim.
-`broken` means a pinned document is gone or now asserts something else, so the
-case's ground truth may no longer hold and re-answering it is the repair;
-`drifted` means only the file's bytes moved and is advisory. Report a single
-line when either is non-zero and stay silent when the census is clean - a
-report that always mentions pins teaches sessions to skip the line that
-matters.
+Campaign masterfile staleness from the `system` block is user-relevant:
+report a stale campaign in its own campaign line and recommend
+`checkpoint-campaign`.
 
-When the last session's corpus generation is known - from a checkpoint, a
-campaign masterfile, or a session note - pass it to `orient` as
-`sinceGeneration` and report the returned document-level delta as what changed
-since last session. When the response says the delta is unavailable, say that
-plainly. It means the recorded history no longer reaches that generation, not
-that nothing changed, and the two must never be reported the same way.
+List proposal filenames only to sanity-check the reported count; never
+read proposal content during ordinary onboarding. Pending proposals are
+not accepted project knowledge.
 
-Benchmark staleness carries two severities and they are not the same news.
-`staleActionable` means the models, the runtime contract, or the chunker moved
-under the measurement, so what retrieval actually does may have changed and a
-re-run is warranted. `staleInformational` means only the corpus or the
-evaluation set drifted, which is ordinary in a living project and warrants no
-action. Give actionable staleness its own line. Mention informational drift as
-a parenthetical at most, and never recommend a benchmark because of it.
-
-List proposal filenames to count them, but do not read their content during
-ordinary onboarding. Pending proposals are not accepted project knowledge.
-
-Run only the cheap health/freshness check. Do not build vectors, download
-models, run a full benchmark, calibrate weights, accept memory, or activate a
-profile during onboarding. If status is unavailable, state that fact and
-continue from canonical source files rather than inventing knowledge health.
+Run only the cheap health check. Do not build vectors, download models,
+run a full benchmark, calibrate weights, accept memory, or activate a
+profile during onboarding. If status is unavailable, print "Knowledge
+search: unavailable" and continue from canonical source files rather than
+inventing knowledge health.
 
 ## Step 5: Read External-Provider State
 
@@ -140,35 +129,35 @@ report that `init-project` resync or repair is required.
 
 ## Step 6: Return One Screen
 
-Use this shape:
+Print exactly this shape and nothing more
+(`<plugin-root>/references/reporting.md`):
 
-```text
+```user-facing
 ## Onboarded - <project name>
 
-Host: <Claude Code|Codex|other>
 Mission: <one sentence>
 Current focus: <one or two lines>
 
 Active campaigns:
-- <slug>: <status>; open questions: <count><; masterfile stale: <n>d behind>
+- <slug>: <status>; open questions: <count><; masterfile stale: recommend checkpoint>
 - none (cold start)
 
-Knowledge: <healthy|degraded|unavailable>; generation: <id|none>
-Changed since last session: <n added, n changed, n removed | delta unavailable>
-Benchmark: <age> days old<; re-run warranted: reason,reason | (corpus drift only)>
-Evidence pins: <n broken, n drifted of n>
-Retrieval: requested <profile>; effective <profile>; fallback: <reason|none>
-Pending memory proposals: <count>
-Delegation backend: <native|provider>
-External providers: <configured names|none>
-Recruiting candidates: <candidate names|none>
+Knowledge search: <user.knowledge>
+Memory: <user.memory>
+Delegation: <native|provider>
+External providers: <names|none> | Recruiting: <candidates|none>
+
+Needs your attention:
+- <each user.attention item, verbatim>
+
 Recent history: <latest chronicle and outcome>
 Ready to: <resume named campaign, open a requested campaign, or await direction>
 ```
 
-Omit the `Changed since last session` line when no prior generation was known
-to ask about, and omit the `Evidence pins` line when the census is clean. Every
-other line is always present.
+Omit the "Needs your attention" section when there are no attention items.
+Every other line is always present. The knowledge and memory lines are the
+status `user` block verbatim; print nothing else about knowledge or memory
+internals.
 
 Stop after orientation. Do not begin substantive investigation until the user
 directs it.
