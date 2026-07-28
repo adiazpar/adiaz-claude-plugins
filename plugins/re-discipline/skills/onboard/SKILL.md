@@ -104,6 +104,13 @@ line when either is non-zero and stay silent when the census is clean - a
 report that always mentions pins teaches sessions to skip the line that
 matters.
 
+When the last session's corpus generation is known - from a checkpoint, a
+campaign masterfile, or a session note - pass it to `orient` as
+`sinceGeneration` and report the returned document-level delta as what changed
+since last session. When the response says the delta is unavailable, say that
+plainly. It means the recorded history no longer reaches that generation, not
+that nothing changed, and the two must never be reported the same way.
+
 Benchmark staleness carries two severities and they are not the same news.
 `staleActionable` means the models, the runtime contract, or the chunker moved
 under the measurement, so what retrieval actually does may have changed and a
@@ -147,6 +154,7 @@ Active campaigns:
 - none (cold start)
 
 Knowledge: <healthy|degraded|unavailable>; generation: <id|none>
+Changed since last session: <n added, n changed, n removed | delta unavailable>
 Benchmark: <age> days old<; re-run warranted: reason,reason | (corpus drift only)>
 Evidence pins: <n broken, n drifted of n>
 Retrieval: requested <profile>; effective <profile>; fallback: <reason|none>
@@ -158,8 +166,9 @@ Recent history: <latest chronicle and outcome>
 Ready to: <resume named campaign, open a requested campaign, or await direction>
 ```
 
-Omit the `Evidence pins` line when the census is clean. Every other line is
-always present.
+Omit the `Changed since last session` line when no prior generation was known
+to ask about, and omit the `Evidence pins` line when the census is clean. Every
+other line is always present.
 
 Stop after orientation. Do not begin substantive investigation until the user
 directs it.

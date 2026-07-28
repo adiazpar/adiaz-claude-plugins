@@ -234,6 +234,11 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertIn("pins.broken", body)
         self.assertIn("Evidence pins:", body)
         self.assertIn("masterfile stale", body)
+        self.assertIn("sinceGeneration", body)
+        self.assertIn("Changed since last session", body)
+        # An unavailable delta and an empty delta mean opposite things and must
+        # never be reported the same way.
+        self.assertIn("delta unavailable", body)
 
     def test_benchmark_reports_hard_negative_coverage_without_gating_on_it(
         self,
