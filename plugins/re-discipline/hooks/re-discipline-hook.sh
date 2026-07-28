@@ -332,16 +332,138 @@ writePolicy'
   [ -n "$memory_mode" ]
 }
 
+# Shared TOML structure scanner. This mirrors tomlCodeLines, openTOMLMultiline,
+# tomlBracketDelta, and stripTOMLComment in the packaged Go recovery scanner so
+# the hook and the server agree on which lines carry TOML structure. Interior
+# lines of a multi-line string, array, or inline table are value content and are
+# never tables, assignments, or comments.
+toml_scan_awk='
+function toml_trim(value) {
+  gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+  return value
+}
+
+function toml_strip_comment(line,   position, span, character, basic, literal, escaped) {
+  basic = 0
+  literal = 0
+  escaped = 0
+  span = length(line)
+  for (position = 1; position <= span; position++) {
+    character = substr(line, position, 1)
+    if (escaped) {
+      escaped = 0
+    } else if (basic && character == "\\") {
+      escaped = 1
+    } else if (!literal && character == "\"") {
+      basic = !basic
+    } else if (!basic && character == "\047") {
+      literal = !literal
+    } else if (!basic && !literal && character == "#") {
+      return substr(line, 1, position - 1)
+    }
+  }
+  return line
+}
+
+function toml_bracket_delta(text,   position, span, character, basic, literal, escaped, delta) {
+  delta = 0
+  basic = 0
+  literal = 0
+  escaped = 0
+  span = length(text)
+  for (position = 1; position <= span; position++) {
+    character = substr(text, position, 1)
+    if (escaped) {
+      escaped = 0
+    } else if (basic && character == "\\") {
+      escaped = 1
+    } else if (!literal && character == "\"") {
+      basic = !basic
+    } else if (!basic && character == "\047") {
+      literal = !literal
+    } else if (!basic && !literal && (character == "[" || character == "{")) {
+      delta++
+    } else if (!basic && !literal && (character == "]" || character == "}")) {
+      delta--
+    }
+  }
+  return delta
+}
+
+function toml_open_multiline(value) {
+  if (substr(value, 1, 3) == "\"\"\"" &&
+      index(substr(value, 4), "\"\"\"") == 0) {
+    return "\"\"\""
+  }
+  if (substr(value, 1, 3) == "\047\047\047" &&
+      index(substr(value, 4), "\047\047\047") == 0) {
+    return "\047\047\047"
+  }
+  return ""
+}
+
+function toml_is_code(raw,   at, rest, line, equals, value, opened) {
+  if (toml_error) {
+    return 0
+  }
+  if (toml_delim != "") {
+    at = index(raw, toml_delim)
+    if (at == 0) {
+      return 0
+    }
+    rest = substr(raw, at + length(toml_delim))
+    toml_delim = ""
+    toml_depth += toml_bracket_delta(toml_strip_comment(rest))
+    if (toml_depth < 0) {
+      toml_error = 1
+    }
+    return 0
+  }
+  if (toml_depth > 0) {
+    toml_depth += toml_bracket_delta(toml_strip_comment(raw))
+    if (toml_depth < 0) {
+      toml_error = 1
+    }
+    return 0
+  }
+  line = toml_trim(toml_strip_comment(raw))
+  equals = index(line, "=")
+  if (equals > 1) {
+    value = toml_trim(substr(line, equals + 1))
+    opened = toml_open_multiline(value)
+    if (opened != "") {
+      toml_delim = opened
+      return 1
+    }
+    toml_depth += toml_bracket_delta(value)
+    if (toml_depth < 0) {
+      toml_error = 1
+    }
+  }
+  return 1
+}
+
+function toml_continues() {
+  return (toml_delim != "" || toml_depth > 0)
+}
+
+function toml_balanced() {
+  return (!toml_error && toml_delim == "" && toml_depth == 0)
+}
+'
+
 toml_boolean() {
   path="$1"
   target_section="$2"
   target_key="$3"
-  awk -v wanted_section="$target_section" -v wanted_key="$target_key" '
+  awk -v wanted_section="$target_section" -v wanted_key="$target_key" \
+    "$toml_scan_awk"'
     BEGIN { section = ""; count = 0; value = "" }
     {
-      line = $0
-      sub(/#.*/, "", line)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (!toml_is_code($0)) {
+        next
+      }
+      line = toml_trim(toml_strip_comment($0))
       if (line ~ /^\[[^]]+\]$/) {
         section = substr(line, 2, length(line) - 2)
       } else if (section == wanted_section) {
@@ -356,7 +478,7 @@ toml_boolean() {
       }
     }
     END {
-      if (count == 1) {
+      if (count == 1 && toml_balanced()) {
         print value
       }
     }
@@ -364,11 +486,7 @@ toml_boolean() {
 }
 
 validate_toml_policy_container() {
-  awk '
-    function trim(value) {
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      return value
-    }
+  awk "$toml_scan_awk"'
     function without_quotes(value) {
       gsub(/["\047]/, "", value)
       return value
@@ -379,29 +497,26 @@ validate_toml_policy_container() {
     }
     BEGIN { active = "" }
     {
-      line = $0
-      sub(/#.*/, "", line)
-      line = trim(line)
+      if (!toml_is_code($0)) {
+        if (toml_error) {
+          exit 1
+        }
+        next
+      }
+      continued = toml_continues()
+      line = toml_trim(toml_strip_comment($0))
       if (line == "") {
         next
       }
-      if (line ~ /"""|\047\047\047/) {
-        exit 1
-      }
       compact = line
       gsub(/[[:space:]]/, "", compact)
-      if (compact ~ /^\[\[[A-Za-z0-9_.-]+\]\]$/ ||
-          compact ~ /^\[[A-Za-z0-9_.-]+\]$/) {
-        array_table = compact ~ /^\[\[/
-        if (array_table) {
-          table = substr(compact, 3, length(compact) - 4)
-        } else {
-          table = substr(compact, 2, length(compact) - 2)
-        }
-        if (managed_path(table)) {
-          if (array_table || (table != "features" && table != "memories")) {
-            exit 1
-          }
+      if (substr(compact, 1, 2) == "[[") {
+        exit 1
+      }
+      if (compact ~ /^\[[A-Za-z0-9_.-]+\]$/) {
+        table = substr(compact, 2, length(compact) - 2)
+        if (managed_path(table) && table != "features" && table != "memories") {
+          exit 1
         }
         active = table
         next
@@ -411,9 +526,13 @@ validate_toml_policy_container() {
       }
       if (line ~ /^[A-Za-z0-9_.-]+[[:space:]]*=/) {
         equals = index(line, "=")
-        left = trim(substr(line, 1, equals - 1))
-        right = trim(substr(line, equals + 1))
-        if (right !~ /^"([^"\\]|\\.)*"$/ &&
+        left = toml_trim(substr(line, 1, equals - 1))
+        right = toml_trim(substr(line, equals + 1))
+        multiline = (continued ||
+                     substr(right, 1, 3) == "\"\"\"" ||
+                     substr(right, 1, 3) == "\047\047\047")
+        if (!multiline &&
+            right !~ /^"([^"\\]|\\.)*"$/ &&
             right !~ "^\047[^\047]*\047$" &&
             right !~ /^\[[^][]*\]$/ &&
             right !~ /^\{[^{}]*\}$/ &&
@@ -439,6 +558,11 @@ validate_toml_policy_container() {
         next
       }
       exit 1
+    }
+    END {
+      if (!toml_balanced()) {
+        exit 1
+      }
     }
   ' "$1"
 }
@@ -479,13 +603,15 @@ repair_host_policy() {
   codex_path="$root/.codex/config.toml"
   toml_setter="$plugin_root/hooks/set-toml-memory.awk"
   if ! validate_toml_policy_container "$codex_path"; then
-    append_warning ".codex/config.toml is malformed or uses unsupported multiline syntax and was preserved"
+    append_warning ".codex/config.toml is malformed or uses unsupported syntax and was preserved"
     return 0
   fi
   if [ ! -f "$toml_setter" ]; then
     append_warning ".codex/config.toml policy helper is unavailable"
     return 0
   fi
+  toml_setter_program="$toml_scan_awk
+$(cat "$toml_setter")"
   working="$(mktemp "$(dirname "$codex_path")/.re-discipline-policy.XXXXXX")" || {
     append_warning ".codex/config.toml temporary policy file could not be created"
     return 0
@@ -506,7 +632,7 @@ repair_host_policy() {
       -v wanted_section="$section" \
       -v wanted_key="$key" \
       -v expected="$expected" \
-      -f "$toml_setter" \
+      "$toml_setter_program" \
       "$working" >"$next"; then
       mv "$next" "$working"
     else
@@ -637,7 +763,11 @@ configuration_recovery() {
     retrieval_compact="$(tr -d '\r\n\t ' <"$retrieval_path" 2>/dev/null)"
     printf '%s' "$retrieval_compact" | grep -Eq '"schemaVersion":1' ||
       append_warning "settings/retrieval-profile.json is malformed or unsupported"
-    printf '%s' "$retrieval_compact" | grep -Eq '"profileId":"plugin:balanced-v1"' ||
+    # Mirror profileIdentityRE in the packaged server. A project that has ever
+    # calibrated and promoted a candidate carries "project:candidate-<hex>",
+    # not the packaged baseline identity.
+    printf '%s' "$retrieval_compact" |
+      grep -Eq '"profileId":"[a-z0-9]+(-[a-z0-9]+)*(:[a-z0-9]+(-[a-z0-9]+)*)?"' ||
       append_warning "settings/retrieval-profile.json has an unsupported profile"
   fi
 

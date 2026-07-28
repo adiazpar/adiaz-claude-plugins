@@ -1758,9 +1758,19 @@ class HookTests(unittest.TestCase):
                 b"[[features]]\nmemories = true\n",
             ),
             (
-                "codex-multiline-string",
+                "codex-unclosed-multiline-string",
                 ".codex/config.toml",
-                b'description = """\nmanaged-looking text\n"""\n',
+                b'description = """\nmanaged-looking text\n',
+            ),
+            (
+                "codex-unbalanced-array",
+                ".codex/config.toml",
+                b'args = [\n  "a",\n',
+            ),
+            (
+                "codex-plain-array-table",
+                ".codex/config.toml",
+                b'[[servers]]\nname = "a"\n',
             ),
             (
                 "codex-unterminated-string",
@@ -1790,6 +1800,118 @@ class HookTests(unittest.TestCase):
                 ]
                 self.assertRegex(context, r"ambiguous|malformed|JSON object")
                 self.assertIn("preserved", context)
+
+    def make_control_plane(self, root: Path, profile_id: str) -> Path:
+        """Materialize a managed project whose retrieval profile is promoted."""
+        self.make_managed_project(root)
+        shutil.copy2(
+            PLUGIN / "templates" / "project" / "config.json",
+            root / ".re-discipline" / "config.json",
+        )
+        settings = root / ".re-discipline" / "settings"
+        settings.mkdir(parents=True)
+        template = json.loads(
+            read(PLUGIN / "templates" / "project" / "retrieval-profile.json")
+        )
+        baseline = template["profileId"]
+        template["profileId"] = profile_id
+        if profile_id != baseline:
+            template["baseProfile"] = baseline
+        path = settings / "retrieval-profile.json"
+        path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def hook_context(self, result: subprocess.CompletedProcess[str]) -> str:
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def assert_promoted_project_profile_accepted(self, runner) -> None:
+        """A calibrated project keeps its own profile identity.
+
+        decide-retrieval-profile writes "project:candidate-<hex>", which the
+        packaged server accepts under profileIdentityRE. A hook that demanded
+        the packaged baseline identity reported every calibrated project as
+        degraded at every session start.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_control_plane(root, "project:candidate-12750fb43b2f9efd")
+
+            result = runner("session-start", root, host="codex")
+            context = self.hook_context(result)
+
+        self.assertNotIn("retrieval-profile", context)
+        self.assertNotIn("read-only degraded", context)
+
+    def assert_malformed_project_profile_warns(self, runner) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.make_control_plane(root, "plugin:balanced-v1")
+            body = json.loads(read(path))
+            body["profileId"] = "Project Candidate!"
+            path.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+
+            result = runner("session-start", root, host="codex")
+            context = self.hook_context(result)
+
+        self.assertIn("retrieval-profile.json", context)
+        self.assertIn("read-only degraded", context)
+
+    MULTILINE_CODEX_CONFIG = (
+        "# the managed-looking keys below are string content, not structure\n"
+        'model = "gpt-test"\n'
+        'notes = """\n'
+        "first line\n"
+        "[features]\n"
+        "memories = true\n"
+        '"""\n'
+        'windows_path = "C:\\\\Users\\\\x"\n'
+        'hashy = "value#notacomment"\n'
+        "\n"
+        "[mcp_servers.alpha.tools.beta]\n"
+        'command = "npx"\n'
+        "args = [\n"
+        '  "-y",\n'
+        '  "some-server"\n'
+        "]\n"
+    )
+
+    def assert_multiline_toml_config_repaired(self, runner) -> None:
+        """Multi-line TOML is structure the hook must scan, not give up on.
+
+        The packaged Go recovery scanner tracks open multi-line strings and
+        bracket depth, so interior lines are value content. Hooks that bailed
+        on any triple quote reported an ordinary Codex configuration as
+        malformed and never applied the memory policy.
+        """
+        original = self.MULTILINE_CODEX_CONFIG.encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_control_plane(root, "plugin:balanced-v1")
+            codex_path = root / ".codex" / "config.toml"
+            codex_path.parent.mkdir()
+            codex_path.write_bytes(original)
+
+            result = runner("session-start", root, host="codex")
+            repaired = codex_path.read_bytes()
+            again = runner("session-start", root, host="codex")
+            settled = codex_path.read_bytes()
+
+        context = self.hook_context(result)
+        self.hook_context(again)
+        self.assertNotIn("preserved", context)
+        self.assertNotIn("malformed", context)
+        self.assertTrue(repaired.startswith(original), repaired)
+        self.assertEqual(repaired, settled)
+
+        text = repaired.decode("utf-8")
+        self.assertIn("[features]\nmemories = false", text)
+        self.assertIn("generate_memories = false", text)
+        self.assertIn("use_memories = false", text)
+        self.assertIn("[mcp_servers.alpha.tools.beta]", text)
+        self.assertIn('windows_path = "C:\\\\Users\\\\x"', text)
+        self.assertIn('hashy = "value#notacomment"', text)
+        self.assertEqual(text.count("memories = true"), 1)
 
     def test_hook_is_silent_outside_initialized_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2086,6 +2208,15 @@ class HookTests(unittest.TestCase):
     def test_hook_preserves_ambiguous_host_settings_byte_for_byte(self) -> None:
         self.assert_ambiguous_host_settings_preserved(self.run_hook)
 
+    def test_hook_accepts_a_promoted_project_retrieval_profile(self) -> None:
+        self.assert_promoted_project_profile_accepted(self.run_hook)
+
+    def test_hook_still_warns_on_a_malformed_profile_identity(self) -> None:
+        self.assert_malformed_project_profile_warns(self.run_hook)
+
+    def test_hook_repairs_configuration_with_multiline_toml(self) -> None:
+        self.assert_multiline_toml_config_repaired(self.run_hook)
+
     def test_hook_recovers_staged_deletions_without_changing_index(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2331,6 +2462,15 @@ class HookTests(unittest.TestCase):
         self,
     ) -> None:
         self.assert_ambiguous_host_settings_preserved(self.run_posix_hook)
+
+    def test_posix_hook_accepts_a_promoted_project_retrieval_profile(self) -> None:
+        self.assert_promoted_project_profile_accepted(self.run_posix_hook)
+
+    def test_posix_hook_still_warns_on_a_malformed_profile_identity(self) -> None:
+        self.assert_malformed_project_profile_warns(self.run_posix_hook)
+
+    def test_posix_hook_repairs_configuration_with_multiline_toml(self) -> None:
+        self.assert_multiline_toml_config_repaired(self.run_posix_hook)
 
     def test_posix_hook_does_not_follow_managed_directory_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

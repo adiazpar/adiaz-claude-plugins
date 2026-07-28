@@ -1,11 +1,19 @@
 # Preserve TOML text while setting one boolean in a named table.
 # Exits 2 for duplicate/ambiguous managed tables or fields.
+#
+# The toml_* helpers come from the shared scanner the hook prepends to this
+# program. Interior lines of a multi-line string, array, or inline table are
+# value content, so they are never read as tables or assignments here.
 
 {
     lines[NR] = $0
+    code[NR] = toml_is_code($0)
 }
 
 END {
+    if (!toml_balanced()) {
+        exit 2
+    }
     active = ""
     section_count = 0
     key_count = 0
@@ -13,9 +21,10 @@ END {
     section_end = NR + 1
 
     for (line_number = 1; line_number <= NR; line_number++) {
-        candidate = lines[line_number]
-        sub(/#.*/, "", candidate)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", candidate)
+        if (!code[line_number]) {
+            continue
+        }
+        candidate = toml_trim(toml_strip_comment(lines[line_number]))
         if (candidate ~ /^\[[^]]+\]$/) {
             table = substr(candidate, 2, length(candidate) - 2)
             if (active == wanted_section && section_end == NR + 1) {
