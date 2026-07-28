@@ -25,8 +25,16 @@ END {
             continue
         }
         candidate = toml_trim(toml_strip_comment(lines[line_number]))
-        if (candidate ~ /^\[[^]]+\]$/) {
-            table = substr(candidate, 2, length(candidate) - 2)
+        table = ""
+        if (substr(candidate, 1, 1) == "[" &&
+            substr(candidate, length(candidate), 1) == "]") {
+            # toml_key_path also recognizes a quoted segment, so a bracket
+            # inside a quoted table name is content rather than a delimiter and
+            # the active section keeps tracking correctly past it.
+            inner = toml_trim(substr(candidate, 2, length(candidate) - 2))
+            table = toml_key_path(inner)
+        }
+        if (table != "") {
             if (active == wanted_section && section_end == NR + 1) {
                 section_end = line_number
             }

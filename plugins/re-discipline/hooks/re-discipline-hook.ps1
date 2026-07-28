@@ -473,8 +473,9 @@ function Test-RetrievalProfile {
 }
 
 # The Get-Toml* helpers below mirror stripTOMLComment, tomlBracketDelta,
-# openTOMLMultiline, and tomlCodeLines in the packaged Go recovery scanner so
-# the hook and the server agree on which lines carry TOML structure.
+# openTOMLMultiline, tomlCodeLines, and tomlKeySegments in the packaged Go
+# recovery scanner so the hook and the server agree on which lines carry TOML
+# structure and on what a dotted key names.
 function Get-TomlCommentStripped {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Line)
 
@@ -545,6 +546,100 @@ function Get-TomlMultilineDelimiter {
         }
     }
     return ""
+}
+
+# Get-TomlKeyPath returns the canonical dotted form of a TOML key, or "" when
+# the key is malformed. Segments may be bare, "basic"-quoted, or 'literal'-quoted;
+# inside a basic segment a backslash escapes the next character, exactly as
+# Get-TomlBracketDelta and Get-TomlCommentStripped already treat strings.
+#
+# Quoting is the only way to write a Windows path as a key, so a scanner that
+# accepts only bare keys reports the section Codex itself writes -
+# [projects."C:\Users\x"] - as malformed, and a host whose configuration is
+# judged malformed never receives its memory policy.
+function Get-TomlKeyPath {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Key)
+
+    $rest = $Key
+    $segments = New-Object System.Collections.Generic.List[string]
+    while ($true) {
+        $rest = $rest.TrimStart(" ", "`t")
+        if ($rest.Length -eq 0) {
+            return ""
+        }
+        $quote = $rest.Substring(0, 1)
+        $segment = ""
+        if ($quote -eq '"' -or $quote -eq "'") {
+            $closed = $false
+            $index = 1
+            while ($index -lt $rest.Length) {
+                $character = $rest.Substring($index, 1)
+                if ($quote -eq '"' -and $character -eq "\") {
+                    if ($index + 1 -ge $rest.Length) {
+                        return ""
+                    }
+                    $segment += $rest.Substring($index + 1, 1)
+                    $index += 2
+                    continue
+                }
+                if ($character -eq $quote) {
+                    $closed = $true
+                    $index++
+                    break
+                }
+                $segment += $character
+                $index++
+            }
+            if (-not $closed) {
+                return ""
+            }
+            $rest = $rest.Substring($index)
+        }
+        else {
+            $index = 0
+            while ($index -lt $rest.Length) {
+                $character = $rest.Substring($index, 1)
+                if ($character -eq "." -or $character -match "\s") {
+                    break
+                }
+                $segment += $character
+                $index++
+            }
+            if ($segment -notmatch "^[A-Za-z0-9_\-]+$") {
+                return ""
+            }
+            $rest = $rest.Substring($index)
+        }
+        if ([string]::IsNullOrEmpty($segment)) {
+            return ""
+        }
+        $segments.Add($segment)
+        $rest = $rest.TrimStart(" ", "`t")
+        if ($rest.Length -eq 0) {
+            return [string]::Join(".", $segments)
+        }
+        if ($rest.Substring(0, 1) -ne ".") {
+            return ""
+        }
+        $rest = $rest.Substring(1)
+    }
+}
+
+# Get-TomlTablePath returns the canonical path of a table header line, or ""
+# when the line is not a well-formed single table header.
+function Get-TomlTablePath {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Line)
+
+    $candidate = $Line.Trim()
+    if (
+        $candidate.Length -lt 2 -or
+        -not $candidate.StartsWith("[") -or
+        -not $candidate.EndsWith("]") -or
+        $candidate.StartsWith("[[")
+    ) {
+        return ""
+    }
+    return Get-TomlKeyPath -Key $candidate.Substring(1, $candidate.Length - 2)
 }
 
 function Get-TomlStructure {
@@ -627,8 +722,9 @@ function Get-TomlBoolean {
             continue
         }
         $candidate = (Get-TomlCommentStripped -Line $lines[$index]).Trim()
-        if ($candidate -match "^\[([^\]]+)\]$") {
-            $activeSection = $matches[1]
+        $table = Get-TomlTablePath -Line $candidate
+        if (-not [string]::IsNullOrEmpty($table)) {
+            $activeSection = $table
             continue
         }
         if (
@@ -757,10 +853,10 @@ function Set-TomlBooleanField {
         if (-not $structure.Code[$index]) {
             continue
         }
-        if ($lines[$index] -match "^\s*\[([^\]]+)\]\s*(?:#.*)?$") {
-            if ($Matches[1] -eq $Section) {
-                $sectionIndexes.Add($index)
-            }
+        $table = Get-TomlTablePath -Line (
+            Get-TomlCommentStripped -Line $lines[$index])
+        if ($table -eq $Section) {
+            $sectionIndexes.Add($index)
         }
     }
     if ($sectionIndexes.Count -gt 1) {
@@ -868,18 +964,31 @@ function Repair-CodexMemoryPolicy {
         if ([string]::IsNullOrEmpty($candidate)) {
             continue
         }
-        $compact = $candidate -replace "\s", ""
-        if ($compact.StartsWith("[[")) {
+        if ($candidate.StartsWith("[[")) {
             $Warnings.Add(
                 ".codex/config.toml uses an unsupported or ambiguous table header and was preserved"
             )
             return
         }
-        if ($compact -match "^\[[A-Za-z0-9_.\-]+\]$") {
-            $table = $compact.Substring(1, $compact.Length - 2)
+        if ($candidate.StartsWith("[")) {
+            $rawTable = ""
+            if ($candidate.EndsWith("]")) {
+                $rawTable = $candidate.Substring(1, $candidate.Length - 2).Trim()
+            }
+            $table = Get-TomlTablePath -Line $candidate
+            if ([string]::IsNullOrEmpty($table)) {
+                $Warnings.Add(
+                    ".codex/config.toml uses an unsupported or ambiguous table header and was preserved"
+                )
+                return
+            }
+            # A managed table must be spelled bare. Set-TomlBooleanField matches
+            # the managed keys inside it by their literal text, so accepting an
+            # alternate spelling here would let it append a second copy of a key
+            # that is already present.
             if (
                 $table -match "^(features|memories)(\.|$)" -and
-                @("features", "memories") -notcontains $table
+                @("features", "memories") -notcontains $rawTable
             ) {
                 $Warnings.Add(
                     ".codex/config.toml uses an ambiguous alternate managed table and was preserved"
@@ -889,20 +998,21 @@ function Repair-CodexMemoryPolicy {
             $activeSection = $table
             continue
         }
-        if ($compact.StartsWith("[")) {
-            $Warnings.Add(
-                ".codex/config.toml uses an unsupported or ambiguous table header and was preserved"
-            )
-            return
-        }
-        if ($candidate -notmatch "^([A-Za-z0-9_.\-]+)\s*=") {
+        $equals = $candidate.IndexOf("=")
+        if ($equals -lt 1) {
             $Warnings.Add(
                 ".codex/config.toml is malformed or uses unsupported syntax and was preserved"
             )
             return
         }
-        $left = $Matches[1]
-        $equals = $candidate.IndexOf("=")
+        $rawLeft = $candidate.Substring(0, $equals).Trim()
+        $left = Get-TomlKeyPath -Key $rawLeft
+        if ([string]::IsNullOrEmpty($left)) {
+            $Warnings.Add(
+                ".codex/config.toml is malformed or uses unsupported syntax and was preserved"
+            )
+            return
+        }
         $right = $candidate.Substring($equals + 1).Trim()
         $multiline = (
             $structure.Continued[$index] -or
@@ -931,9 +1041,14 @@ function Repair-CodexMemoryPolicy {
             )
             return
         }
+        # A managed key must be spelled bare for the same reason a managed table
+        # must: the setter finds it by its literal text, so a dotted or quoted
+        # spelling of the same key would be updated in one place and appended in
+        # another.
         if (
             $activeSection -eq "features" -and
-            $left -match "^memories\."
+            $left -match "^memories(\.|$)" -and
+            $rawLeft -ne "memories"
         ) {
             $Warnings.Add(
                 ".codex/config.toml uses an ambiguous dotted features.memories key and was preserved"
@@ -942,7 +1057,8 @@ function Repair-CodexMemoryPolicy {
         }
         if (
             $activeSection -eq "memories" -and
-            $left -match "^(generate_memories|use_memories)\."
+            $left -match "^(generate_memories|use_memories)(\.|$)" -and
+            $rawLeft -notmatch "^(generate_memories|use_memories)$"
         ) {
             $Warnings.Add(
                 ".codex/config.toml uses an ambiguous dotted memories policy key and was preserved"
