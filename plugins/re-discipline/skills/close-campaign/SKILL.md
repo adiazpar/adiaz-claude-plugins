@@ -26,19 +26,32 @@ model. The manager still ratifies the proposal.
 
 ## Step 2: Account For Every Finding
 
-Enumerate the campaign's own reports and confirm each recorded finding has a
-resolution. Do not reconstruct this from memory or from the masterfile alone:
-query the campaign's reports for their TRUTH-PROMOTION CANDIDATES and RESIDUAL
-UNCERTAINTIES, and read the `**Disposition:**` stamp on each report.
+Read `active/<slug>/REVIEWS.md` in full, then enumerate the campaign's own
+reports and confirm each recorded finding has a resolution. Do not reconstruct
+this from memory or from the masterfile alone: query the campaign's reports for
+their TRUTH-PROMOTION CANDIDATES and RESIDUAL UNCERTAINTIES, and read the
+`**Disposition:**` stamp on each report.
+
+The ledger is the audit, the stamps are the evidence. Reconcile them against
+each other: a stamped report with no ledger row, or a ledger row whose report
+carries no stamp, means the review record is incomplete and closure cannot yet
+account for it.
 
 Every PROMOTE must be promoted or explicitly declined with a reason. Every
 HOLD must reach `docs/backlog/`, be promoted now, or be explicitly dropped
 with a reason. Every DROP must appear in the chronicle's dead ends. Every
 BLOCK must be resolved or carried forward as a named open question.
 
+The ledger's Unresolved Holds table is where HOLD dispositions are recorded,
+and it is the one part of the campaign directory with no durable projection of
+its own. Every row must be resolved now or carried to the destination its own
+row names - normally a `docs/backlog/` entry - before Step 7 removes the
+directory. Resolve rows; never empty the table by deleting them.
+
 An unstamped report means nobody reviewed it. Review it now or record
 explicitly that its content is being discarded unreviewed - do not let it pass
-silently.
+silently. A missing `REVIEWS.md` in a campaign that dispatched drafters means
+the same thing about the campaign as a whole.
 
 This step exists because closure performs extreme compression. A campaign with
 a megabyte of reports and a nine-kilobyte chronicle is discarding most of what
@@ -92,7 +105,14 @@ retrospective voice. Include:
 - exact reproduction recipes and maintained deliverables;
 - classes of raw material discarded after distillation;
 - deferred leads and backlog links;
-- provenance and scratch sources folded into the chronicle.
+- provenance and scratch sources folded into the chronicle;
+- the review ledger's outcome summary: reports reviewed, total
+  PROMOTE/HOLD/DROP/BLOCK counts, and each carried hold with the destination it
+  reached.
+
+That summary is the ledger's only durable projection. `REVIEWS.md` dies with
+the directory in Step 7, so a hold that appears in neither the chronicle nor
+`docs/backlog/` is a judgement the campaign made and then erased.
 
 ## Step 6: Update Masterfiles
 
@@ -123,9 +143,14 @@ and is the campaign the user asked to close. Use one shell and literal paths
 throughout the operation.
 
 Remove the campaign only after the chronicle passes a cold-reopen read, every
-truth has a durable verifier, and every manifest entry has a completed
-Maintain, Distill, or Delete disposition. If there is any hesitation, stop and
-improve the chronicle or disposition first.
+truth has a durable verifier, every manifest entry has a completed Maintain,
+Distill, or Delete disposition, and `REVIEWS.md` carries no unresolved hold
+that has not reached its named destination. If there is any hesitation, stop
+and improve the chronicle or disposition first.
+
+The ledger is deleted by the same recursive removal that deletes the reports,
+so re-read its Unresolved Holds table immediately before removal rather than
+trusting the Step 2 reading: reviews performed during closure append to it.
 
 Before removal, resolve every campaign-owned pending memory proposal or replace
 its scratch-only citation with a durable source. Do not leave accepted recall
@@ -142,13 +167,15 @@ Confirm truth links, index links, verification bases, recipes, and maintained
 source, tools, tests, fixtures, corpora, or references. Confirm
 `active/<slug>/` is gone and no durable file points only to the deleted
 scratch. Report truth additions, overturns, chronicle, maintained deliverables,
-distilled material, and deletions.
+distilled material, the review ledger's outcome summary and where each carried
+hold landed, and deletions.
 
 Do not commit unless the user explicitly asks.
 
 ## Reference
 
 - Chronicle template: `<plugin-root>/templates/chronicle.md`.
+- Review ledger template: `<plugin-root>/templates/campaign-reviews.md`.
 - Gates: `review-subagent`, `promote-truth`, and `overturn`.
 - Knowledge governance: `<plugin-root>/references/knowledge-governance.md`.
 - Shared-memory decisions: `review-memory`.

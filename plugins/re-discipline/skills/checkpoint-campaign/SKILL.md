@@ -30,9 +30,16 @@ context-pack IDs and digests instead of copying passages or spent tool output.
 
 ## Step 2: Account For Unresolved Holds
 
-List every HOLD recorded since the last checkpoint and give each one a current
-destination: promoted now, written to `docs/backlog/`, still genuinely open
-with a named decisive observation, or explicitly dropped with a reason.
+Read `active/<slug>/REVIEWS.md` and work its Unresolved Holds table, not a
+list reassembled from memory. That table is the destination of record for HOLD
+dispositions; `CAMPAIGN.md` records where the campaign is now, so a hold that
+lives only in campaign state has no record once the state is rewritten.
+
+Give every row a current destination: promoted now, written to `docs/backlog/`,
+still genuinely open with a named decisive observation, or explicitly dropped
+with a reason. Then write the outcome back into the ledger - resolve rows,
+never delete them - and add any HOLD recorded since the last checkpoint that
+`review-subagent` has not yet entered.
 
 Do this every checkpoint rather than at closure. A campaign that reaches
 closure with dozens of unexamined HOLDs is compressing months of judgement
@@ -40,9 +47,14 @@ into a single act, performed by whoever is closing, over reports they may
 never have read. Surfacing a handful at each checkpoint is the same work
 spread across the people who actually did it.
 
-Reviewed reports are retrievable, so this is a query rather than a memory
-exercise: search the campaign tier for the campaign's own RESIDUAL
-UNCERTAINTIES and TRUTH-PROMOTION CANDIDATES.
+The ledger and reviewed reports are both retrievable, so verifying the table
+against its evidence is a query rather than a memory exercise: search the
+campaign tier for the campaign's own RESIDUAL UNCERTAINTIES and
+TRUTH-PROMOTION CANDIDATES.
+
+Render `<plugin-root>/templates/campaign-reviews.md` if a campaign that has
+dispatched drafters has no ledger yet, and say so in the checkpoint report:
+the reviews happened, their record did not.
 
 ## Step 3: Sweep Scratch Carefully
 
@@ -88,8 +100,8 @@ Read the rewritten masterfile as if the session had no prior context. Confirm
 that its links resolve, its next action is executable, and every new artifact
 has a disposition.
 
-Report the Current state line count, removed scratch, retained artifacts, and
-resume action. If the closure bar is already met, recommend `close-campaign`
+Report the Current state line count, removed scratch, retained artifacts, the
+number of unresolved holds still in the ledger, and the resume action. If the closure bar is already met, recommend `close-campaign`
 instead of describing the campaign as both open and solved.
 
 Do not commit unless the user explicitly asks.
@@ -97,6 +109,7 @@ Do not commit unless the user explicitly asks.
 ## Reference
 
 - Active manager adapter: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.
+- Review ledger template: `<plugin-root>/templates/campaign-reviews.md`.
 - Knowledge governance: `<plugin-root>/references/knowledge-governance.md`.
 - Memory decisions: `review-memory`.
 - Closure: `close-campaign`.

@@ -78,6 +78,23 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		{Path: "docs/history", Tier: "history", Recursive: true, Enabled: settings.Sources.History},
 		{Path: "docs/backlog", Tier: "backlog", Recursive: true, Enabled: settings.Sources.Backlog},
 		{Path: "active", Tier: "active", Recursive: true, BaseOnly: "CAMPAIGN.md", Enabled: settings.Sources.ActiveCampaigns},
+		// REVIEWS.md is campaign state, not a drafter claim, so it shares the
+		// `active` tier with the masterfile rather than joining reviewed reports
+		// in `campaign`. The two files are one logical masterfile that was split
+		// only because they grow at different rates - CAMPAIGN.md is rewritten
+		// every checkpoint and must stay small enough to re-read cold, the ledger
+		// only appends - and a split made for size should not also move half the
+		// content into a different epistemic class.
+		//
+		// `campaign` means "a drafter finding a manager rederived": content a
+		// drafter authored and a manager qualified. The ledger contains no drafter
+		// prose at all, only the manager's own dispositions and the destinations
+		// held claims will take. Filing it under `campaign` would make that tier
+		// mean two different things at once.
+		//
+		// It rides the activeCampaigns toggle for the same reason: a project that
+		// declines to index campaign state declines to index both halves of it.
+		{Path: "active", Tier: "active", Recursive: true, BaseOnly: "REVIEWS.md", Enabled: settings.Sources.ActiveCampaigns},
 		// Drafter reports carry a mandated section schema - VERDICT, CLAIMS,
 		// RESIDUAL UNCERTAINTIES, EVIDENCE INDEX - as markdown headings, so
 		// the chunker already partitions them along the epistemic boundary.
