@@ -85,7 +85,7 @@ exposes:
 | `orient` | Bounded orientation from allowed project tiers. |
 | `search` | Tier-filtered exact, lexical, graph, dense, and reranked retrieval. |
 | `read` | Generation- and content-hash-validated reads of managed sources. |
-| `context_pack` | Read-only construction of an immutable, citable context pack whose digest the manager retains independently. |
+| `context_pack` | Read-only construction of an immutable, citable context pack whose digest the manager retains independently. A `requiredPaths` entry is pinned as the one indexed chunk of that document the pack's task ranks highest, so a source larger than the budget still reaches the caller; `read` returns the rest. |
 | `context_pack_materialize` | Rebuild and atomically write the pack only to an approved campaign or recruiting drafter workspace when it matches that independently retained digest. |
 | `recall_propose` | Proposal-only write under `.re-discipline/memory/proposals/`; never accepts memory. |
 
