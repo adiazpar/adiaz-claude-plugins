@@ -31,7 +31,7 @@ const reviewStamp = "\n**Review:** promote\n\n**Disposition:** promote\n"
 // reports are indexed at all.
 func enableDrafterReports(t *testing.T, root string) {
 	t.Helper()
-	writeTestFile(t, filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc"), `{
+	writeTestFile(t, filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc"), `{
   "schemaVersion": 1,
   "sources": {
     "truth": true,

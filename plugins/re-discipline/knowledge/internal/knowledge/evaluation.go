@@ -137,6 +137,10 @@ type ProfileBenchmark struct {
 	MetricsBySplit         map[string]QualityMetrics       `json:"metricsBySplit"`
 	MetricsByBudget        map[string]QualityMetrics       `json:"metricsByBudget"`
 	QualityMetricsByBudget map[string]QualityMetrics       `json:"qualityMetricsByBudget"`
+	// ComputedEvidence is the evidence block this run measured, suitable for
+	// re-declaration in the packaged profile after an intentional contract
+	// change. EvaluatedAt is stamped by the updater, not here.
+	ComputedEvidence BenchmarkEvidence `json:"computedEvidence,omitempty"`
 }
 
 type BenchmarkReport struct {
@@ -308,6 +312,47 @@ func validateEvalPath(value string) error {
 	return nil
 }
 
+// UpdateDeclaredBenchmarks rewrites the packaged profile's declared
+// evidence blocks from a full benchmark's computed evidence. It is a
+// plugin-maintainer operation for intentional contract changes (runtime,
+// chunker, or fixture); it never runs for consuming projects. Ratified
+// ratchet values on each row are preserved so re-declaration cannot loosen
+// an accepted quality floor.
+func UpdateDeclaredBenchmarks(assetRoot string, report BenchmarkReport) error {
+	if report.Mode != "full" {
+		return errors.New("declared evidence may only be updated from a full run")
+	}
+	profilePath := filepath.Join(assetRoot, "profiles", "balanced-v1.json")
+	profileBody, err := os.ReadFile(profilePath)
+	if err != nil {
+		return err
+	}
+	var profile RetrievalProfile
+	if err := decodeStrict(profileBody, &profile); err != nil {
+		return err
+	}
+	stamp := RFC3339UTC(time.Now())
+	for index := range profile.EffectiveProfiles {
+		row := &profile.EffectiveProfiles[index]
+		var measured *ProfileBenchmark
+		for candidateIndex := range report.Profiles {
+			if report.Profiles[candidateIndex].ProfileName == row.Name {
+				measured = &report.Profiles[candidateIndex]
+				break
+			}
+		}
+		if measured == nil {
+			return fmt.Errorf("full report carries no row for profile %s", row.Name)
+		}
+		evidence := measured.ComputedEvidence
+		evidence.EvaluatedAt = stamp
+		evidence.RatifiedHardNegativeHits = row.Benchmark.RatifiedHardNegativeHits
+		evidence.RatifiedAbstentionAccuracy = row.Benchmark.RatifiedAbstentionAccuracy
+		row.Benchmark = evidence
+	}
+	return AtomicWriteJSON(profilePath, profile, 0o644)
+}
+
 func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (BenchmarkReport, error) {
 	if mode != "quick" && mode != "full" {
 		return BenchmarkReport{}, errors.New("benchmark mode must be quick or full")
@@ -354,7 +399,7 @@ func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (Benchmar
 			if err = copyTree(fixture, temp); err != nil {
 				return
 			}
-			profileTarget := filepath.Join(temp, ".re-discipline", "settings", "retrieval-profile.json")
+			profileTarget := filepath.Join(temp, ".re-discipline", "knowledge", "retrieval-profile.json")
 			if err = AtomicWrite(profileTarget, profileBody, 0o600); err != nil {
 				return
 			}
@@ -555,9 +600,20 @@ func benchmarkCases(
 		return ProfileBenchmark{}, err
 	}
 	verified := digest == row.Benchmark.Digest
+	runtimeDigest, _ := CanonicalDigest(RuntimeContract(selected.Runtime))
+	computedEvidence := BenchmarkEvidence{
+		Suite: "packaged-conformance-v1", Digest: digest, Status: "passed",
+		EvalFingerprint:    evalDigest,
+		CorpusFingerprint:  generation.CorpusFingerprint,
+		ModelFingerprint:   mustDigest(selected.Models),
+		RuntimeFingerprint: runtimeDigest,
+		ChunkerVersion:     generation.ChunkerVersion,
+		ParserVersion:      generation.ParserVersion,
+	}
 	return ProfileBenchmark{
 		ProfileName: row.Name, DeclaredDigest: row.Benchmark.Digest,
 		ComputedDigest: digest, DigestVerified: verified,
+		ComputedEvidence: computedEvidence,
 		Passed: passed && verified && metrics.AuthorityViolations == 0 &&
 			metrics.CitationViolations == 0 && metrics.HardNegativeHits == 0,
 		Cases: outcomes, CasesByBudget: casesByBudget,

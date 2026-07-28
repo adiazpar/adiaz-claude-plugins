@@ -242,7 +242,7 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 func TestAdversarialMCPProjectBudgetsAreEnforcedNotMerelyAdvertised(t *testing.T) {
 	root := makeAdversarialProject(t)
 	settingsPath := filepath.Join(
-		root, ".re-discipline", "settings", "knowledge.jsonc")
+		root, ".re-discipline", "knowledge", "policy.jsonc")
 	body, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatal(err)
@@ -436,7 +436,7 @@ func TestAdversarialMCPRejectsUnsupportedManagedProjectVersion(t *testing.T) {
 	}
 	body = bytes.ReplaceAll(
 		body,
-		[]byte("<!-- re-discipline:shared-laws v0.6.0 -->"),
+		[]byte("<!-- re-discipline:shared-laws v0.7.0 -->"),
 		[]byte("<!-- re-discipline:shared-laws v0.5.0 -->"),
 	)
 	if err := os.WriteFile(profilePath, body, 0o600); err != nil {
@@ -450,7 +450,7 @@ func TestAdversarialMCPRejectsUnsupportedManagedProjectVersion(t *testing.T) {
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
 		toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
 	)
-	assertToolError(t, rpcResponseByID(t, messages, 2), "shared-laws v0.6.0")
+	assertToolError(t, rpcResponseByID(t, messages, 2), "shared-laws v0.7.0")
 	if _, err := os.Stat(filepath.Join(root, ".re-discipline", "cache", "knowledge")); !os.IsNotExist(err) {
 		t.Fatal("unsupported project version was mutated before rejection")
 	}
@@ -767,7 +767,7 @@ func TestAdversarialMalformedConfigurationHasReadOnlyStatusAndFailsClosed(t *tes
 		{
 			name: "knowledge settings",
 			relative: filepath.ToSlash(filepath.Join(
-				".re-discipline", "settings", "knowledge.jsonc")),
+				".re-discipline", "knowledge", "policy.jsonc")),
 			body: `{"schemaVersion":1,"sources":`,
 		},
 	}
@@ -963,7 +963,7 @@ func TestAdversarialReplayAcrossEveryEffectiveFallback(t *testing.T) {
 
 func TestAdversarialUnapprovedProjectProfileCannotSelfPromote(t *testing.T) {
 	root := makeAdversarialProject(t)
-	profilePath := filepath.Join(root, ".re-discipline", "settings", "retrieval-profile.json")
+	profilePath := filepath.Join(root, ".re-discipline", "knowledge", "retrieval-profile.json")
 	body, err := os.ReadFile(profilePath)
 	if err != nil {
 		t.Fatal(err)

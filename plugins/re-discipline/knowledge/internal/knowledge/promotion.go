@@ -273,7 +273,7 @@ func (service *Service) PromoteProfile(
 			"generated approval receipt failed self-validation: %w", err)
 	}
 	target := filepath.Join(
-		service.Boundary.Root, ".re-discipline", "settings", "retrieval-profile.json")
+		service.Boundary.Root, ".re-discipline", "knowledge", "retrieval-profile.json")
 	serialized, err := json.MarshalIndent(candidate, "", "  ")
 	if err != nil {
 		return ProfilePromotionResult{}, err
