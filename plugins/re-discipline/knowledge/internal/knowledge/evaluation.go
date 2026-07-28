@@ -140,11 +140,17 @@ type ProfileBenchmark struct {
 }
 
 type BenchmarkReport struct {
-	SchemaVersion int                `json:"schemaVersion"`
-	Mode          string             `json:"mode"`
-	Suite         string             `json:"suite"`
-	Profiles      []ProfileBenchmark `json:"profiles"`
-	Passed        bool               `json:"passed"`
+	SchemaVersion int    `json:"schemaVersion"`
+	Mode          string `json:"mode"`
+	Suite         string `json:"suite"`
+	// HardNegativeCoverage says how much of the suite actually exercises the
+	// hard-negative guard. A single hit fails a case, which makes a clean run
+	// read as suite-wide protection when it is only protection for the cases
+	// that declare a negative. It gates nothing; it stops the report from
+	// overstating itself.
+	HardNegativeCoverage HardNegativeCoverage `json:"hardNegativeCoverage"`
+	Profiles             []ProfileBenchmark   `json:"profiles"`
+	Passed               bool                 `json:"passed"`
 }
 
 func LoadEvalCases(path string) ([]EvalCase, error) {
@@ -333,7 +339,9 @@ func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (Benchmar
 		}
 	}
 	report := BenchmarkReport{
-		SchemaVersion: 1, Mode: mode, Suite: "packaged-conformance-v1", Passed: true,
+		SchemaVersion: 1, Mode: mode, Suite: "packaged-conformance-v1",
+		HardNegativeCoverage: MeasureHardNegativeCoverage(cases),
+		Passed:               true,
 	}
 	for _, row := range rows {
 		temp, err := os.MkdirTemp("", "re-discipline-conformance-*")
@@ -561,6 +569,135 @@ func benchmarkCases(
 		MetricsBySplit: metricsBySplit, MetricsByBudget: metricsByBudget,
 		QualityMetricsByBudget: qualityMetricsByBudget,
 	}, nil
+}
+
+// EvidencePinHealth is the cheap, read-only census of pin rot.
+//
+// Until this existed, a rotten pin was discovered only when a calibration run
+// tripped over it - which is to say, at the moment somebody needed the
+// measurement to be trustworthy. Hashing the pinned documents is cheap enough
+// to do on every status call, so the census belongs where a session already
+// looks rather than where a run already fails.
+type EvidencePinHealth struct {
+	Total int `json:"total"`
+	// Intact: the document still asserts what it asserted when the case was
+	// ratified.
+	Intact int `json:"intact"`
+	// Drifted: the claim is unchanged but the file's bytes moved. The case
+	// still measures what it was ratified to measure; the pin is advisory here
+	// and never gates.
+	Drifted int `json:"drifted"`
+	// Broken: the claim digest changed, or the document cannot be read at all.
+	// The case's ground truth may no longer hold and re-answering it is the
+	// only honest repair.
+	Broken         int               `json:"broken"`
+	NonIntactPaths []EvidencePinPath `json:"nonIntactPaths"`
+	// Unavailable records why no census could be taken - a malformed evaluation
+	// corpus, say. Absent when the project simply has no evaluation cases,
+	// which is not a fault.
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+// EvidencePinPath counts the pins one document is responsible for.
+type EvidencePinPath struct {
+	Path  string `json:"path"`
+	State string `json:"state"`
+	Pins  int    `json:"pins"`
+}
+
+// EvidencePinCensus hashes every pinned document once and classifies the pins
+// that reference it.
+func (service *Service) EvidencePinCensus() EvidencePinHealth {
+	health := EvidencePinHealth{NonIntactPaths: []EvidencePinPath{}}
+	root := filepath.Join(
+		service.Boundary.Root, ".re-discipline", "knowledge", "evals")
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		// No ratified evaluation corpus is a legitimate project state, not a
+		// degraded one. Report an empty census rather than an error.
+		return health
+	}
+	cases, err := service.loadProjectEvalCases()
+	if err != nil {
+		health.Unavailable = err.Error()
+		return health
+	}
+	states := map[string]string{}
+	counts := map[string]int{}
+	for _, eval := range cases {
+		for _, pin := range eval.EvidencePins {
+			health.Total++
+			state, resolved := states[pin.Path]
+			if !resolved {
+				state = classifyEvidencePin(service.Boundary.Root, pin)
+				states[pin.Path] = state
+			}
+			switch state {
+			case "intact":
+				health.Intact++
+				continue
+			case "drifted":
+				health.Drifted++
+			default:
+				health.Broken++
+			}
+			counts[pin.Path]++
+		}
+	}
+	paths := make([]string, 0, len(counts))
+	for path := range counts {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		health.NonIntactPaths = append(health.NonIntactPaths, EvidencePinPath{
+			Path: path, State: states[path], Pins: counts[path],
+		})
+	}
+	return health
+}
+
+// classifyEvidencePin decides one pinned document's state. A pin's claim digest
+// is the gate and its content digest is advisory, so an unreadable document and
+// a rewritten claim are the same kind of news and a reworded paragraph is not.
+func classifyEvidencePin(root string, pin EvidencePin) string {
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(pin.Path)))
+	if err != nil {
+		return "broken"
+	}
+	if ClaimDigest(string(body), pin.Path) != pin.ClaimSha256 {
+		return "broken"
+	}
+	if pin.ContentSha256 != "" &&
+		pin.ContentSha256 != "sha256:"+SHA256Bytes(body) {
+		return "drifted"
+	}
+	return "intact"
+}
+
+// HardNegativeCoverage reports how much of an evaluation set actually exercises
+// the hard-negative guard.
+//
+// The guard is absolute - one hard-negative hit fails a case - which makes it
+// read as strong protection across the whole suite. It only protects the cases
+// that declare a negative, and nothing said how few of them did. This is
+// visibility, not a gate: it changes no pass/fail decision, it stops the
+// measurement from overstating itself.
+type HardNegativeCoverage struct {
+	CasesWithNegatives int `json:"casesWithNegatives"`
+	TotalCases         int `json:"totalCases"`
+	DeclaredPaths      int `json:"declaredPaths"`
+}
+
+func MeasureHardNegativeCoverage(cases []EvalCase) HardNegativeCoverage {
+	coverage := HardNegativeCoverage{TotalCases: len(cases)}
+	for _, eval := range cases {
+		if len(eval.HardNegativePaths) == 0 {
+			continue
+		}
+		coverage.CasesWithNegatives++
+		coverage.DeclaredPaths += len(eval.HardNegativePaths)
+	}
+	return coverage
 }
 
 // EvalPinChange describes one pin whose document changed.

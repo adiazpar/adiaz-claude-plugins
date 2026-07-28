@@ -322,6 +322,8 @@ func (service *Service) Status(ctx context.Context) (map[string]any, error) {
 		"fallbackReason": selected.FallbackReason,
 		"runtime":        selected.Runtime,
 		"benchmark":      service.benchmarkStatus(selected.Effective.Benchmark, generation, runtimeIdentity),
+		"pins":           service.EvidencePinCensus(),
+		"campaigns":      service.campaignStatus(),
 		"telemetry":      service.telemetryStatus(),
 	}
 	return status, nil
@@ -370,16 +372,19 @@ func (service *Service) benchmarkStatus(
 		actionable = append(actionable, "parser-version")
 	}
 	expectedEval := ""
+	coverage := HardNegativeCoverage{}
 	switch evidence.Suite {
 	case "packaged-conformance-v1":
 		if cases, err := LoadEvalCases(filepath.Join(
 			service.AssetRoot, "evals", "conformance", "cases.json",
 		)); err == nil {
 			expectedEval, _ = CanonicalDigest(cases)
+			coverage = MeasureHardNegativeCoverage(cases)
 		}
 	case "project-calibration-v1":
 		if cases, err := service.loadProjectEvalCases(); err == nil {
 			expectedEval, _ = CanonicalDigest(cases)
+			coverage = MeasureHardNegativeCoverage(cases)
 		}
 		if evidence.CorpusFingerprint == "" ||
 			evidence.CorpusFingerprint != generation.CorpusFingerprint {
@@ -418,12 +423,16 @@ func (service *Service) benchmarkStatus(
 		"staleInformational":        len(informational) > 0,
 		"actionableStaleReasons":    actionable,
 		"informationalStaleReasons": informational,
-		"evalFingerprint":           evidence.EvalFingerprint,
-		"corpusFingerprint":         evidence.CorpusFingerprint,
-		"modelFingerprint":          evidence.ModelFingerprint,
-		"runtimeFingerprint":        evidence.RuntimeFingerprint,
-		"chunkerVersion":            evidence.ChunkerVersion,
-		"parserVersion":             evidence.ParserVersion,
+		// Coverage is measured against today's evaluation set, not against the
+		// set the receipt was taken on. The question it answers is "how much of
+		// the guard is real right now", which a stale receipt cannot answer.
+		"hardNegativeCoverage": coverage,
+		"evalFingerprint":      evidence.EvalFingerprint,
+		"corpusFingerprint":    evidence.CorpusFingerprint,
+		"modelFingerprint":     evidence.ModelFingerprint,
+		"runtimeFingerprint":   evidence.RuntimeFingerprint,
+		"chunkerVersion":       evidence.ChunkerVersion,
+		"parserVersion":        evidence.ParserVersion,
 	}
 }
 

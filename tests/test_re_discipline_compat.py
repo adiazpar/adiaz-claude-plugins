@@ -218,6 +218,35 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertIn(".claude/CLAUDE.md", body)
         self.assertIn("active host", body.lower())
 
+    def test_onboard_reports_the_measurement_health_status_now_exposes(
+        self,
+    ) -> None:
+        body = read(PLUGIN / "skills" / "onboard" / "SKILL.md")
+        server = read(PLUGIN / "knowledge" / "internal" / "knowledge" / "service.go")
+
+        # Every block the server computes must have a reader, or it is cost
+        # nobody spends and news nobody hears.
+        for key in ('"pins"', '"campaigns"'):
+            with self.subTest(key=key):
+                self.assertIn(key, server)
+
+        self.assertIn("pins.drifted", body)
+        self.assertIn("pins.broken", body)
+        self.assertIn("Evidence pins:", body)
+        self.assertIn("masterfile stale", body)
+
+    def test_benchmark_reports_hard_negative_coverage_without_gating_on_it(
+        self,
+    ) -> None:
+        body = read(PLUGIN / "skills" / "benchmark-knowledge" / "SKILL.md")
+
+        self.assertIn("hardNegativeCoverage", body)
+        self.assertIn("hard-negative coverage", body.lower())
+        collapsed = " ".join(body.split())
+        self.assertIn("State hard-negative coverage even when every gate passed", collapsed)
+        self.assertIn("It changes no pass/fail decision", collapsed)
+        self.assertIn("do not treat low coverage as a failure", collapsed)
+
     def test_shared_runtime_adapter_reference_exists(self) -> None:
         body = read(PLUGIN / "references" / "runtime-adapters.md")
 
