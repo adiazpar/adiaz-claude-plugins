@@ -22,6 +22,39 @@ var profileIdentityRE = regexp.MustCompile(
 var hexDigestRE = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var modelRevisionRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 
+// IndexingSettingsDigest digests exactly the settings that decide which files
+// enter the index: the source-class toggles and any additional declared
+// classes. It is deliberately narrower than the settings file.
+//
+// A budget or telemetry change alters what a response carries, not what the
+// index contains. Mixing those in would rebuild the whole corpus every time a
+// maintainer edited a token ceiling, which teaches people to distrust the
+// rebuild rather than to trust the setting.
+func IndexingSettingsDigest(settings KnowledgeSettings) string {
+	normalized := settings.Sources
+	additional := append([]AdditionalSource(nil), normalized.Additional...)
+	sort.Slice(additional, func(i, j int) bool {
+		if additional[i].Path != additional[j].Path {
+			return additional[i].Path < additional[j].Path
+		}
+		if additional[i].Tier != additional[j].Tier {
+			return additional[i].Tier < additional[j].Tier
+		}
+		return additional[i].Pattern < additional[j].Pattern
+	})
+	normalized.Additional = additional
+	digest, err := CanonicalDigest(struct {
+		Sources SourceSettings `json:"sources"`
+	}{normalized})
+	if err != nil {
+		// A digest that cannot be computed must never compare equal to a
+		// recorded one, or the failure becomes indistinguishable from
+		// freshness.
+		return "unavailable:" + err.Error()
+	}
+	return digest
+}
+
 func DefaultBootstrapConfig() BootstrapConfig {
 	return BootstrapConfig{
 		SchemaVersion:     1,

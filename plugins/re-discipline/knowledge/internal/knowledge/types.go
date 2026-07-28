@@ -347,24 +347,37 @@ type Chunk struct {
 }
 
 type Generation struct {
-	ID                string          `json:"id"`
-	Database          string          `json:"database"`
-	CorpusFingerprint string          `json:"corpusFingerprint"`
-	ModelFingerprint  string          `json:"modelFingerprint"`
-	Project           string          `json:"project"`
-	Worktree          string          `json:"worktree"`
-	GitRevision       string          `json:"gitRevision"`
-	DirtyFingerprint  string          `json:"dirtyFingerprint"`
-	ParserVersion     string          `json:"parserVersion"`
-	ChunkerVersion    string          `json:"chunkerVersion"`
-	CreatedAt         string          `json:"createdAt"`
-	Runtime           RuntimeIdentity `json:"runtime"`
-	DocumentCount     int             `json:"documentCount"`
-	ChunkCount        int             `json:"chunkCount"`
-	SourceStates      []SourceState   `json:"sourceStates"`
-	DirectoryStates   []SourceState   `json:"directoryStates"`
-	ServingStale      bool            `json:"servingStale,omitempty"`
-	WriterContention  bool            `json:"writerContention,omitempty"`
+	ID                string `json:"id"`
+	Database          string `json:"database"`
+	CorpusFingerprint string `json:"corpusFingerprint"`
+	// SettingsFingerprint digests the settings that decide WHICH files are
+	// indexed. The corpus fingerprint answers "did the indexed documents
+	// change", which is a different question: the fast freshness path never
+	// computes it, and answers "is anything stale" from recorded file mtimes
+	// alone. Toggling a source class moves no file, so a project that enabled
+	// drafter reports kept serving an index built without them until somebody
+	// happened to edit a document.
+	//
+	// Only the fields that change what gets indexed belong here. Budgets and
+	// telemetry change what a served response carries, not what the index
+	// contains, and folding them in would rebuild the whole corpus to answer a
+	// question the index has no part in.
+	SettingsFingerprint string          `json:"settingsFingerprint,omitempty"`
+	ModelFingerprint    string          `json:"modelFingerprint"`
+	Project             string          `json:"project"`
+	Worktree            string          `json:"worktree"`
+	GitRevision         string          `json:"gitRevision"`
+	DirtyFingerprint    string          `json:"dirtyFingerprint"`
+	ParserVersion       string          `json:"parserVersion"`
+	ChunkerVersion      string          `json:"chunkerVersion"`
+	CreatedAt           string          `json:"createdAt"`
+	Runtime             RuntimeIdentity `json:"runtime"`
+	DocumentCount       int             `json:"documentCount"`
+	ChunkCount          int             `json:"chunkCount"`
+	SourceStates        []SourceState   `json:"sourceStates"`
+	DirectoryStates     []SourceState   `json:"directoryStates"`
+	ServingStale        bool            `json:"servingStale,omitempty"`
+	WriterContention    bool            `json:"writerContention,omitempty"`
 }
 
 type GenerationSummary struct {
