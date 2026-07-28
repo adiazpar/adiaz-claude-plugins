@@ -163,7 +163,7 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 	if _, err := RecoverProject(root, adversarialPluginRoot(t)); err != nil {
 		t.Fatalf("initial recovery: %v", err)
 	}
-	trackedConfig := []byte("{\n  \"schemaVersion\": 1,\n  \"settingsDirectory\": \"settings\",\n  \"memory\": {\"mode\": \"shared-only\", \"writePolicy\": \"proposal-only\"},\n  \"knowledge\": {\"enabled\": true, \"profile\": \"plugin:balanced-v1\", \"settingsFile\": \"settings/knowledge.jsonc\", \"projectProfile\": \"settings/retrieval-profile.json\"}\n}\n")
+	trackedConfig := []byte("{\n  \"schemaVersion\": 2,\n  \"knowledgeDirectory\": \"knowledge\",\n  \"memory\": {\"mode\": \"shared-only\", \"writePolicy\": \"proposal-only\"},\n  \"knowledge\": {\"enabled\": true, \"profile\": \"plugin:balanced-v1\", \"settingsFile\": \"knowledge/policy.jsonc\", \"projectProfile\": \"knowledge/retrieval-profile.json\"}\n}\n")
 	configPath := filepath.Join(root, ".re-discipline", "config.json")
 	if err := os.WriteFile(configPath, trackedConfig, 0o600); err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 	if err := os.WriteFile(claudePath, trackedClaude, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	knowledgePath := filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc")
+	knowledgePath := filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc")
 	trackedKnowledge, err := os.ReadFile(knowledgePath)
 	if err != nil {
 		t.Fatal(err)
@@ -181,13 +181,13 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 	tracked := []string{
 		".re-discipline/project-profile.md",
 		".re-discipline/config.json",
-		".re-discipline/settings/knowledge.jsonc",
+		".re-discipline/knowledge/policy.jsonc",
 		".claude/settings.json",
 	}
 	initializeRecoveryRepository(t, root, tracked...)
 
 	codexPath := filepath.Join(root, ".codex", "config.toml")
-	profilePath := filepath.Join(root, ".re-discipline", "settings", "retrieval-profile.json")
+	profilePath := filepath.Join(root, ".re-discipline", "knowledge", "retrieval-profile.json")
 	for _, path := range []string{configPath, knowledgePath, claudePath, codexPath, profilePath} {
 		if err := os.Remove(path); err != nil {
 			t.Fatal(err)
@@ -195,12 +195,12 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 	}
 	runRecoveryGit(t, root, "add", "-u", "--",
 		".re-discipline/config.json",
-		".re-discipline/settings/knowledge.jsonc",
+		".re-discipline/knowledge/policy.jsonc",
 		".claude/settings.json",
 	)
 	stagedBefore := runRecoveryGit(t, root, "diff", "--cached", "--name-status", "--",
 		".re-discipline/config.json",
-		".re-discipline/settings/knowledge.jsonc",
+		".re-discipline/knowledge/policy.jsonc",
 		".claude/settings.json",
 	)
 
@@ -253,7 +253,7 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 	}
 	stagedAfter := runRecoveryGit(t, root, "diff", "--cached", "--name-status", "--",
 		".re-discipline/config.json",
-		".re-discipline/settings/knowledge.jsonc",
+		".re-discipline/knowledge/policy.jsonc",
 		".claude/settings.json",
 	)
 	if stagedAfter != stagedBefore {
@@ -327,7 +327,7 @@ func TestAdversarialRecoveryPreservesMalformedOrAmbiguousFilesAndFailsClosed(t *
 			if err := os.WriteFile(target, testCase.body, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			unrelatedMissing := filepath.Join(root, ".re-discipline", "settings", "README.md")
+			unrelatedMissing := filepath.Join(root, ".re-discipline", "knowledge", "README.md")
 			if err := os.Remove(unrelatedMissing); err != nil {
 				t.Fatal(err)
 			}
@@ -369,8 +369,8 @@ func TestAdversarialRecoveryReconcilesTrackedSharedOnlyHostPolicy(t *testing.T) 
 	initializeRecoveryRepository(t, root,
 		".re-discipline/project-profile.md",
 		".re-discipline/config.json",
-		".re-discipline/settings/knowledge.jsonc",
-		".re-discipline/settings/retrieval-profile.json",
+		".re-discipline/knowledge/policy.jsonc",
+		".re-discipline/knowledge/retrieval-profile.json",
 		".claude/settings.json",
 		".codex/config.toml",
 	)
@@ -472,7 +472,7 @@ func TestAdversarialRecoveryRejectsUnsupportedMarkerWithoutMutation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer := bytes.ReplaceAll(original, []byte("v0.6.0"), []byte("v0.7.0"))
+	newer := bytes.ReplaceAll(original, []byte("v0.7.0"), []byte("v0.8.0"))
 	if err := os.WriteFile(markerPath, newer, 0o600); err != nil {
 		t.Fatal(err)
 	}

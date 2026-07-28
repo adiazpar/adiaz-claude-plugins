@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "settingsDirectory": "settings",
+  "schemaVersion": 2,
+  "knowledgeDirectory": "knowledge",
   "memory": {
     "mode": "shared-only",
     "writePolicy": "proposal-only"
@@ -8,7 +8,7 @@
   "knowledge": {
     "enabled": true,
     "profile": "plugin:balanced-v1",
-    "settingsFile": "settings/knowledge.jsonc",
-    "projectProfile": "settings/retrieval-profile.json"
+    "settingsFile": "knowledge/policy.jsonc",
+    "projectProfile": "knowledge/retrieval-profile.json"
   }
 }

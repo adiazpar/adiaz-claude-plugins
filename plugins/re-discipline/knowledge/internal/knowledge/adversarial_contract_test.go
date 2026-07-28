@@ -82,12 +82,12 @@ framing: "an isolated knowledge-runtime fixture"
 
 The canonical fixture profile carries orientation-marker-alpha.
 
-<!-- re-discipline:shared-laws v0.6.0 -->
+<!-- re-discipline:shared-laws v0.7.0 -->
 The test fixture uses the supported managed-project contract.
 <!-- re-discipline:shared-laws:end -->
 `)
 	writeTestJSON(t, filepath.Join(root, ".re-discipline", "config.json"), DefaultBootstrapConfig())
-	writeTestFile(t, filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc"), `{
+	writeTestFile(t, filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc"), `{
   // Comments must be accepted without weakening strict field validation.
   "schemaVersion": 1,
   "sources": {
@@ -115,7 +115,7 @@ The test fixture uses the supported managed-project contract.
 	copyTestFile(
 		t,
 		filepath.Join(assetRoot, "profiles", "balanced-v1.json"),
-		filepath.Join(root, ".re-discipline", "settings", "retrieval-profile.json"),
+		filepath.Join(root, ".re-discipline", "knowledge", "retrieval-profile.json"),
 	)
 
 	writeTestFile(t, filepath.Join(root, "docs", "INDEX.md"), `# Knowledge index
@@ -266,14 +266,14 @@ func TestAdversarialStrictConfigurationValidation(t *testing.T) {
 	t.Run("unknown bootstrap field is rejected", func(t *testing.T) {
 		root := makeAdversarialProject(t)
 		writeTestFile(t, filepath.Join(root, ".re-discipline", "config.json"), `{
-		  "schemaVersion": 1,
-		  "settingsDirectory": "settings",
+		  "schemaVersion": 2,
+		  "knowledgeDirectory": "knowledge",
 		  "memory": {"mode": "shared-only", "writePolicy": "proposal-only"},
 		  "knowledge": {
 		    "enabled": true,
 		    "profile": "plugin:balanced-v1",
-		    "settingsFile": "settings/knowledge.jsonc",
-		    "projectProfile": "settings/retrieval-profile.json"
+		    "settingsFile": "knowledge/policy.jsonc",
+		    "projectProfile": "knowledge/retrieval-profile.json"
 		  },
 		  "unexpected": true
 		}`)
@@ -285,7 +285,7 @@ func TestAdversarialStrictConfigurationValidation(t *testing.T) {
 
 	t.Run("unknown settings field is rejected", func(t *testing.T) {
 		root := makeAdversarialProject(t)
-		path := filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc")
+		path := filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc")
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -300,7 +300,7 @@ func TestAdversarialStrictConfigurationValidation(t *testing.T) {
 
 	t.Run("unsafe budget is rejected without rewriting it", func(t *testing.T) {
 		root := makeAdversarialProject(t)
-		path := filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc")
+		path := filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc")
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -2280,7 +2280,7 @@ func TestAdversarialCalibrationUsesDevelopmentThenFrozenHoldoutWithoutActivation
 			Answerable: boolPointer(true),
 		},
 	})
-	profilePath := filepath.Join(root, ".re-discipline", "settings", "retrieval-profile.json")
+	profilePath := filepath.Join(root, ".re-discipline", "knowledge", "retrieval-profile.json")
 	before, err := os.ReadFile(profilePath)
 	if err != nil {
 		t.Fatal(err)
@@ -2303,7 +2303,7 @@ func TestAdversarialCalibrationUsesDevelopmentThenFrozenHoldoutWithoutActivation
 	}
 	if strings.Contains(
 		filepath.Clean(report.CandidatePath),
-		filepath.Clean(filepath.Join(root, ".re-discipline", "settings")),
+		filepath.Clean(filepath.Join(root, ".re-discipline", "knowledge")),
 	) {
 		t.Fatalf("candidate profile was written into active tracked settings: %s", report.CandidatePath)
 	}
@@ -2404,7 +2404,7 @@ func TestAdversarialProfilePromotionAuthenticatesCandidateAndRecomputesEvidence(
 	if err != nil {
 		t.Fatal(err)
 	}
-	activePath := filepath.Join(root, ".re-discipline", "settings", "retrieval-profile.json")
+	activePath := filepath.Join(root, ".re-discipline", "knowledge", "retrieval-profile.json")
 	activeOriginal, err := os.ReadFile(activePath)
 	if err != nil {
 		t.Fatal(err)
@@ -3346,7 +3346,7 @@ func TestAdversarialTelemetryIsBoundedAggregateOnlyAndOffMeansNoWrites(t *testin
 
 	t.Run("off neither creates nor updates an aggregate", func(t *testing.T) {
 		root := makeAdversarialProject(t)
-		writeTestFile(t, filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc"), `{
+		writeTestFile(t, filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc"), `{
   "schemaVersion": 1,
   "sources": {
     "truth": true,
@@ -3683,10 +3683,10 @@ func TestAdversarialProjectConfigurationCannotEscapeThroughLinks(t *testing.T) {
 	}{
 		{name: "config file link", relative: ".re-discipline/config.json"},
 		{name: "config parent link", relative: ".re-discipline", parentDir: true},
-		{name: "knowledge settings file link", relative: ".re-discipline/settings/knowledge.jsonc"},
-		{name: "knowledge settings parent link", relative: ".re-discipline/settings", parentDir: true},
-		{name: "retrieval profile file link", relative: ".re-discipline/settings/retrieval-profile.json"},
-		{name: "retrieval profile parent link", relative: ".re-discipline/settings", parentDir: true},
+		{name: "knowledge settings file link", relative: ".re-discipline/knowledge/policy.jsonc"},
+		{name: "knowledge settings parent link", relative: ".re-discipline/knowledge", parentDir: true},
+		{name: "retrieval profile file link", relative: ".re-discipline/knowledge/retrieval-profile.json"},
+		{name: "retrieval profile parent link", relative: ".re-discipline/knowledge", parentDir: true},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3753,8 +3753,8 @@ func TestAdversarialProjectBenchmarkUsesRatifiedProjectEvalsAndCacheOnly(t *test
 	canonicalPaths := []string{
 		".re-discipline/project-profile.md",
 		".re-discipline/config.json",
-		".re-discipline/settings/knowledge.jsonc",
-		".re-discipline/settings/retrieval-profile.json",
+		".re-discipline/knowledge/policy.jsonc",
+		".re-discipline/knowledge/retrieval-profile.json",
 		".re-discipline/knowledge/evals/project-benchmark.json",
 		"docs/truth/engine.md",
 		"docs/truth/portability.md",

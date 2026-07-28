@@ -432,8 +432,8 @@ func (server *MCPServer) service(projectRoot string) (*Service, error) {
 func (server *MCPServer) serviceConfigurationStamp(root string) string {
 	projectPaths := []string{
 		".re-discipline/config.json",
-		".re-discipline/settings/knowledge.jsonc",
-		".re-discipline/settings/retrieval-profile.json",
+		".re-discipline/knowledge/policy.jsonc",
+		".re-discipline/knowledge/retrieval-profile.json",
 	}
 	assetPaths := []string{
 		"profiles/balanced-v1.json",
