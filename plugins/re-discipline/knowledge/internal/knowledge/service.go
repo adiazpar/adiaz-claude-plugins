@@ -685,6 +685,7 @@ func (service *Service) contextPackRequired(
 			len(uniqueRequiredPaths), selected.Effective.Packing.MaxPassages,
 		)
 	}
+	cleanRequiredPaths := make([]string, 0, len(uniqueRequiredPaths))
 	for _, requiredPath := range uniqueRequiredPaths {
 		normalized := strings.ReplaceAll(strings.TrimSpace(requiredPath), "\\", "/")
 		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(normalized)))
@@ -693,22 +694,51 @@ func (service *Service) contextPackRequired(
 			IsForbiddenSource(clean) {
 			return ContextPack{}, fmt.Errorf("required path %q is unsafe", requiredPath)
 		}
-		value, readErr := service.readPinned(
-			ctx, generation, selected, ReadOptions{Path: clean})
-		if readErr != nil {
-			return ContextPack{}, fmt.Errorf("read required path %q: %w", clean, readErr)
+		cleanRequiredPaths = append(cleanRequiredPaths, clean)
+	}
+	requiredRetriever := Retriever{
+		Boundary: service.Boundary, Generation: generation, Profile: selected,
+	}
+	requiredChunks, requiredErr := requiredRetriever.BestDocumentChunks(
+		ctx, task, "auto", tiers, cleanRequiredPaths)
+	if requiredErr != nil {
+		return ContextPack{}, requiredErr
+	}
+	for _, clean := range cleanRequiredPaths {
+		row, present := requiredChunks[clean]
+		if !present {
+			return ContextPack{}, fmt.Errorf(
+				"required path %q is not part of the active managed knowledge "+
+					"corpus within the allowed epistemic tiers", clean)
 		}
-		passage, passageOK := value["passage"].(string)
-		citation, citationOK := value["citation"].(Citation)
-		if !passageOK || !citationOK || !contains(tiers, citation.Tier) {
+		if !contains(tiers, row.Chunk.Tier) {
 			return ContextPack{}, fmt.Errorf(
 				"required path %q is outside the allowed epistemic tiers", clean)
 		}
+		// A required passage is held to exactly the same source-integrity bar as
+		// a retrieved one: the cited lines are re-read from the working tree and
+		// must still hash to what the index recorded. A required path is never
+		// silently dropped for staleness the way a candidate is, so the failure
+		// is raised and the caller reconciles.
+		if !requiredRetriever.verifyChunk(row.Chunk, row.DocumentHash) {
+			return ContextPack{}, fmt.Errorf(
+				"read required path %q: %w", clean, errSourceChangedAfterIndex)
+		}
 		requiredSeen[clean] = true
 		requiredResults = append(requiredResults, projectSearchResult(SearchResult{
-			ChunkID: StableID("required", generation.ID, clean, citation.PassageHash),
+			ChunkID: row.Chunk.ID,
 			Score:   1<<62 - 1, LaneRanks: map[string]int{"required": 1},
-			Passage: passage, Citation: citation,
+			Passage:         row.Chunk.Content,
+			DocumentContext: row.Chunk.Context,
+			Citation: Citation{
+				Path: row.Chunk.Path, Heading: row.Chunk.Heading,
+				StartLine: row.Chunk.StartLine, EndLine: row.Chunk.EndLine,
+				ContentHash: row.Chunk.ContentHash, SourceHash: row.DocumentHash,
+				PassageHash: row.Chunk.ContentHash, Tier: row.Chunk.Tier,
+				URI:         "re-discipline://" + generation.ID + "/chunks/" + row.Chunk.ID,
+				ContextHash: row.Chunk.ContextHash,
+				Durability:  CitationDurability(row.Chunk.Tier),
+			},
 		}, verbosity, true))
 	}
 	if len(requiredResults) > 0 {
