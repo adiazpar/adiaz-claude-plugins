@@ -92,126 +92,10 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	}
 	defer db.Close()
 
-	candidates := make(map[string]*candidate)
-	get := func(row candidate) *candidate {
-		if existing, ok := candidates[row.Chunk.ID]; ok {
-			return existing
-		}
-		row.LaneRanks = map[string]int{}
-		candidates[row.Chunk.ID] = &row
-		return &row
-	}
-	active := make(map[string]bool)
-	for _, lane := range retriever.Profile.ActiveLanes {
-		active[lane] = true
-	}
-	if active["exact"] {
-		exact, err := rankExact(ctx, db, options.Query, tiers, 400)
-		if err != nil {
-			return SearchResponse{}, err
-		}
-		for rank, row := range exact {
-			get(row).LaneRanks["exact"] = rank + 1
-		}
-	}
-	if active["fts"] {
-		fts, err := rankFTS(ctx, db, options.Query, tiers, 200)
-		if err != nil {
-			return SearchResponse{}, err
-		}
-		for rank, row := range fts {
-			get(row).LaneRanks["fts"] = rank + 1
-		}
-	}
-	if active["dense"] {
-		if retriever.Profile.Effective.Requires.Embedding == nil {
-			return SearchResponse{}, errors.New("effective profile enables dense lane without a pinned embedding model")
-		}
-		var embedding ModelIdentity
-		for _, model := range retriever.Profile.Models {
-			if model.ID == *retriever.Profile.Effective.Requires.Embedding {
-				embedding = model
-				break
-			}
-		}
-		if embedding.ID == "" {
-			return SearchResponse{}, errors.New("effective embedding model identity is unavailable")
-		}
-		dense, err := rankDense(
-			ctx, db, options.Query, tiers, embedding,
-		)
-		if err != nil {
-			return SearchResponse{}, err
-		}
-		for rank, row := range dense {
-			get(row).LaneRanks["dense"] = rank + 1
-		}
-	}
-	if active["graph"] {
-		// Relationship expansion starts from lexical evidence. Dense-only
-		// neighbors are useful results, but treating every semantic neighbor as
-		// a graph seed lets well-linked unrelated documents collectively swamp
-		// a strong no-overlap semantic match.
-		graphCandidates := make(map[string]*candidate)
-		for id, row := range candidates {
-			if row.LaneRanks["exact"] > 0 || row.LaneRanks["fts"] > 0 {
-				graphCandidates[id] = row
-			}
-		}
-		seeds := sortedCandidates(
-			graphCandidates,
-			retriever.Profile.Effective.Weights,
-			retriever.Profile.Effective.RRFK,
-		)
-		graph, err := rankGraph(ctx, db, seeds, tiers, 100)
-		if err != nil {
-			return SearchResponse{}, err
-		}
-		for rank, row := range graph {
-			get(row).LaneRanks["graph"] = rank + 1
-		}
-	}
-	ranked := sortedCandidates(candidates, retriever.Profile.Effective.Weights, retriever.Profile.Effective.RRFK)
-	if active["rerank"] && shouldRerank(options.QueryClass, len(ranked)) {
-		depth := retriever.Profile.Effective.RerankDepth
-		if depth > len(ranked) {
-			depth = len(ranked)
-		}
-		for index := 0; index < depth; index++ {
-			ranked[index].Rerank = linearRerank(options.Query, ranked[index].Chunk)
-		}
-		sort.SliceStable(ranked[:depth], func(i, j int) bool {
-			left := ranked[i].Fusion + ranked[i].Rerank*1000
-			right := ranked[j].Fusion + ranked[j].Rerank*1000
-			if left != right {
-				return left > right
-			}
-			return candidateLess(ranked[i], ranked[j])
-		})
-	}
-
-	// Promote the highest-ranked chunk of each distinct document ahead of
-	// additional chunks of documents already represented, up to
-	// minDistinctDocuments. A document whose chunks hold the top ranks would
-	// otherwise fill the whole response even when the budget allows several,
-	// and maxPerDocument cannot prevent it: that cap only binds once more than
-	// one result fits at all.
-	//
-	// This is a stable reordering rather than a second packing pass, so the
-	// omission counters below stay exact and the result stays deterministic.
-	if len(ranked) > 1 {
-		seenPath := map[string]bool{}
-		lead := make([]*candidate, 0, len(ranked))
-		rest := make([]*candidate, 0, len(ranked))
-		for _, row := range ranked {
-			if len(seenPath) < minDistinctDocuments && !seenPath[row.Chunk.Path] {
-				seenPath[row.Chunk.Path] = true
-				lead = append(lead, row)
-				continue
-			}
-			rest = append(rest, row)
-		}
-		ranked = append(lead, rest...)
+	ranked, err := retriever.rankCandidates(
+		ctx, db, options.Query, options.QueryClass, tiers, nil)
+	if err != nil {
+		return SearchResponse{}, err
 	}
 
 	replayInput := struct {
@@ -337,6 +221,271 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	return finalizeSearchResponse(
 		response, options.TokenBudget, retriever.Profile.Effective.Packing.MaxBytes,
 	)
+}
+
+// rankCandidates runs every active lane, fuses them, applies the reranker and
+// the distinct-document lead, and returns the candidates in canonical order.
+//
+// paths, when non-empty, bounds every lane to those documents. Ordinary
+// retrieval passes none; required-evidence selection passes the required
+// document set so that a document the corpus-wide ranking would never surface
+// is still ranked against the same query by the same lanes, with the same
+// weights and the same tie-breaks.
+func (retriever Retriever) rankCandidates(
+	ctx context.Context,
+	db *sql.DB,
+	query string,
+	queryClass string,
+	tiers []string,
+	paths []string,
+) ([]*candidate, error) {
+	candidates := make(map[string]*candidate)
+	get := func(row candidate) *candidate {
+		if existing, ok := candidates[row.Chunk.ID]; ok {
+			return existing
+		}
+		row.LaneRanks = map[string]int{}
+		candidates[row.Chunk.ID] = &row
+		return &row
+	}
+	active := make(map[string]bool)
+	for _, lane := range retriever.Profile.ActiveLanes {
+		active[lane] = true
+	}
+	if active["exact"] {
+		exact, err := rankExact(ctx, db, query, tiers, paths, 400)
+		if err != nil {
+			return nil, err
+		}
+		for rank, row := range exact {
+			get(row).LaneRanks["exact"] = rank + 1
+		}
+	}
+	if active["fts"] {
+		fts, err := rankFTS(ctx, db, query, tiers, paths, 200)
+		if err != nil {
+			return nil, err
+		}
+		for rank, row := range fts {
+			get(row).LaneRanks["fts"] = rank + 1
+		}
+	}
+	if active["dense"] {
+		if retriever.Profile.Effective.Requires.Embedding == nil {
+			return nil, errors.New("effective profile enables dense lane without a pinned embedding model")
+		}
+		var embedding ModelIdentity
+		for _, model := range retriever.Profile.Models {
+			if model.ID == *retriever.Profile.Effective.Requires.Embedding {
+				embedding = model
+				break
+			}
+		}
+		if embedding.ID == "" {
+			return nil, errors.New("effective embedding model identity is unavailable")
+		}
+		dense, err := rankDense(ctx, db, query, tiers, paths, embedding)
+		if err != nil {
+			return nil, err
+		}
+		for rank, row := range dense {
+			get(row).LaneRanks["dense"] = rank + 1
+		}
+	}
+	if active["graph"] {
+		// Relationship expansion starts from lexical evidence. Dense-only
+		// neighbors are useful results, but treating every semantic neighbor as
+		// a graph seed lets well-linked unrelated documents collectively swamp
+		// a strong no-overlap semantic match.
+		graphCandidates := make(map[string]*candidate)
+		for id, row := range candidates {
+			if row.LaneRanks["exact"] > 0 || row.LaneRanks["fts"] > 0 {
+				graphCandidates[id] = row
+			}
+		}
+		seeds := sortedCandidates(
+			graphCandidates,
+			retriever.Profile.Effective.Weights,
+			retriever.Profile.Effective.RRFK,
+		)
+		graph, err := rankGraph(ctx, db, seeds, tiers, paths, 100)
+		if err != nil {
+			return nil, err
+		}
+		for rank, row := range graph {
+			get(row).LaneRanks["graph"] = rank + 1
+		}
+	}
+	ranked := sortedCandidates(
+		candidates, retriever.Profile.Effective.Weights, retriever.Profile.Effective.RRFK)
+	if active["rerank"] && shouldRerank(queryClass, len(ranked)) {
+		depth := retriever.Profile.Effective.RerankDepth
+		if depth > len(ranked) {
+			depth = len(ranked)
+		}
+		for index := 0; index < depth; index++ {
+			ranked[index].Rerank = linearRerank(query, ranked[index].Chunk)
+		}
+		sort.SliceStable(ranked[:depth], func(i, j int) bool {
+			left := ranked[i].Fusion + ranked[i].Rerank*1000
+			right := ranked[j].Fusion + ranked[j].Rerank*1000
+			if left != right {
+				return left > right
+			}
+			return candidateLess(ranked[i], ranked[j])
+		})
+	}
+
+	// Promote the highest-ranked chunk of each distinct document ahead of
+	// additional chunks of documents already represented, up to
+	// minDistinctDocuments. A document whose chunks hold the top ranks would
+	// otherwise fill the whole response even when the budget allows several,
+	// and maxPerDocument cannot prevent it: that cap only binds once more than
+	// one result fits at all.
+	//
+	// This is a stable reordering rather than a second packing pass, so the
+	// omission counters below stay exact and the result stays deterministic.
+	if len(ranked) > 1 {
+		seenPath := map[string]bool{}
+		lead := make([]*candidate, 0, len(ranked))
+		rest := make([]*candidate, 0, len(ranked))
+		for _, row := range ranked {
+			if len(seenPath) < minDistinctDocuments && !seenPath[row.Chunk.Path] {
+				seenPath[row.Chunk.Path] = true
+				lead = append(lead, row)
+				continue
+			}
+			rest = append(rest, row)
+		}
+		ranked = append(lead, rest...)
+	}
+	return ranked, nil
+}
+
+// BestDocumentChunks returns, for each requested document, the single chunk
+// that best answers the query.
+//
+// A required source is evidence a caller has named, not a candidate: it is
+// served whether or not corpus-wide ranking would have surfaced it. Serving it
+// as the whole file made a required document larger than the pack budget
+// impossible to include at any citation verbosity, so a manager asking for a
+// small pack pinned to a truth document received nothing at all. Selecting a
+// chunk keeps the same guarantee at a size the budget can hold.
+//
+// Selection is deterministic: the document's chunks are ranked by the same
+// lanes, weights and tie-breaks as ordinary retrieval, restricted to the named
+// documents. A document the query does not touch falls back to its opening
+// chunk, which for a truth document is the header carrying the claim, the
+// confidence grade and the supersession status.
+//
+// Documents absent from the corpus, or outside the eligible tiers, are simply
+// absent from the result; the caller decides what that means.
+func (retriever Retriever) BestDocumentChunks(
+	ctx context.Context,
+	query string,
+	queryClass string,
+	tiers []string,
+	paths []string,
+) (map[string]candidate, error) {
+	selected := map[string]candidate{}
+	if len(paths) == 0 {
+		return selected, nil
+	}
+	query = strings.TrimSpace(query)
+	if query == "" || len([]byte(query)) > 1000 {
+		return nil, errors.New("query must contain 1 to 1000 UTF-8 bytes")
+	}
+	if queryClass == "" || queryClass == "auto" {
+		queryClass = classifyQuery(query)
+	}
+	tiers, err := ValidateTierList(tiers)
+	if err != nil {
+		return nil, err
+	}
+	paths = SortedUnique(paths)
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(retriever.Generation.Database))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	ranked, err := retriever.rankCandidates(ctx, db, query, queryClass, tiers, paths)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range ranked {
+		if _, taken := selected[row.Chunk.Path]; taken {
+			continue
+		}
+		selected[row.Chunk.Path] = *row
+	}
+	for _, path := range paths {
+		if _, taken := selected[path]; taken {
+			continue
+		}
+		row, err := openingChunk(ctx, db, path, tiers)
+		if err != nil {
+			return nil, err
+		}
+		if row != nil {
+			selected[path] = *row
+		}
+	}
+	for path, row := range selected {
+		chunk := row
+		_ = db.QueryRowContext(ctx,
+			`SELECT context,context_hash FROM chunks WHERE id=?`,
+			chunk.Chunk.ID).Scan(&chunk.Chunk.Context, &chunk.Chunk.ContextHash)
+		selected[path] = chunk
+	}
+	return selected, nil
+}
+
+// openingChunk loads a document's first chunk, or nil when the document is not
+// indexed within the eligible tiers.
+func openingChunk(
+	ctx context.Context,
+	db *sql.DB,
+	path string,
+	tiers []string,
+) (*candidate, error) {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	args := []any{path}
+	for _, tier := range tiers {
+		args = append(args, tier)
+	}
+	var row candidate
+	err := db.QueryRowContext(ctx, `SELECT c.id,c.document_id,c.path,c.tier,c.heading,
+		c.start_line,c.end_line,c.content,c.content_hash,COALESCE(c.parent_id,''),
+		COALESCE(c.previous_id,''),COALESCE(c.next_id,''),d.content_hash
+		FROM chunks c JOIN documents d ON d.id=c.document_id
+		WHERE c.path=? AND c.tier IN (`+placeholders+`)
+		ORDER BY c.start_line ASC,c.id ASC LIMIT 1`, args...).Scan(
+		&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
+		&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+		&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
+		&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	row.LaneRanks = map[string]int{}
+	return &row, nil
+}
+
+// documentFilter renders an optional document restriction for a chunks alias.
+func documentFilter(alias string, paths []string) (string, []any) {
+	if len(paths) == 0 {
+		return "", nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(paths)), ",")
+	args := make([]any, 0, len(paths))
+	for _, path := range paths {
+		args = append(args, path)
+	}
+	return " AND " + alias + ".path IN (" + placeholders + ")", args
 }
 
 // projectSearchResult reduces a fully populated result to the requested
@@ -522,6 +671,7 @@ func rankExact(
 	db *sql.DB,
 	query string,
 	tiers []string,
+	paths []string,
 	candidateLimit int,
 ) ([]candidate, error) {
 	queryTokens := SortedUnique(modelTokens(query))
@@ -538,6 +688,7 @@ func rankExact(
 		trigrams = trigrams[:48]
 	}
 	tierPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	documentClause, documentArgs := documentFilter("c", paths)
 	idScores := map[string]int{}
 	queryIDs := func(table, column string, values []string, weight int) error {
 		if len(values) == 0 {
@@ -551,11 +702,12 @@ func rankExact(
 		for _, tier := range tiers {
 			args = append(args, tier)
 		}
+		args = append(args, documentArgs...)
 		args = append(args, candidateLimit)
 		statement := `SELECT x.chunk_id,count(*) AS hits FROM ` + table + ` x
 			JOIN chunks c ON c.id=x.chunk_id
 			WHERE x.` + column + ` IN (` + valuePlaceholders + `)
-			AND c.tier IN (` + tierPlaceholders + `)
+			AND c.tier IN (` + tierPlaceholders + `)` + documentClause + `
 			GROUP BY x.chunk_id ORDER BY hits DESC,x.chunk_id ASC LIMIT ?`
 		rows, err := db.QueryContext(ctx, statement, args...)
 		if err != nil {
@@ -583,10 +735,12 @@ func rankExact(
 	for _, tier := range tiers {
 		directArgs = append(directArgs, tier)
 	}
+	directArgs = append(directArgs, documentArgs...)
 	directRows, err := db.QueryContext(ctx, `SELECT c.id FROM chunks c
 		JOIN documents d ON d.id=c.document_id
 		WHERE (lower(c.path)=? OR lower(d.title)=?) AND c.tier IN (`+
-		tierPlaceholders+`) ORDER BY c.path,c.start_line LIMIT 50`, directArgs...)
+		tierPlaceholders+`)`+documentClause+
+		` ORDER BY c.path,c.start_line LIMIT 50`, directArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +831,14 @@ func loadChunksByID(ctx context.Context, db *sql.DB, ids []rankedID) ([]candidat
 	return result, nil
 }
 
-func rankFTS(ctx context.Context, db *sql.DB, query string, tiers []string, limit int) ([]candidate, error) {
+func rankFTS(
+	ctx context.Context,
+	db *sql.DB,
+	query string,
+	tiers []string,
+	paths []string,
+	limit int,
+) ([]candidate, error) {
 	tokens := SortedUnique(modelTokens(query))
 	if len(tokens) == 0 {
 		return nil, nil
@@ -691,10 +852,12 @@ func rankFTS(ctx context.Context, db *sql.DB, query string, tiers []string, limi
 	}
 	match := strings.Join(parts, " OR ")
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	documentClause, documentArgs := documentFilter("c", paths)
 	args := []any{match}
 	for _, tier := range tiers {
 		args = append(args, tier)
 	}
+	args = append(args, documentArgs...)
 	args = append(args, limit)
 	statement := `SELECT c.id,c.document_id,c.path,c.tier,c.heading,c.start_line,c.end_line,
 		c.content,c.content_hash,COALESCE(c.parent_id,''),COALESCE(c.previous_id,''),
@@ -702,7 +865,7 @@ func rankFTS(ctx context.Context, db *sql.DB, query string, tiers []string, limi
 		FROM chunks_fts
 		JOIN chunks c ON c.id=chunks_fts.chunk_id
 		JOIN documents d ON d.id=c.document_id
-		WHERE chunks_fts MATCH ? AND c.tier IN (` + placeholders + `)
+		WHERE chunks_fts MATCH ? AND c.tier IN (` + placeholders + `)` + documentClause + `
 		ORDER BY rank ASC,c.path ASC,c.start_line ASC,c.id ASC LIMIT ?`
 	rows, err := db.QueryContext(ctx, statement, args...)
 	if err != nil {
@@ -731,6 +894,7 @@ func rankDense(
 	db *sql.DB,
 	query string,
 	tiers []string,
+	paths []string,
 	modelValue any,
 ) ([]candidate, error) {
 	model, err := resolveEmbeddingModel(modelValue)
@@ -743,23 +907,26 @@ func rankDense(
 	}
 	modelID := model.ID
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	documentClause, documentArgs := documentFilter("c", paths)
 	countArgs := []any{modelID}
 	for _, tier := range tiers {
 		countArgs = append(countArgs, tier)
 	}
+	countArgs = append(countArgs, documentArgs...)
 	var eligibleCount int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM vectors v
 		JOIN chunks c ON c.id=v.chunk_id
-		WHERE v.model_id=? AND c.tier IN (`+placeholders+`)`, countArgs...).Scan(&eligibleCount); err != nil {
+		WHERE v.model_id=? AND c.tier IN (`+placeholders+`)`+documentClause,
+		countArgs...).Scan(&eligibleCount); err != nil {
 		return nil, err
 	}
 	var rows []denseCandidate
 	if eligibleCount <= denseExactScanMaximum {
 		rows, err = loadDenseCandidates(
-			ctx, db, tiers, modelID, nil, denseCandidateMaximum)
+			ctx, db, tiers, paths, modelID, nil, denseCandidateMaximum)
 	} else {
 		rows, err = loadDenseCandidateFloor(
-			ctx, db, tiers, modelID,
+			ctx, db, tiers, paths, modelID,
 			vectorSignatureSlice(queryVector), denseExpandedMinimum, denseCandidateMaximum,
 		)
 	}
@@ -807,6 +974,7 @@ func loadDenseCandidateFloor(
 	ctx context.Context,
 	db *sql.DB,
 	tiers []string,
+	paths []string,
 	modelID string,
 	querySignature uint16,
 	minimum int,
@@ -833,7 +1001,7 @@ func loadDenseCandidateFloor(
 			end = len(signatures)
 		}
 		rows, err := loadDenseCandidates(
-			ctx, db, tiers, modelID, signatures[start:end], maximum-len(result),
+			ctx, db, tiers, paths, modelID, signatures[start:end], maximum-len(result),
 		)
 		if err != nil {
 			return nil, err
@@ -857,21 +1025,24 @@ func loadDenseCandidates(
 	ctx context.Context,
 	db *sql.DB,
 	tiers []string,
+	paths []string,
 	modelID string,
 	signatures []uint16,
 	limit int,
 ) ([]denseCandidate, error) {
 	tierPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	documentClause, documentArgs := documentFilter("c", paths)
 	args := []any{modelID}
 	statement := `SELECT c.id,c.document_id,c.path,c.tier,c.heading,c.start_line,c.end_line,
 		c.content,c.content_hash,COALESCE(c.parent_id,''),COALESCE(c.previous_id,''),
 		COALESCE(c.next_id,''),d.content_hash,v.vector
 		FROM vectors v JOIN chunks c ON c.id=v.chunk_id
 		JOIN documents d ON d.id=c.document_id
-		WHERE v.model_id=? AND c.tier IN (` + tierPlaceholders + `)`
+		WHERE v.model_id=? AND c.tier IN (` + tierPlaceholders + `)` + documentClause
 	for _, tier := range tiers {
 		args = append(args, tier)
 	}
+	args = append(args, documentArgs...)
 	if len(signatures) > 0 {
 		signaturePlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(signatures)), ",")
 		statement += ` AND v.signature IN (` + signaturePlaceholders + `)`
@@ -916,6 +1087,7 @@ func rankGraph(
 	db *sql.DB,
 	seeds []*candidate,
 	tiers []string,
+	paths []string,
 	limit int,
 ) ([]candidate, error) {
 	if len(seeds) > 30 {
@@ -924,6 +1096,10 @@ func rankGraph(
 	tierSet := map[string]bool{}
 	for _, tier := range tiers {
 		tierSet[tier] = true
+	}
+	pathSet := map[string]bool{}
+	for _, path := range paths {
+		pathSet[path] = true
 	}
 	seen := map[string]bool{}
 	result := []candidate{}
@@ -952,6 +1128,9 @@ func rankGraph(
 			); err != nil {
 				rows.Close()
 				return nil, err
+			}
+			if len(pathSet) > 0 && !pathSet[row.Chunk.Path] {
+				continue
 			}
 			if tierSet[row.Chunk.Tier] && !seen[row.Chunk.ID] {
 				seen[row.Chunk.ID] = true

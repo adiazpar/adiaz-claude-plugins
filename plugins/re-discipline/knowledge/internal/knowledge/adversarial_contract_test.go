@@ -1226,7 +1226,7 @@ func TestAdversarialDenseRetrievalUsesBoundedPersistedCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidates, err := loadDenseCandidates(
-		ctx, db, []string{"truth"}, "builtin:feature-hash-512-v1",
+		ctx, db, []string{"truth"}, nil, "builtin:feature-hash-512-v1",
 		[]uint16{uint16(signature)}, denseCandidateMaximum,
 	)
 	if err != nil {
@@ -1235,7 +1235,7 @@ func TestAdversarialDenseRetrievalUsesBoundedPersistedCandidates(t *testing.T) {
 	if len(candidates) != denseCandidateMaximum {
 		t.Fatalf("dense candidate bound = %d, want %d", len(candidates), denseCandidateMaximum)
 	}
-	ranked, err := rankDense(ctx, db, query, []string{"truth"}, "builtin:feature-hash-512-v1")
+	ranked, err := rankDense(ctx, db, query, []string{"truth"}, nil, "builtin:feature-hash-512-v1")
 	if err != nil {
 		t.Fatalf("rankDense crossed its bounded window: %v", err)
 	}
@@ -1512,27 +1512,29 @@ func TestAdversarialExactFTSDenseGraphCitationsBudgetsAndReplay(t *testing.T) {
 	}
 	defer db.Close()
 
-	exact, err := rankExact(ctx, db, "A1B2C3D4", []string{"truth"}, 400)
+	exact, err := rankExact(ctx, db, "A1B2C3D4", []string{"truth"}, nil, 400)
 	if err != nil || len(exact) == 0 || exact[0].Chunk.Path != "docs/truth/engine.md" {
 		t.Fatalf("exact lane missed technical identifier: rows=%#v err=%v", exact, err)
 	}
-	fts, err := rankFTS(ctx, db, "frame serialization checksum", []string{"truth"}, 200)
+	fts, err := rankFTS(ctx, db, "frame serialization checksum", []string{"truth"}, nil, 200)
 	if err != nil || len(fts) == 0 || fts[0].Chunk.Path != "docs/truth/engine.md" {
 		t.Fatalf("FTS lane missed engine truth: rows=%#v err=%v", fts, err)
 	}
 	if selected.Effective.Requires.Embedding == nil {
 		t.Fatal("full selected profile lacks embedding requirement")
 	}
-	dense, err := rankDense(ctx, db, "engine frame checksum", []string{"truth"}, *selected.Effective.Requires.Embedding)
+	dense, err := rankDense(
+		ctx, db, "engine frame checksum", []string{"truth"}, nil,
+		*selected.Effective.Requires.Embedding)
 	if err != nil || len(dense) == 0 {
 		t.Fatalf("dense lane returned no bounded candidates: rows=%#v err=%v", dense, err)
 	}
-	consumer, err := rankExact(ctx, db, "docs/truth/consumer.md", []string{"truth"}, 400)
+	consumer, err := rankExact(ctx, db, "docs/truth/consumer.md", []string{"truth"}, nil, 400)
 	if err != nil || len(consumer) == 0 {
 		t.Fatalf("direct path lookup missed graph seed: %v", err)
 	}
 	consumer[0].LaneRanks = map[string]int{"exact": 1}
-	graph, err := rankGraph(ctx, db, []*candidate{&consumer[0]}, []string{"truth"}, 100)
+	graph, err := rankGraph(ctx, db, []*candidate{&consumer[0]}, []string{"truth"}, nil, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
