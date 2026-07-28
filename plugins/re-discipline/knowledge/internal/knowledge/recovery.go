@@ -35,11 +35,17 @@ type recoveryFile struct {
 	Kind     string
 }
 
+// SharedLawsMarker is the exact contract handshake between this compiled
+// runtime and a project's canonical profile. Recovery and MCP validation
+// both refuse projects carrying any other version; migration (migrate.go)
+// is the only door from v0.6.0 to this marker.
+const SharedLawsMarker = "<!-- re-discipline:shared-laws v0.7.0 -->"
+
 var managedRecoveryFiles = []recoveryFile{
 	{".re-discipline/config.json", "config.json", "config"},
-	{".re-discipline/settings/README.md", "settings-README.md", "markdown"},
-	{".re-discipline/settings/knowledge.jsonc", "knowledge.jsonc", "settings"},
-	{".re-discipline/settings/retrieval-profile.json", "retrieval-profile.json", "profile"},
+	{".re-discipline/knowledge/README.md", "knowledge-README.md", "markdown"},
+	{".re-discipline/knowledge/policy.jsonc", "policy.jsonc", "settings"},
+	{".re-discipline/knowledge/retrieval-profile.json", "retrieval-profile.json", "profile"},
 	{".re-discipline/memory/INDEX.md", "memory-INDEX.md", "markdown"},
 	{".re-discipline/knowledge/evals/README.md", "knowledge-evals-README.md", "markdown"},
 	{".claude/settings.json", "claude-settings.json", "claude-json"},
@@ -47,7 +53,7 @@ var managedRecoveryFiles = []recoveryFile{
 }
 
 var managedRecoveryDirectories = []string{
-	".re-discipline/settings",
+	".re-discipline/knowledge",
 	".re-discipline/memory/proposals",
 	".re-discipline/memory/topics",
 	".re-discipline/knowledge/evals",
@@ -80,9 +86,9 @@ func RecoverProject(projectRoot, pluginRoot string) (RecoveryResult, error) {
 	if err != nil {
 		return RecoveryResult{}, errors.New("recovery requires an existing managed project profile")
 	}
-	const marker = "<!-- re-discipline:shared-laws v0.6.0 -->"
+	const marker = SharedLawsMarker
 	if !strings.Contains(string(markerBody), marker) {
-		return RecoveryResult{}, errors.New("recovery requires the supported shared-laws v0.6.0 marker")
+		return RecoveryResult{}, errors.New("recovery requires the supported shared-laws v0.7.0 marker")
 	}
 	pluginAbsolute, err := filepath.Abs(pluginRoot)
 	if err != nil {
