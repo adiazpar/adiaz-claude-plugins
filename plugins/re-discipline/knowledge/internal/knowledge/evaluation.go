@@ -1641,20 +1641,8 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 		return CalibrationReport{}, fmt.Errorf(
 			"evaluate active holdout baseline: %w", err)
 	}
-	// Clamp the comparison floor to the tighter of the incumbent's score on
-	// today's corpus and the score it was ratified at. The incumbent's live
-	// score drifts as the corpus changes - an overturn that leaves a
-	// near-duplicate chronicle behind can raise its hard-negative count with
-	// no profile change at all - and without this clamp that drift silently
-	// raises the bar a candidate is allowed to meet.
-	ratified := selected.Effective.Benchmark
-	if ratified.RatifiedHardNegativeHits > 0 &&
-		ratified.RatifiedHardNegativeHits < baselineHoldoutMetrics.HardNegativeHits {
-		baselineHoldoutMetrics.HardNegativeHits = ratified.RatifiedHardNegativeHits
-	}
-	if ratified.RatifiedAbstentionAccuracy > baselineHoldoutMetrics.AbstentionAccuracy {
-		baselineHoldoutMetrics.AbstentionAccuracy = ratified.RatifiedAbstentionAccuracy
-	}
+	baselineHoldoutMetrics = ratchetBaseline(
+		selected.Effective.Benchmark, baselineHoldoutMetrics)
 	candidates := []CalibrationCandidate{}
 	rowsByIdentity := map[string]EffectiveProfile{}
 	for _, exact := range []int{6, 8, 10} {
@@ -1797,7 +1785,7 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 				// Record what this profile was accepted at so a later
 				// calibration compares against the tighter of this and the
 				// incumbent's drifted live score.
-				RatifiedHardNegativeHits:   recommended.HoldoutMetrics.HardNegativeHits,
+				RatifiedHardNegativeHits:   ratifiedHits(recommended.HoldoutMetrics),
 				RatifiedAbstentionAccuracy: recommended.HoldoutMetrics.AbstentionAccuracy,
 			}
 			runtimeDigest, _ := CanonicalDigest(RuntimeContract(selected.Runtime))
@@ -2009,10 +1997,45 @@ func cloneWeights(input map[string]int) map[string]int {
 	return output
 }
 
+// ratchetBaseline clamps the comparison floor to the tighter of the
+// incumbent's score on today's corpus and the score it was ratified at.
+//
+// The incumbent's live score drifts as the corpus changes - an overturn that
+// leaves a near-duplicate chronicle behind can raise its hard-negative count
+// with no profile change at all - and without this clamp that drift silently
+// raises the bar a candidate is allowed to meet.
+//
+// A profile ratified at zero hard-negative hits is the case that matters most
+// and the one that was silently exempt: zero is the best achievable score, so
+// nothing may relax it, yet it is also what an unrecorded value looks like.
+// Absent stays absent and disengages the ratchet; a recorded zero clamps.
+func ratchetBaseline(ratified BenchmarkEvidence, baseline QualityMetrics) QualityMetrics {
+	if ratified.RatifiedHardNegativeHits != nil &&
+		*ratified.RatifiedHardNegativeHits < baseline.HardNegativeHits {
+		baseline.HardNegativeHits = *ratified.RatifiedHardNegativeHits
+	}
+	if ratified.RatifiedAbstentionAccuracy > baseline.AbstentionAccuracy {
+		baseline.AbstentionAccuracy = ratified.RatifiedAbstentionAccuracy
+	}
+	return baseline
+}
+
+// ratifiedHits records a candidate's accepted hard-negative count, including
+// zero. Recording zero is the whole point: it is the value that must clamp the
+// hardest and the one an omitted field cannot express.
+func ratifiedHits(metrics QualityMetrics) *int {
+	hits := metrics.HardNegativeHits
+	return &hits
+}
+
 func cloneEffectiveProfile(input EffectiveProfile) EffectiveProfile {
 	output := input
 	output.Lanes = append([]string(nil), input.Lanes...)
 	output.Weights = cloneWeights(input.Weights)
+	if input.Benchmark.RatifiedHardNegativeHits != nil {
+		hits := *input.Benchmark.RatifiedHardNegativeHits
+		output.Benchmark.RatifiedHardNegativeHits = &hits
+	}
 	if input.Requires.Embedding != nil {
 		value := *input.Requires.Embedding
 		output.Requires.Embedding = &value

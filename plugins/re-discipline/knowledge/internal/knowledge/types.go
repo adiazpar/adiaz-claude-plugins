@@ -180,7 +180,19 @@ type BenchmarkEvidence struct {
 	// Without them the comparison re-anchors every run: a corpus edit that
 	// raises the incumbent's hard-negative count silently raises the ceiling
 	// a future candidate must clear, and the drift is never recorded.
-	RatifiedHardNegativeHits   int     `json:"ratifiedHardNegativeHits,omitempty"`
+	//
+	// The hard-negative count is a pointer because zero is its best possible
+	// value and also the value an absent field decodes to. Held as a plain
+	// int, a profile ratified at zero hard-negative hits recorded nothing and
+	// therefore clamped nothing, so the ceiling was free to drift upward in
+	// exactly the case where it must not move at all. nil means no ratified
+	// value was recorded - every profile promoted before this field existed -
+	// and leaves the ratchet disengaged, unchanged.
+	//
+	// Abstention accuracy needs no such distinction: the clamp takes the
+	// larger of the ratified and the live value, and zero is the loosest
+	// possible floor, so an absent field and a genuine zero behave alike.
+	RatifiedHardNegativeHits   *int    `json:"ratifiedHardNegativeHits,omitempty"`
 	RatifiedAbstentionAccuracy float64 `json:"ratifiedAbstentionAccuracy,omitempty"`
 }
 
