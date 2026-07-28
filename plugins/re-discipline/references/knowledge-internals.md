@@ -1,16 +1,18 @@
-# Re-Discipline Project Settings
+# Knowledge System Internals (Agent Reference)
 
-This directory is the tracked, project-facing control plane for the shared
-knowledge system. It does not contain server code, packaged model files,
-indexes, benchmark output, or machine-local security state.
+This reference documents the machine-managed knowledge control files under
+a project's `.re-discipline/` tree. It is agent documentation: users never
+need it. The tree does not contain server code, packaged model files,
+indexes, benchmark output, or machine-local security state, and none of it
+is narrated to users (see `reporting.md`).
 
 ## Files
 
 | File | Owner | Edit policy |
 |---|---|---|
-| `../config.json` | re-discipline bootstrap | Small strict-JSON safety policy. Change memory mode through `init-project` resync so both host settings are updated together. |
-| `knowledge.jsonc` | project maintainer | Human-editable source, local-execution, telemetry, and context-budget policy. Comments are allowed. |
-| `retrieval-profile.json` | retrieval-profile governance | Generated, content-hashed production ranking profile. Do not hand-edit it; use `calibrate-knowledge` and `decide-retrieval-profile`. |
+| `.re-discipline/config.json` | re-discipline bootstrap | Small strict-JSON safety policy. Change memory mode through `init-project` resync so both host settings are updated together. |
+| `knowledge/policy.jsonc` | project maintainer | Human-editable source, local-execution, telemetry, and context-budget policy. Comments are allowed. |
+| `knowledge/retrieval-profile.json` | retrieval-profile governance | Generated, content-hashed production ranking profile. Do not hand-edit it; use `calibrate-knowledge` and `decide-retrieval-profile`. |
 
 The schemas live in the installed plugin under `knowledge/schemas/`. The
 `plugin://re-discipline/...` schema identifiers are stable package IDs; they
@@ -26,20 +28,20 @@ do not grant network access.
   enabled.
 - Tracked settings cannot authorize remote providers or external source roots.
 
-### `../config.json`
+### `config.json`
 
 | Field | Default | Meaning |
 |---|---|---|
-| `schemaVersion` | `1` | Strict bootstrap schema. A newer value is never downgraded automatically. |
-| `settingsDirectory` | `"settings"` | Fixed directory relative to `.re-discipline/`; traversal and absolute paths are rejected. |
+| `schemaVersion` | `2` | Strict bootstrap schema. A newer value is never downgraded automatically. |
+| `knowledgeDirectory` | `"knowledge"` | Fixed directory relative to `.re-discipline/`; traversal and absolute paths are rejected. |
 | `memory.mode` | `"shared-only"` | `shared-only`, `hybrid`, or `native`; resync both host settings after changing it. |
 | `memory.writePolicy` | `"proposal-only"` | Agents may propose recall but cannot directly accept shared memory. |
 | `knowledge.enabled` | `true` | Enables the project knowledge server and preflight. |
 | `knowledge.profile` | `"plugin:balanced-v1"` | Requested packaged production profile. |
-| `knowledge.settingsFile` | `"settings/knowledge.jsonc"` | Fixed human-editable policy path. |
-| `knowledge.projectProfile` | `"settings/retrieval-profile.json"` | Fixed generated/accepted profile path. |
+| `knowledge.settingsFile` | `"knowledge/policy.jsonc"` | Fixed AI-curated policy path; users change behavior by asking the agent. |
+| `knowledge.projectProfile` | `"knowledge/retrieval-profile.json"` | Fixed generated/accepted profile path. |
 
-### `knowledge.jsonc`
+### `knowledge/policy.jsonc`
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -60,7 +62,7 @@ do not grant network access.
 | `budgets.maxPassages` | `12` | Maximum passages before a smaller caller limit. |
 | `budgets.maxBytes` | `32768` | Absolute returned-context byte ceiling. |
 
-### Generated `retrieval-profile.json`
+### Generated `knowledge/retrieval-profile.json`
 
 Do not edit these fields manually:
 
@@ -96,11 +98,11 @@ host files and bootstrap policy cannot drift.
 
 - Canonical truth remains in `docs/truth/`.
 - History, backlog, and active campaigns retain their own epistemic tiers.
-- Accepted operational recall lives in `../memory/topics/`.
-- Pending proposals live in `../memory/proposals/` and are excluded from
+- Accepted operational recall lives in `.re-discipline/memory/topics/`.
+- Pending proposals live in `.re-discipline/memory/proposals/` and are excluded from
   ordinary retrieval until a manager reviews them and the user ratifies them.
-- Project evaluation cases live in `../knowledge/evals/`.
-- Everything under `../cache/` is disposable and ignored.
+- Project evaluation cases live in `.re-discipline/knowledge/evals/`.
+- Everything under `.re-discipline/cache/` is disposable and ignored.
 - The checksum-pinned model artifact lives in the installed plugin, not this
   project. This release exposes no remote-model, external-root, or hardware
   grant; any future security-sensitive grant must be explicit machine-local
@@ -108,8 +110,8 @@ host files and bootstrap policy cannot drift.
 
 ## Recovery And De-Initialization
 
-The `re-discipline:shared-laws v0.6.0` marker in
-`../project-profile.md` declares that this managed configuration is expected.
+The `re-discipline:shared-laws v0.7.0` marker in
+`.re-discipline/project-profile.md` declares that this managed configuration is expected.
 At session start, the cheap bootstrap hook restores a missing tracked
 bootstrap, settings, or host-memory policy file from `HEAD`. If a required
 file has never been tracked, it creates the current safe default atomically.

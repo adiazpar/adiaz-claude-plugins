@@ -1,7 +1,7 @@
 # Re-Discipline Knowledge Runtime
 
 This directory contains the local, manager-neutral knowledge server shipped
-with re-discipline 0.6.0. Claude Code, Codex, direct managers, and delegated
+with re-discipline 0.7.0. Claude Code, Codex, direct managers, and delegated
 drafters use the same executable, project configuration, source tiers,
 indexes, retrieval profiles, and context-pack format.
 
@@ -133,7 +133,7 @@ Use `--asset-root` to identify this `knowledge/` directory and
 `--project-root` for the initialized project. `--disable-dense` and
 `--disable-rerank` exercise the independently benchmarked fallback profiles.
 Project-facing token and source policy remains in
-`.re-discipline/settings/knowledge.jsonc`.
+`.re-discipline/knowledge/policy.jsonc`.
 
 `recover`, context-pack materialization, recall proposal, index reconciliation,
 calibration, and benchmark report output are explicit writes. Retrieval tools

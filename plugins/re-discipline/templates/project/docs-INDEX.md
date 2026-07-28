@@ -14,7 +14,7 @@ and mission. Framing: {{ONE_LINE_FRAMING}}
 | [`backlog/`](backlog/) | Deferred campaign briefs. |
 | `../active/<slug>/CAMPAIGN.md` | Provisional work in flight. |
 | `../.re-discipline/memory/INDEX.md` | Accepted operational recall and the proposal queue. |
-| `../.re-discipline/settings/README.md` | Shared knowledge policy, defaults, and recovery. |
+| `../.re-discipline/knowledge/README.md` | Machine-managed knowledge system; ask the agent to change its behavior. |
 
 ## Current Focus
 

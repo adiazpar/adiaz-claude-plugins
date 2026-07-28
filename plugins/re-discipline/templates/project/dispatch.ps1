@@ -62,8 +62,8 @@ $canonicalProfileText = [System.IO.File]::ReadAllText(
     $canonicalProfile,
     [System.Text.Encoding]::UTF8
 )
-$managedV06 = $canonicalProfileText -match (
-    '<!--\s*re-discipline:shared-laws v0\.6\.\d+\s*-->'
+$managedSupported = $canonicalProfileText -match (
+    '<!--\s*re-discipline:shared-laws v0\.[67]\.\d+\s*-->'
 )
 
 function Resolve-FromRoot {
@@ -305,7 +305,7 @@ $hasContextPack = Test-Path -LiteralPath $contextPack -PathType Leaf
 if ($ContextPackPath -and -not $hasContextPack) {
     throw "Context pack not found: $contextPack"
 }
-if ($managedV06 -and -not $hasContextPack) {
+if ($managedSupported -and -not $hasContextPack) {
     throw (
         "Managed re-discipline v0.6 dispatch requires immutable " +
         "context-pack.json in the selected workspace."

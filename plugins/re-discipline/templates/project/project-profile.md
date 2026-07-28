@@ -12,7 +12,7 @@ This is the single source of project identity, domain facts, and shared
 re-discipline laws. Runtime-specific bootstrap and configuration belong in
 thin manager adapters, not in a second project profile.
 
-<!-- re-discipline:shared-laws v0.6.0 -->
+<!-- re-discipline:shared-laws v0.7.0 -->
 ## Directory Means Trust
 
 | Location | Status | Treatment |
