@@ -48,7 +48,7 @@ current tools. Ensure the neutral file is ignored before writing values.
 ## Recover Managed Knowledge Configuration Separately
 
 When the recovered profile contains
-`re-discipline:shared-laws v0.6.0` or newer, it declares that
+`re-discipline:shared-laws v0.7.0` or newer, it declares that
 `.re-discipline/config.json`, required settings, and project host-memory policy
 files are managed:
 

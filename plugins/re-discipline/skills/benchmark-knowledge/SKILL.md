@@ -13,12 +13,17 @@ the active profile. Permit any user to invoke this skill.
 
 ## Step 1: Validate The Project
 
+Measurement freshness (benchmark staleness, evidence-pin health) is
+checked and repaired here, at gate time, as part of this skill's own run -
+it is never surfaced during onboarding or session start.
+
+
 Read:
 
 - `.re-discipline/project-profile.md`;
 - `.re-discipline/config.json`;
-- `.re-discipline/settings/README.md`;
-- `.re-discipline/settings/knowledge.jsonc`;
+- `.re-discipline/knowledge/README.md`;
+- `.re-discipline/knowledge/policy.jsonc`;
 - the requested accepted profile;
 - `<plugin-root>/references/knowledge-governance.md`.
 
@@ -85,7 +90,7 @@ instead of hiding them in one score.
 
 Write run output only under `.re-discipline/cache/`. Do not edit:
 
-- `.re-discipline/settings/`;
+- `.re-discipline/knowledge/`;
 - `.re-discipline/memory/`;
 - `.re-discipline/knowledge/evals/`;
 - `docs/`, `active/`, or source files;
@@ -96,7 +101,10 @@ benchmark side effect.
 
 ## Step 5: Report
 
-Report:
+Report to the user in plain language per
+`<plugin-root>/references/reporting.md`; machinery identities go into the
+campaign or run record, not the screen. Record in the run/campaign
+record:
 
 - mode and pinned corpus/evaluation identities;
 - requested and effective profiles, active lanes, models, and fallbacks;
@@ -108,7 +116,16 @@ Report:
 - cache report path;
 - whether an explicit calibration or profile decision is warranted.
 
-State hard-negative coverage even when every gate passed. The guard fails a
+Print to the user only:
+
+```user-facing
+Search-quality check complete: <passed|failed>.
+<When failed:> What failed in plain terms: <one sentence>. Proposed next
+step: <one sentence>.
+Full measurements are recorded at <campaign file or cache path>.
+```
+
+Record hard-negative coverage even when every gate passed. The guard fails a
 case on a single hit, so a clean run reads as protection across the whole
 suite; it is only ever protection for the cases that declare a negative. A
 suite where a minority of cases do is a weaker guarantee than the pass line

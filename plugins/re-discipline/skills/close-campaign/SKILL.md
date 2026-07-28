@@ -166,9 +166,18 @@ it: a pack dies with its own campaign, not with the one it cites.
 Confirm truth links, index links, verification bases, recipes, and maintained
 source, tools, tests, fixtures, corpora, or references. Confirm
 `active/<slug>/` is gone and no durable file points only to the deleted
-scratch. Report truth additions, overturns, chronicle, maintained deliverables,
-distilled material, the review ledger's outcome summary and where each carried
-hold landed, and deletions.
+scratch. Record truth additions, overturns, chronicle, maintained
+deliverables, distilled material, the review ledger's outcome summary and
+where each carried hold landed, and deletions in the chronicle and indexes.
+Report to the user in plain language per
+`<plugin-root>/references/reporting.md`; machinery identities go into the
+campaign or run record, not the screen. Print to the user only:
+
+```user-facing
+Campaign <slug> closed. Chronicle: docs/history/chronicles/<file>.
+Truth promoted: <n claims|none>. Backlogged: <n briefs|none>.
+<n> scratch files removed.
+```
 
 Do not commit unless the user explicitly asks.
 

@@ -54,6 +54,10 @@ packing rules, or manager/drafter budgets. Those remain versioned profile or
 project-policy inputs and require their own measured implementation before a
 future calibration release may change them.
 
+Measurement freshness (benchmark staleness, evidence-pin health) is
+checked and repaired here, at gate time, as part of this skill's own run -
+it is never surfaced during onboarding or session start.
+
 Evaluate development cases first. Evaluate only finalists on the frozen
 holdout. Benchmark every declared effective capability profile independently,
 including no-reranker and model-free fallbacks.
@@ -86,16 +90,27 @@ Treat any candidate carrying those fields as malformed candidate output.
 
 ## Step 5: Stop Before Promotion
 
-Do not edit `.re-discipline/settings/retrieval-profile.json`, plugin baseline
+Do not edit `.re-discipline/knowledge/retrieval-profile.json`, plugin baseline
 profiles, memory, truth, or ratified evaluation cases. Do not activate the
 candidate, even when every metric improves. Calibration never stamps approval
 or writes a promotion receipt.
 
-Report the candidate path, hard-gate outcome, holdout comparison, supported
-fallback matrix, the benchmark's token-budget measurements, and any
-end-to-end work not run. Do not describe budget measurements as budget
-tuning. Direct the user to `decide-retrieval-profile` for an explicit promote,
-reject, retain, or rollback decision.
+Report to the user in plain language per
+`<plugin-root>/references/reporting.md`; machinery identities go into the
+campaign or run record, not the screen. Record the candidate path,
+hard-gate outcome, holdout comparison, supported fallback matrix, the
+benchmark's token-budget measurements, and any end-to-end work not run in
+the campaign or run record. Do not describe budget measurements as budget
+tuning.
+
+Print to the user only:
+
+```user-facing
+Calibration finished. A tuned search profile is ready for your decision:
+it <improved|did not improve> retrieval on this project's own questions.
+Accept or reject it with decide-retrieval-profile. Details are recorded at
+<candidate path>.
+```
 
 Do not commit unless the user explicitly asks.
 

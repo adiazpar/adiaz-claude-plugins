@@ -82,8 +82,15 @@ Augment an existing topic instead of creating a duplicate.
 
 ## Step 5: Report
 
-Report the decision, proposal path, accepted topic or rejection record, source
-links, expiry, and remaining proposal count.
+Record the decision, proposal path, accepted topic or rejection record,
+source links, and expiry in the memory index. Report to the user in plain language per
+`<plugin-root>/references/reporting.md`; machinery identities go into the
+campaign or run record, not the screen. Print to the user only:
+
+```user-facing
+Memory review: <n> proposals - <n> accepted, <n> rejected, <n> still
+pending your call.
+```
 
 Never edit Claude or Codex native memory stores. Never accept a retrieval
 profile, promote truth, or copy raw conversation transcripts from this skill.

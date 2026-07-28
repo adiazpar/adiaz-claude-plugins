@@ -10,7 +10,7 @@ Read root and nested `AGENTS.md` files, `.codex/AGENTS.md`,
 `.claude/project-profile.md`, `.codex/local-paths.md`,
 `.claude/local-paths.md`, project `.codex/config.toml`, project
 `.claude/settings.json`, `.re-discipline/config.json`,
-`.re-discipline/settings/`, `.gitignore`, docs indexes, README files,
+`.re-discipline/knowledge/`, `.gitignore`, docs indexes, README files,
 dispatch scripts, campaign templates, truth files, chronicles, and git
 history. Search those sources for legacy archive semantics before treating any
 filesystem path as re-discipline state. Classify every relevant instruction as:
