@@ -3,8 +3,8 @@
   "schemaVersion": 1,
   "runtime": {
     "name": "re-discipline-knowledge",
-    "version": "0.6.0",
-    "buildId": "sha256:329d98ea9a4272f9c99189b78604b2431bb0cda4c1ea291ad8b1c1d75308989b"
+    "version": "0.7.0",
+    "buildId": "sha256:831c126c2191abc6d6d24d7db1c41b0ab19d6f73962344627e83b12c85b49bd5"
   },
   "build": {
     "goToolchain": "go1.26.5",
@@ -12,7 +12,7 @@
     "flags": [
       "-trimpath",
       "-buildvcs=false",
-      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:329d98ea9a4272f9c99189b78604b2431bb0cda4c1ea291ad8b1c1d75308989b"
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:831c126c2191abc6d6d24d7db1c41b0ab19d6f73962344627e83b12c85b49bd5"
     ],
     "environment": [
       "CGO_ENABLED=0",
@@ -32,8 +32,8 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:ff4358ffdee1592b7b955d52860d323ee17f1a4e71b16a0251a8c3a53f5183eb",
-      "size": 8264704,
+      "sha256": "sha256:ed21c020b3274393b8eaffd2660f82ba87bc23e42e7ec39dd0c400fca3672cdb",
+      "size": 8269312,
       "mode": "0644"
     },
     {
@@ -41,8 +41,8 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:dec7b571bfba01d21a67279bba0600703054a791446e14336a16b7979497e9a1",
-      "size": 7806976,
+      "sha256": "sha256:85891f7bcda5101c406d1ac5126624a78805eb34213a86854b977ad6f1e99930",
+      "size": 7810560,
       "mode": "0644"
     },
     {
@@ -50,7 +50,7 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:ad444b82ed48d4715d06f0206d46fa52e203cb27e280f87af0da13aafe4067a5",
+      "sha256": "sha256:68554efc4a0808e2305668cb299324e143b01fe938e676dad963b16403c8fe80",
       "size": 8036478,
       "mode": "0755"
     },
@@ -59,7 +59,7 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:6dff8bb9a274863a5131691460beb5641d08f3948f4e348bbe2374f636bfb9d5",
+      "sha256": "sha256:f5f47c525246a73c7b419b0422d0f02c9d1664d28bc4f7adb5f1bd751daa8403",
       "size": 7798910,
       "mode": "0755"
     },
@@ -68,8 +68,8 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:eca160d1e271a9c91b43b5a5b1462d231056237006f5a0c766ba1b058f75ff6b",
-      "size": 8162352,
+      "sha256": "sha256:56b625e78e852e59481c488db1e08fe3c635ac99abb75261bbada463557eb52b",
+      "size": 8170560,
       "mode": "0755"
     },
     {
@@ -77,8 +77,8 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:2a12478a97af25fb25036b3bd40f1febeff031863ac465654ef5673014e839c1",
-      "size": 7878946,
+      "sha256": "sha256:848c071161f556132bc1fdac71d456a954fd70b68b21e761a155f8d6c7bcec2d",
+      "size": 7878962,
       "mode": "0755"
     }
   ],
@@ -111,8 +111,15 @@
     {
       "kind": "benchmark-fixture",
       "path": "evals/conformance/fixture/.re-discipline/config.json",
-      "sha256": "sha256:92bda450d1d1d831d31d68be5415f0aa3636d425b459f3b2288b8a066307e0ba",
-      "size": 325,
+      "sha256": "sha256:00bddd07262c4d89a71b0c6116e39d6f515c9eef3e846dfd563714aecdb680ac",
+      "size": 326,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/.re-discipline/knowledge/policy.jsonc",
+      "sha256": "sha256:03af95bed9127a2803383db3bfb451d0d60a28f7358d6c19517e6bcdd76cdfb1",
+      "size": 490,
       "mode": "0644"
     },
     {
@@ -139,15 +146,8 @@
     {
       "kind": "benchmark-fixture",
       "path": "evals/conformance/fixture/.re-discipline/project-profile.md",
-      "sha256": "sha256:be6fe74de668f2e9db7a4cdde32cb1d1ddd52d1c33c6677947e41039bd7b2f6c",
+      "sha256": "sha256:14a5242e6267302b108a533ebed6d404f38d65adf99cb92790d1bdb2690e2497",
       "size": 269,
-      "mode": "0644"
-    },
-    {
-      "kind": "benchmark-fixture",
-      "path": "evals/conformance/fixture/.re-discipline/settings/knowledge.jsonc",
-      "sha256": "sha256:03af95bed9127a2803383db3bfb451d0d60a28f7358d6c19517e6bcdd76cdfb1",
-      "size": 490,
       "mode": "0644"
     },
     {
@@ -237,7 +237,7 @@
     {
       "kind": "model-manifest",
       "path": "models/manifest.json",
-      "sha256": "sha256:d0c17624d97fa4da78c812b6d54d30fd794015cc1316c18d3cbba48d5e965161",
+      "sha256": "sha256:85c12739f1bbbd80a9548f72a83e87894d359467fb63ec0b5ba4581c45841a12",
       "size": 1835,
       "mode": "0644"
     },
@@ -258,15 +258,15 @@
     {
       "kind": "retrieval-profile",
       "path": "profiles/balanced-v1.json",
-      "sha256": "sha256:d2c7d3a50a5802b993232881dd0763117a6d8eaa1f00ce43cec3d2431821c2f1",
-      "size": 4223,
+      "sha256": "sha256:b2740898785caccac09f623412c0271bf48d1737517be27bee726ee28383e5ce",
+      "size": 4343,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/config.schema.json",
-      "sha256": "sha256:07682469d59dd8d8b6c83abdfa35929668e15a3b8fc335412445ca86d11fd405",
-      "size": 1103,
+      "sha256": "sha256:c683849b6b63c1a2c770a3cda1087b09e2f7a6060639a1e077174537638806e4",
+      "size": 1105,
       "mode": "0644"
     },
     {
@@ -300,7 +300,7 @@
     {
       "kind": "json-schema",
       "path": "schemas/retrieval-profile.schema.json",
-      "sha256": "sha256:44301584414bd36b15dd4db4bd6eef40bf7d263acb7b5dc72f8f15e946dee8a6",
+      "sha256": "sha256:a7fe9e27fb78092027459c4c0a501ba350332cfb9fdaf7cc3cdeca12ea562e58",
       "size": 6434,
       "mode": "0644"
     },
