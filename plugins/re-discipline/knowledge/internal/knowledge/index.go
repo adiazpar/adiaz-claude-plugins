@@ -246,10 +246,12 @@ func (manager IndexManager) cleanupGenerations(activeDatabase string) {
 		return
 	}
 	type obsoleteCandidate struct {
-		path    string
-		modTime time.Time
-		corrupt bool
+		path       string
+		generation string
+		modTime    time.Time
+		corrupt    bool
 	}
+	leased := leasedGenerationIDs(manager.CacheRoot)
 	candidates := []obsoleteCandidate{}
 	for _, entry := range entries {
 		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
@@ -273,7 +275,8 @@ func (manager IndexManager) cleanupGenerations(activeDatabase string) {
 			continue
 		}
 		candidates = append(candidates, obsoleteCandidate{
-			path: path, modTime: info.ModTime(),
+			path: path, generation: strings.SplitN(name, ".sqlite", 2)[0],
+			modTime: info.ModTime(),
 			corrupt: strings.Contains(name, ".sqlite.corrupt-"),
 		})
 	}
@@ -289,6 +292,12 @@ func (manager IndexManager) cleanupGenerations(activeDatabase string) {
 			}
 		} else if retainedComplete < 2 {
 			retainedComplete++
+			continue
+		}
+		if leased[candidate.generation] {
+			// An active measurement run in this or another session is still
+			// reading this generation. Retention reclaims it after a later
+			// publication rather than failing that run.
 			continue
 		}
 		// A Windows reader may still hold the immutable file. Cleanup is

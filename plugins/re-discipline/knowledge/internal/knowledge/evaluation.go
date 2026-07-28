@@ -1584,10 +1584,16 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 		return CalibrationReport{}, errors.New(
 			"calibration requires topic-isolated development and holdout cases")
 	}
-	generation, _, selected, _, err := service.ensure(ctx)
+	// Calibration measures every candidate against one generation for far
+	// longer than a benchmark does. It never re-ensures, so the lease alone
+	// keeps a concurrently publishing session's retention from deleting the
+	// database these candidates are being measured against.
+	generation, selected, lease, err := service.leaseMeasurementGeneration(
+		ctx, "calibration")
 	if err != nil {
 		return CalibrationReport{}, err
 	}
+	defer lease.Release()
 	before := selected.EffectiveIdentity
 	evalDigest, _ := CanonicalDigest(cases)
 	baselineRetriever := Retriever{

@@ -23,6 +23,16 @@ func unlockWriterFile(file *os.File) error {
 	return unix.Flock(int(file.Fd()), unix.LOCK_UN)
 }
 
+// flock is whole-file and advisory, so a lease uses the same primitive as the
+// writer lock and never blocks a sweep from reading the record.
+func tryLockLeaseFile(file *os.File) error {
+	return tryLockWriterFile(file)
+}
+
+func unlockLeaseFile(file *os.File) error {
+	return unlockWriterFile(file)
+}
+
 func writerFileHasMultipleLinks(file *os.File) (bool, error) {
 	info, err := file.Stat()
 	if err != nil {

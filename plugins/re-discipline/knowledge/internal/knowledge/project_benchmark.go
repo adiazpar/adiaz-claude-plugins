@@ -93,10 +93,15 @@ func (service *Service) RunProjectBenchmark(
 	if err != nil {
 		return ProjectBenchmarkReport{}, err
 	}
-	generation, _, active, _, err := service.ensure(ctx)
+	// The run pins and leases the generation it starts on. Another session may
+	// publish and prune throughout the run without failing it, and the report
+	// records the generation the measurements were actually taken against.
+	generation, active, lease, err := service.leaseMeasurementGeneration(ctx, "benchmark")
 	if err != nil {
 		return ProjectBenchmarkReport{}, err
 	}
+	defer lease.Release()
+	service.PinGeneration(generation)
 	evalFingerprint, _ := CanonicalDigest(cases)
 	report := ProjectBenchmarkReport{
 		SchemaVersion: 1, RunID: nowRunID("benchmark"), Mode: mode,
@@ -197,6 +202,10 @@ func benchmarkProjectProfile(
 	if err != nil {
 		return ProjectProfileBenchmark{}, err
 	}
+	// Every per-profile service measures the run-pinned generation, so the
+	// check below compares against what this run measures rather than against
+	// whichever generation another session has since published.
+	profileService.PinGeneration(generation)
 	profileGeneration, _, profileSelected, _, err := profileService.ensure(ctx)
 	if err != nil {
 		return ProjectProfileBenchmark{}, err
