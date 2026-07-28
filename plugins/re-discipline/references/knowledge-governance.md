@@ -44,22 +44,25 @@ scheduled to vanish, and the chronicle rather than the handle is its durable
 projection. Never carry an ephemeral citation into truth, accepted memory, or
 a ratified evaluation case.
 
-## Project-Facing Settings
+## Machine-Managed Knowledge State
 
 Keep `.re-discipline/config.json` small. Treat it as a strict-JSON bootstrap
 and recovery manifest, not a home for tuning knobs.
 
-Keep documented project policy under `.re-discipline/settings/`:
+The knowledge system owns its state under `.re-discipline/knowledge/`. It
+is machine-driven and AI-curated: users change behavior by asking the
+agent, never by hand-editing files (see `reporting.md`).
 
-- `README.md` explains every setting, default, owner, generated file, and
-  recovery rule.
-- `knowledge.jsonc` is the commented human-editable source, budget, local
-  execution, and local telemetry policy.
+- `README.md` is the two-line pointer users may stumble on.
+- `policy.jsonc` is the commented, AI-curated source, budget, local
+  execution, and local telemetry policy. The manager edits it on user
+  request; `<plugin-root>/references/knowledge-internals.md` documents
+  every field.
 - `retrieval-profile.json` is the generated, content-hashed accepted project
   profile. Change it only through `decide-retrieval-profile`.
 
-Keep code, model artifacts, indexes, benchmark output, memory, and
-evaluation cases outside `settings/`. The current release exposes no remote
+Keep code, model artifacts, indexes, benchmark output, and memory outside
+the control files; evaluation cases live under `knowledge/evals/`. The current release exposes no remote
 model, external-root, or hardware grant. Any future security-sensitive grant
 must live in machine-local state and require an explicit user action. Never put
 production ranking weights in machine-local state.
@@ -97,7 +100,8 @@ effective fallback profile or fail clearly.
 
 Record the requested profile, effective profile, active lanes, model
 identities, and fallback reason in every benchmark, retrieval result, and
-context pack.
+context pack - in campaign records and system-facing artifacts, never in
+user-facing prose (see `reporting.md`).
 
 ## Benchmark, Calibration, And Promotion
 
