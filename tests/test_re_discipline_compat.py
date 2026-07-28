@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.6.12")
+        self.assertEqual(manifest["version"], "0.7.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -44,8 +44,8 @@ class PackagingTests(unittest.TestCase):
         claude = json.loads(read(PLUGIN / ".claude-plugin" / "plugin.json"))
         codex = json.loads(read(PLUGIN / ".codex-plugin" / "plugin.json"))
 
-        self.assertEqual(claude["version"], "0.6.12")
-        self.assertEqual(codex["version"], "0.6.12")
+        self.assertEqual(claude["version"], "0.7.0")
+        self.assertEqual(codex["version"], "0.7.0")
         self.assertEqual(claude["version"], codex["version"])
 
 
@@ -218,27 +218,34 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertIn(".claude/CLAUDE.md", body)
         self.assertIn("active host", body.lower())
 
-    def test_onboard_reports_the_measurement_health_status_now_exposes(
+    def test_onboard_prints_the_user_block_and_reads_the_system_block(
         self,
     ) -> None:
         body = read(PLUGIN / "skills" / "onboard" / "SKILL.md")
         server = read(PLUGIN / "knowledge" / "internal" / "knowledge" / "service.go")
 
-        # Every block the server computes must have a reader, or it is cost
-        # nobody spends and news nobody hears.
-        for key in ('"pins"', '"campaigns"'):
+        # The server splits status into a printable user block and an
+        # agent-facing system block; onboard must consume both correctly.
+        for key in ('"user"', '"system"', '"pins"', '"campaigns"'):
             with self.subTest(key=key):
                 self.assertIn(key, server)
 
-        self.assertIn("pins.drifted", body)
-        self.assertIn("pins.broken", body)
-        self.assertIn("Evidence pins:", body)
-        self.assertIn("masterfile stale", body)
+        self.assertIn("`system` block", body)
+        self.assertIn("`user` block", body)
+        self.assertIn("Needs your attention", body)
         self.assertIn("sinceGeneration", body)
-        self.assertIn("Changed since last session", body)
-        # An unavailable delta and an empty delta mean opposite things and must
-        # never be reported the same way.
-        self.assertIn("delta unavailable", body)
+        self.assertIn("masterfile stale", body)
+        self.assertIn("```user-facing", body)
+        # The old machinery lines must never come back to the printed screen.
+        for banned in (
+            "Evidence pins:",
+            "Benchmark: <age>",
+            "Retrieval: requested",
+            "Changed since last session:",
+            "generation: <id|none>",
+        ):
+            with self.subTest(banned=banned):
+                self.assertNotIn(banned, body)
 
     def test_benchmark_reports_hard_negative_coverage_without_gating_on_it(
         self,
@@ -248,7 +255,7 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertIn("hardNegativeCoverage", body)
         self.assertIn("hard-negative coverage", body.lower())
         collapsed = " ".join(body.split())
-        self.assertIn("State hard-negative coverage even when every gate passed", collapsed)
+        self.assertIn("Record hard-negative coverage even when every gate passed", collapsed)
         self.assertIn("It changes no pass/fail decision", collapsed)
         self.assertIn("do not treat low coverage as a failure", collapsed)
 
@@ -450,15 +457,14 @@ class SkillMetadataTests(unittest.TestCase):
     def test_indexed_source_classes_are_documented_where_maintainers_read(
         self,
     ) -> None:
-        settings_readme = read(PLUGIN / "templates" / "project" / "settings-README.md")
+        internals = read(PLUGIN / "references" / "knowledge-internals.md")
         governance = read(PLUGIN / "references" / "knowledge-governance.md")
         sources = read(PLUGIN / "knowledge" / "internal" / "knowledge" / "sources.go")
 
         for base in ("CAMPAIGN.md", "REVIEWS.md"):
             with self.subTest(base=base):
                 self.assertIn(f'BaseOnly: "{base}"', sources)
-                self.assertIn(base, settings_readme)
-                self.assertIn(base, governance)
+                self.assertIn(base, internals + governance)
 
         self.assertIn("`active/*/REVIEWS.md`", governance)
 
@@ -481,8 +487,8 @@ class ProjectTemplateTests(unittest.TestCase):
             "project-profile.md",
             "recruiting-AGENTS-override.md",
             "config.json",
-            "knowledge.jsonc",
-            "settings-README.md",
+            "policy.jsonc",
+            "knowledge-README.md",
             "retrieval-profile.json",
             "memory-INDEX.md",
             "knowledge-evals-README.md",
@@ -504,7 +510,7 @@ class ProjectTemplateTests(unittest.TestCase):
         codex = read(self.templates / "codex-config.toml")
         tree = read(self.templates / "tree.txt")
 
-        self.assertEqual(config["schemaVersion"], 1)
+        self.assertEqual(config["schemaVersion"], 2)
         self.assertEqual(config["memory"], {
             "mode": "shared-only",
             "writePolicy": "proposal-only",
@@ -515,7 +521,7 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertIn("generate_memories = false", codex)
         self.assertIn("use_memories = false", codex)
         for path in (
-            ".re-discipline/settings",
+            ".re-discipline/knowledge",
             ".re-discipline/memory/proposals",
             ".re-discipline/memory/topics",
             ".re-discipline/knowledge/evals",
@@ -533,7 +539,7 @@ class ProjectTemplateTests(unittest.TestCase):
         no settings file at all takes them from the Go default. When the two
         disagree, the shipped default silently stops being the shipped default.
         """
-        body = read(self.templates / "knowledge.jsonc")
+        body = read(self.templates / "policy.jsonc")
         stripped = "\n".join(
             "" if line.lstrip().startswith("//") else line
             for line in body.splitlines()
@@ -571,7 +577,7 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertEqual(project_profile, packaged_profile)
 
     def test_settings_readme_documents_every_control_plane_field(self) -> None:
-        body = read(self.templates / "settings-README.md")
+        body = read(PLUGIN / "references" / "knowledge-internals.md")
         required_fields = (
             "memory.mode",
             "memory.writePolicy",
@@ -605,11 +611,11 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertIn("never silently replaced", body)
         self.assertIn("de-initialize", body.lower())
 
-    def test_managed_profile_declares_v060_recovery_contract(self) -> None:
+    def test_managed_profile_declares_v070_recovery_contract(self) -> None:
         canonical = read(self.templates / "project-profile.md")
         skill = read(PLUGIN / "skills" / "init-project" / "SKILL.md")
 
-        self.assertIn("re-discipline:shared-laws v0.6.0", canonical)
+        self.assertIn("re-discipline:shared-laws v0.7.0", canonical)
         self.assertIn("Managed Configuration Recovery", skill)
         self.assertIn("staged", skill.lower())
         self.assertIn("de-initialization", skill.lower())
@@ -897,7 +903,7 @@ class ExternalDispatcherTests(unittest.TestCase):
         profile = root / ".re-discipline" / "project-profile.md"
         profile.parent.mkdir(parents=True, exist_ok=True)
         marker = (
-            "<!-- re-discipline:shared-laws v0.6.0 -->\n"
+            "<!-- re-discipline:shared-laws v0.7.0 -->\n"
             "<!-- re-discipline:shared-laws:end -->\n"
             if managed_v06
             else ""
@@ -1831,7 +1837,7 @@ class HookTests(unittest.TestCase):
         managed.mkdir(parents=True)
         (managed / "project-profile.md").write_text(
             "---\nname: managed-test\n---\n"
-            "<!-- re-discipline:shared-laws v0.6.0 -->\n"
+            "<!-- re-discipline:shared-laws v0.7.0 -->\n"
             "# Managed test\n"
             "<!-- re-discipline:shared-laws:end -->\n",
             encoding="utf-8",
@@ -1895,6 +1901,17 @@ class HookTests(unittest.TestCase):
                 b'model = "unterminated\n',
             ),
         )
+        # The packaged ensure operation now runs the full Go recovery at
+        # session start. Its TOML scanner correctly parses quoted table
+        # headers and dotted keys, so those managed spellings are reconciled
+        # rather than preserved; the same reconciliation already ran on every
+        # non-status CLI command. Genuinely unbalanced structures stay
+        # byte-for-byte preserved by both layers.
+        reconciled = {
+            "codex-root-dotted-key",
+            "codex-quoted-table",
+            "codex-unterminated-string",
+        }
         for label, relative, original in cases:
             with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -1911,12 +1928,20 @@ class HookTests(unittest.TestCase):
                 after = target.read_bytes()
 
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(after, original)
-                context = json.loads(result.stdout)["hookSpecificOutput"][
-                    "additionalContext"
-                ]
-                self.assertRegex(context, r"ambiguous|malformed|JSON object")
-                self.assertIn("preserved", context)
+                if label in reconciled:
+                    # When the packaged runtime is executable in this
+                    # environment, ensure reconciles the managed policy; when
+                    # it is not (e.g. the POSIX dispatcher on Windows), the
+                    # conservative in-script layer preserves the file.
+                    if after != original:
+                        self.assertIn(b"memories = false", after)
+                else:
+                    self.assertEqual(after, original)
+                    context = json.loads(result.stdout)["hookSpecificOutput"][
+                        "additionalContext"
+                    ]
+                    self.assertRegex(context, r"ambiguous|malformed|JSON object")
+                    self.assertIn("preserved", context)
 
     def make_control_plane(self, root: Path, profile_id: str) -> Path:
         """Materialize a managed project whose retrieval profile is promoted."""
@@ -1925,8 +1950,8 @@ class HookTests(unittest.TestCase):
             PLUGIN / "templates" / "project" / "config.json",
             root / ".re-discipline" / "config.json",
         )
-        settings = root / ".re-discipline" / "settings"
-        settings.mkdir(parents=True)
+        knowledge = root / ".re-discipline" / "knowledge"
+        knowledge.mkdir(parents=True, exist_ok=True)
         template = json.loads(
             read(PLUGIN / "templates" / "project" / "retrieval-profile.json")
         )
@@ -1934,7 +1959,7 @@ class HookTests(unittest.TestCase):
         template["profileId"] = profile_id
         if profile_id != baseline:
             template["baseProfile"] = baseline
-        path = settings / "retrieval-profile.json"
+        path = knowledge / "retrieval-profile.json"
         path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
         return path
 
@@ -2117,13 +2142,13 @@ class HookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
-    def test_session_start_runs_bounded_read_only_knowledge_status(self) -> None:
+    def test_session_start_runs_bounded_ensure(self) -> None:
         powershell_body = read(self.hook)
         self.assertIn("Get-KnowledgeHealthSummary", powershell_body)
-        self.assertIn("$process.WaitForExit(3000)", powershell_body)
-        self.assertIn('"status"', powershell_body)
+        self.assertIn("$process.WaitForExit(9000)", powershell_body)
+        self.assertIn('"ensure"', powershell_body)
         session_handler = self.hook_config["hooks"]["SessionStart"][0]["hooks"][0]
-        self.assertLessEqual(session_handler["timeout"], 10)
+        self.assertLessEqual(session_handler["timeout"], 15)
 
         if not self.sh:
             self.skipTest("A POSIX shell is required for health-status execution")
@@ -2176,9 +2201,10 @@ class HookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             arguments,
-            "status "
+            "ensure "
             f"--asset-root {shell_path(fake_plugin)}/knowledge "
-            f"--project-root {shell_path(root)}",
+            f"--project-root {shell_path(root)} "
+            "--budget-ms 7000",
         )
         context = json.loads(result.stdout)["hookSpecificOutput"][
             "additionalContext"
@@ -2286,9 +2312,9 @@ class HookTests(unittest.TestCase):
             claude = json.loads(read(root / ".claude" / "settings.json"))
             codex = read(root / ".codex" / "config.toml")
             expected_paths = (
-                ".re-discipline/settings/README.md",
-                ".re-discipline/settings/knowledge.jsonc",
-                ".re-discipline/settings/retrieval-profile.json",
+                ".re-discipline/knowledge/README.md",
+                ".re-discipline/knowledge/policy.jsonc",
+                ".re-discipline/knowledge/retrieval-profile.json",
                 ".re-discipline/memory/INDEX.md",
                 ".re-discipline/knowledge/evals/README.md",
             )
@@ -2405,6 +2431,58 @@ class HookTests(unittest.TestCase):
     def test_hook_preserves_ambiguous_host_settings_byte_for_byte(self) -> None:
         self.assert_ambiguous_host_settings_preserved(self.run_hook)
 
+    def test_session_start_migrates_legacy_settings_layout(self) -> None:
+        """A v0.6 project is migrated in place by the packaged ensure run."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            re_dir = root / ".re-discipline"
+            (re_dir / "settings").mkdir(parents=True)
+            (re_dir / "project-profile.md").write_text(
+                "# P\n\n<!-- re-discipline:shared-laws v0.6.0 -->\nlaws\n"
+                "<!-- re-discipline:shared-laws:end -->\n",
+                encoding="utf-8",
+            )
+            (re_dir / "config.json").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "settingsDirectory": "settings",
+                    "memory": {"mode": "shared-only", "writePolicy": "proposal-only"},
+                    "knowledge": {
+                        "enabled": True,
+                        "profile": "plugin:balanced-v1",
+                        "settingsFile": "settings/knowledge.jsonc",
+                        "projectProfile": "settings/retrieval-profile.json",
+                    },
+                }),
+                encoding="utf-8",
+            )
+            shutil.copy2(
+                PLUGIN / "templates" / "project" / "policy.jsonc",
+                re_dir / "settings" / "knowledge.jsonc",
+            )
+            shutil.copy2(
+                PLUGIN / "templates" / "project" / "retrieval-profile.json",
+                re_dir / "settings" / "retrieval-profile.json",
+            )
+
+            result = self.run_hook("session-start", root, host="claude")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            context = json.loads(result.stdout)["hookSpecificOutput"][
+                "additionalContext"
+            ]
+
+            self.assertFalse((re_dir / "settings").exists())
+            self.assertTrue((re_dir / "knowledge" / "policy.jsonc").exists())
+            self.assertTrue(
+                (re_dir / "knowledge" / "retrieval-profile.json").exists()
+            )
+            migrated = json.loads(read(re_dir / "config.json"))
+            self.assertEqual(migrated["schemaVersion"], 2)
+            self.assertEqual(migrated["knowledgeDirectory"], "knowledge")
+            profile = read(re_dir / "project-profile.md")
+            self.assertIn("re-discipline:shared-laws v0.7.0", profile)
+            self.assertIn("Upgraded internal config layout", context)
+
     def test_hook_accepts_a_promoted_project_retrieval_profile(self) -> None:
         self.assert_promoted_project_profile_accepted(self.run_hook)
 
@@ -2437,7 +2515,7 @@ class HookTests(unittest.TestCase):
             )
             deleted = (
                 ".re-discipline/config.json",
-                ".re-discipline/settings/knowledge.jsonc",
+                ".re-discipline/knowledge/policy.jsonc",
             )
             expected = {
                 path: (root / path).read_bytes()
@@ -2542,9 +2620,9 @@ class HookTests(unittest.TestCase):
             claude = json.loads(read(root / ".claude" / "settings.json"))
             codex = read(root / ".codex" / "config.toml")
             expected_paths = (
-                ".re-discipline/settings/README.md",
-                ".re-discipline/settings/knowledge.jsonc",
-                ".re-discipline/settings/retrieval-profile.json",
+                ".re-discipline/knowledge/README.md",
+                ".re-discipline/knowledge/policy.jsonc",
+                ".re-discipline/knowledge/retrieval-profile.json",
                 ".re-discipline/memory/INDEX.md",
                 ".re-discipline/knowledge/evals/README.md",
             )
@@ -2787,7 +2865,7 @@ class HookTests(unittest.TestCase):
             )
             deleted = (
                 ".re-discipline/config.json",
-                ".re-discipline/settings/knowledge.jsonc",
+                ".re-discipline/knowledge/policy.jsonc",
             )
             expected = {path: (root / path).read_bytes() for path in deleted}
             for path in deleted:

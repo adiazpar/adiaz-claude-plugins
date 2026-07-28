@@ -249,7 +249,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             "plugin://re-discipline/schemas/runtime-package-manifest.schema.json",
         )
         self.assertEqual(manifest["runtime"]["name"], "re-discipline-knowledge")
-        self.assertEqual(manifest["runtime"]["version"], "0.6.0")
+        self.assertEqual(manifest["runtime"]["version"], "0.7.0")
         self.assertRegex(manifest["runtime"]["buildId"], r"^sha256:[0-9a-f]{64}$")
         self.assertFalse(manifest["build"]["cgoEnabled"])
         self.assertRegex(
@@ -654,7 +654,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
         )
         status = responses[3]["result"]
         self.assertFalse(status["isError"], status)
-        status_body = status["structuredContent"]
+        status_body = status["structuredContent"]["system"]
         self.assertEqual(status_body["configuration"]["memoryMode"], "shared-only")
         self.assertFalse(status_body["configuration"]["nativeMemoryTouched"])
         search = responses[4]["result"]
@@ -669,8 +669,8 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
     def test_relocated_codex_and_claude_launch_same_shared_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            claude_copy = temporary / "claude-cache" / "re-discipline" / "0.6.0"
-            codex_copy = temporary / "codex-cache" / "re-discipline" / "0.6.0"
+            claude_copy = temporary / "claude-cache" / "re-discipline" / "0.7.0"
+            codex_copy = temporary / "codex-cache" / "re-discipline" / "0.7.0"
             shutil.copytree(PLUGIN, claude_copy, copy_function=copy_or_link)
             shutil.copytree(PLUGIN, codex_copy, copy_function=copy_or_link)
             project = temporary / "project"
@@ -687,7 +687,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                 codex_copy, codex_declaration, project, environment
             )
             self.assertEqual(
-                preflight["configuration"]["memoryMode"],
+                preflight["system"]["configuration"]["memoryMode"],
                 "shared-only",
             )
             self.assertTrue((project / ".re-discipline" / "config.json").is_file())
@@ -726,7 +726,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
         for relative, malformed in (
             (".re-discipline/config.json", b'{"schemaVersion":'),
             (
-                ".re-discipline/settings/knowledge.jsonc",
+                ".re-discipline/knowledge/policy.jsonc",
                 b'{"schemaVersion":1,"sources":',
             ),
         ):
@@ -761,10 +761,10 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(status.returncode, 0, status.stderr)
                 status_body = json.loads(status.stdout)
-                self.assertFalse(status_body["configuration"]["valid"], status_body)
-                self.assertTrue(status_body["configuration"]["errors"], status_body)
+                self.assertFalse(status_body["system"]["configuration"]["valid"], status_body)
+                self.assertTrue(status_body["system"]["configuration"]["errors"], status_body)
                 self.assertFalse(
-                    status_body["index"]["mutationPerformed"], status_body
+                    status_body["system"]["index"]["mutationPerformed"], status_body
                 )
                 self.assertEqual(control_path.read_bytes(), malformed)
                 self.assertEqual(snapshot_tree(cache_root), cache_before)
