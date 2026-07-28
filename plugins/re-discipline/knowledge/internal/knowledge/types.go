@@ -76,11 +76,11 @@ type KnowledgeSettings struct {
 }
 
 type SourceSettings struct {
-	Truth           bool               `json:"truth"`
-	History         bool               `json:"history"`
-	Backlog         bool               `json:"backlog"`
-	ActiveCampaigns bool               `json:"activeCampaigns"`
-	SharedMemory    bool               `json:"sharedMemory"`
+	Truth           bool `json:"truth"`
+	History         bool `json:"history"`
+	Backlog         bool `json:"backlog"`
+	ActiveCampaigns bool `json:"activeCampaigns"`
+	SharedMemory    bool `json:"sharedMemory"`
 	// DrafterReports indexes active/*/subagents/*/report.md. Reviewed reports
 	// land in the `campaign` tier; unreviewed ones in `draft`, which is in no
 	// default tier set and must be asked for by name.

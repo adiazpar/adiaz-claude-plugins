@@ -105,9 +105,9 @@ type DocumentPrelude struct {
 }
 
 var (
-	preludeVerdictRE    = regexp.MustCompile(`(?ms)^#{1,4}[ \t]*\d*\.?[ \t]*VERDICT\b[^\n]*\n+(.*?)(?:\n#{1,4}[ \t]|\z)`)
-	preludeOverallRE    = regexp.MustCompile(`(?mi)^#{0,4}[ \t]*\**\s*OVERALL CONFIDENCE\**[: \t]*(.*)$`)
-	preludeReviewRE     = regexp.MustCompile(`(?m)^\*\*Review:\*\*[ \t]*(.*)$`)
+	preludeVerdictRE      = regexp.MustCompile(`(?ms)^#{1,4}[ \t]*\d*\.?[ \t]*VERDICT\b[^\n]*\n+(.*?)(?:\n#{1,4}[ \t]|\z)`)
+	preludeOverallRE      = regexp.MustCompile(`(?mi)^#{0,4}[ \t]*\**\s*OVERALL CONFIDENCE\**[: \t]*(.*)$`)
+	preludeReviewRE       = regexp.MustCompile(`(?m)^\*\*Review:\*\*[ \t]*(.*)$`)
 	preludeVerdictLabelRE = regexp.MustCompile(
 		`^(?i)(VERDICT|DIRECT|INFERRED|CONFIRMED|REFUTED|PARTIAL)[ \t]*[:\-]+[ \t]*`)
 	preludeDispositionRE = regexp.MustCompile(`(?m)^\*\*Disposition:\*\*[ \t]*(.*)$`)

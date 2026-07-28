@@ -1,4 +1,4 @@
-﻿package knowledge
+package knowledge
 
 import (
 	"strings"
@@ -130,4 +130,3 @@ func TestPreludeHandlesCRLFAndMultibyte(t *testing.T) {
 		t.Fatalf("prelude must be a single line: %q", rendered)
 	}
 }
-

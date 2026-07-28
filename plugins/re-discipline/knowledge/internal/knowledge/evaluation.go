@@ -1,4 +1,4 @@
-﻿package knowledge
+package knowledge
 
 import (
 	"context"
@@ -110,13 +110,13 @@ type QualityMetrics struct {
 	// CitationMetadataViolations counts malformed or foreign-generation
 	// citations only. Unlike CitationViolations it carries no recall
 	// component, so it is safe to use as an absolute gate.
-	CitationMetadataViolations int `json:"citationMetadataViolations"`
-	HardNegativeHits         int     `json:"hardNegativeHits"`
-	RelevantTokenRatio       float64 `json:"relevantTokenRatio"`
-	DuplicateTokenRatio      float64 `json:"duplicateTokenRatio"`
-	DeterministicReplayRate  float64 `json:"deterministicReplayRate"`
-	P50LatencyMillis         int64   `json:"p50LatencyMillis"`
-	P95LatencyMillis         int64   `json:"p95LatencyMillis"`
+	CitationMetadataViolations int     `json:"citationMetadataViolations"`
+	HardNegativeHits           int     `json:"hardNegativeHits"`
+	RelevantTokenRatio         float64 `json:"relevantTokenRatio"`
+	DuplicateTokenRatio        float64 `json:"duplicateTokenRatio"`
+	DeterministicReplayRate    float64 `json:"deterministicReplayRate"`
+	P50LatencyMillis           int64   `json:"p50LatencyMillis"`
+	P95LatencyMillis           int64   `json:"p95LatencyMillis"`
 }
 
 type ProfileBenchmark struct {
@@ -2063,4 +2063,3 @@ func (service *Service) loadProjectEvalCases() ([]EvalCase, error) {
 	}
 	return cases, nil
 }
-
