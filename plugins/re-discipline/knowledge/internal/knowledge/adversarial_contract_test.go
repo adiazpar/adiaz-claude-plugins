@@ -1642,9 +1642,13 @@ func TestAdversarialExactFTSDenseGraphCitationsBudgetsAndReplay(t *testing.T) {
 		t.Fatalf("context pack does not bind the indexed execution identity: %#v", pack)
 	}
 
-	status, err := service.Status(ctx)
+	statusPayload, err := service.Status(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	status, ok := statusPayload["system"].(map[string]any)
+	if !ok {
+		t.Fatalf("status omitted the system block: %#v", statusPayload)
 	}
 	statusRuntime, ok := status["runtime"].(RuntimeIdentity)
 	if !ok || statusRuntime != selected.Runtime {

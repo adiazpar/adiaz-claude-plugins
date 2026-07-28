@@ -76,10 +76,11 @@ func TestStatusReportsEvidencePinHealth(t *testing.T) {
 		t.Fatalf("an intact census named non-intact paths: %+v", intact.NonIntactPaths)
 	}
 
-	status, err := service.Status(ctx)
+	statusPayload, err := service.Status(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	status := statusPayload["system"].(map[string]any)
 	if _, present := status["pins"]; !present {
 		t.Fatal("status omitted the evidence-pin census")
 	}
@@ -145,10 +146,11 @@ func TestHardNegativeCoverageIsReportedNotGated(t *testing.T) {
 		t.Fatalf("coverage = %+v, want 1 of 2 cases with 1 declared path", coverage)
 	}
 
-	status, err := service.Status(context.Background())
+	statusPayload, err := service.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	status := statusPayload["system"].(map[string]any)
 	benchmark, ok := status["benchmark"].(map[string]any)
 	if !ok {
 		t.Fatal("status omitted the benchmark block")
@@ -199,10 +201,11 @@ func TestStatusFlagsCampaignMasterfilesLeftBehind(t *testing.T) {
 		t.Fatal("a stale masterfile did not name the work it fell behind")
 	}
 
-	status, err := service.Status(context.Background())
+	statusPayload, err := service.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	status := statusPayload["system"].(map[string]any)
 	reported, ok := status["campaigns"].([]CampaignState)
 	if !ok || len(reported) != 1 || !reported[0].Stale {
 		t.Fatalf("status campaigns block = %#v", status["campaigns"])

@@ -339,7 +339,7 @@ func TestAdversarialMCPInitializeToolsAndStructuredResults(t *testing.T) {
 	if len(asArray(t, toolsResult["tools"])) != 7 {
 		t.Fatalf("tools/list result is incomplete: %#v", toolsResult)
 	}
-	status := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
+	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))["system"])
 	configuration := asObject(t, status["configuration"])
 	if configuration["nativeMemoryTouched"] != false {
 		t.Fatal("knowledge status reported native-memory mutation")
@@ -408,7 +408,7 @@ func TestAdversarialMCPExplicitStatusDoesNotRecoverAnUngrantedRoot(t *testing.T)
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
 		toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
 	)
-	status := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
 	configuration := asObject(t, status["configuration"])
 	if configuration["valid"] != false {
 		t.Fatalf("explicit diagnostic status concealed missing configuration: %#v", status)
@@ -800,9 +800,13 @@ func TestAdversarialMalformedConfigurationHasReadOnlyStatusAndFailsClosed(t *tes
 			if err != nil {
 				t.Fatalf("malformed ordinary configuration blocked diagnostic service: %v", err)
 			}
-			status, err := service.Status(context.Background())
+			statusPayload, err := service.Status(context.Background())
 			if err != nil {
 				t.Fatalf("read-only status failed for malformed configuration: %v", err)
+			}
+			status, systemOK := statusPayload["system"].(map[string]any)
+			if !systemOK {
+				t.Fatalf("status omitted the system block: %#v", statusPayload)
 			}
 			configuration, ok := status["configuration"].(map[string]any)
 			if !ok || configuration["valid"] != false {
@@ -847,7 +851,8 @@ func TestAdversarialMalformedConfigurationHasReadOnlyStatusAndFailsClosed(t *tes
 					"tokenBudget": 1024, "projectRoot": root,
 				}),
 			)
-			mcpStatus := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+			mcpStatus := asObject(t,
+				assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
 			mcpConfiguration := asObject(t, mcpStatus["configuration"])
 			if mcpConfiguration["valid"] != false {
 				t.Fatalf("MCP status did not preserve invalid diagnostics: %#v", mcpStatus)
