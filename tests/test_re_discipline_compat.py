@@ -2766,9 +2766,11 @@ class HookTests(unittest.TestCase):
             outside.mkdir()
             sentinel = outside / "sentinel.txt"
             sentinel.write_text("OUTSIDE_SENTINEL", encoding="utf-8")
-            settings_link = root / ".re-discipline" / "settings"
+            # The link must sit on a directory the hook actually manages under
+            # the v0.7.0 layout; a link on a retired path proves nothing.
+            knowledge_link = root / ".re-discipline" / "knowledge"
             try:
-                settings_link.symlink_to(outside, target_is_directory=True)
+                knowledge_link.symlink_to(outside, target_is_directory=True)
             except OSError as error:
                 self.skipTest(f"directory symlinks are unavailable: {error}")
 
@@ -2776,7 +2778,12 @@ class HookTests(unittest.TestCase):
             sentinel_after = sentinel.read_text(encoding="utf-8")
             escaped_files = tuple(
                 (outside / name).exists()
-                for name in ("README.md", "knowledge.jsonc", "retrieval-profile.json")
+                for name in (
+                    "README.md",
+                    "policy.jsonc",
+                    "retrieval-profile.json",
+                    "evals",
+                )
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
