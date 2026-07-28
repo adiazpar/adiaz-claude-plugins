@@ -145,6 +145,13 @@ already failed:
   file under its own campaign directory. The masterfile is the cold-resume
   surface and the only campaign file that rots by standing still.
 
+`orient` accepts a `sinceGeneration` a caller has already seen and answers with
+the document-level delta. The delta rides beside the pack and is not part of
+its digest, because a pack is a reproducible citable artifact and what one
+caller last saw is neither. When the recorded history no longer reaches that
+generation the delta reports itself unavailable; report that as unavailable,
+never as no change.
+
 ## Memory Proposals
 
 Treat every memory candidate as provisional. Store it only under

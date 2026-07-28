@@ -486,10 +486,11 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 		return service.Status(ctx)
 	case "orient":
 		var input struct {
-			ProjectRoot string `json:"projectRoot"`
-			Role        string `json:"role"`
-			TokenBudget int    `json:"tokenBudget"`
-			Verbosity   string `json:"verbosity"`
+			ProjectRoot     string `json:"projectRoot"`
+			Role            string `json:"role"`
+			TokenBudget     int    `json:"tokenBudget"`
+			Verbosity       string `json:"verbosity"`
+			SinceGeneration string `json:"sinceGeneration"`
 		}
 		if err := decodeToolInput(body, &input); err != nil {
 			return nil, err
@@ -498,8 +499,25 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 		if err != nil {
 			return nil, err
 		}
-		return service.OrientVerbosity(
+		pack, err := service.OrientVerbosity(
 			ctx, input.Role, input.TokenBudget, input.Verbosity)
+		if err != nil {
+			return nil, err
+		}
+		if input.SinceGeneration == "" {
+			return pack, nil
+		}
+		// The delta rides beside the pack, never inside it. A pack's digest
+		// covers a citable artifact reproducible from its generation; what one
+		// particular caller last saw is neither citable nor reproducible, and
+		// folding it in would give two callers asking the same question two
+		// different pack identities over identical evidence.
+		object, err := toObject(pack)
+		if err != nil {
+			return nil, err
+		}
+		object["delta"] = service.GenerationDeltaSince(ctx, input.SinceGeneration)
+		return object, nil
 	case "search":
 		var input struct {
 			ProjectRoot  string   `json:"projectRoot"`
@@ -697,6 +715,14 @@ func toolDefinitions() []map[string]any {
 				"role":        map[string]any{"type": "string", "enum": []string{"manager", "drafter"}, "default": "manager"},
 				"tokenBudget": integerSchema(512, 8192),
 				"verbosity":   verbosity,
+				"sinceGeneration": map[string]any{
+					"type": "string", "pattern": "^generation-[0-9a-f]{20}$",
+					"description": "A generation ID this caller has already seen. The response then " +
+						"carries a sibling `delta` object listing the documents added, changed, and " +
+						"removed since then, with their tiers. The delta sits beside the pack and is " +
+						"not part of its digest. When the recorded history does not reach back that " +
+						"far the delta reports itself unavailable rather than implying nothing changed.",
+				},
 			}, nil),
 			"annotations": readOnly,
 		},

@@ -225,10 +225,26 @@ func (manager IndexManager) ensure(
 		verifyDatabase(current.Database) == nil {
 		reusePath = current.Database
 	}
+	// The document-level difference between the outgoing and the incoming corpus
+	// exists only during a publication and was previously discarded. A session
+	// resuming days later can ask what moved only if somebody wrote it down, so
+	// read the outgoing document set now, while the generation it belongs to is
+	// still current and still on disk.
+	previousID := ""
+	var previousDocuments map[string]documentRecord
+	if err == nil && current.ID != "" {
+		if documents, documentsErr := readGenerationDocuments(
+			current.Database,
+		); documentsErr == nil {
+			previousID, previousDocuments = current.ID, documents
+		}
+	}
 	generation, err := manager.build(ctx, inventory, runtimeIdentity, reusePath)
 	if err != nil {
 		return Generation{}, inventory, false, err
 	}
+	recordGenerationDelta(manager.CacheRoot, buildGenerationDelta(
+		previousID, previousDocuments, generation, inventory))
 	if corruptPath != "" && filepath.Clean(corruptPath) != filepath.Clean(generation.Database) {
 		if err := quarantineCorruptGeneration(corruptPath); err != nil {
 			return Generation{}, inventory, false, err
