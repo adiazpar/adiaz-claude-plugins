@@ -1276,6 +1276,9 @@ func TestAdversarialLearnedDenseRetrievalAddsNoOverlapSemanticRecall(t *testing.
 			response, err := service.Search(context.Background(), SearchOptions{
 				Query: testCase.query, QueryClass: "conceptual",
 				AllowedTiers: []string{"truth"}, Limit: 12, TokenBudget: 1024,
+				// Lane ranks are ranking diagnostics that only a verbose
+				// response carries.
+				Verbosity: VerbosityVerbose,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1544,6 +1547,9 @@ func TestAdversarialExactFTSDenseGraphCitationsBudgetsAndReplay(t *testing.T) {
 	options := SearchOptions{
 		Query: "A1B2C3D4", QueryClass: "exact", AllowedTiers: []string{"truth"},
 		Limit: 12, TokenBudget: 512,
+		// The full execution identity this asserts is exactly what a compact
+		// response drops as re-derivable; ask for the canonical form.
+		Verbosity: VerbosityVerbose,
 	}
 	first, err := service.Search(ctx, options)
 	if err != nil {
@@ -2880,7 +2886,7 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 			"role", "allowedTiers", "requestedProfile", "effectiveProfile",
 			"activeLanes", "models", "fallbackReason", "tokenBudget", "estimatedTokens",
 			"passages", "omitted",
-		}, nil)
+		}, []string{"verbosity"})
 
 		generation := adversarialSchemaMap(t, root, "generation")
 		generationFields := assertAdversarialClosedSchemaObject(
@@ -2915,12 +2921,15 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 		passageItem := adversarialSchemaMap(t, passages, "items")
 		passage := assertAdversarialClosedSchemaObject(t, "context pack passage", passageItem, []string{
 			"chunkId", "passage", "citation",
-		}, nil)
+		}, []string{"documentContext"})
 
 		citation := adversarialSchemaMap(t, passage, "citation")
+		// sourceHash is optional because a compact pack drops it as
+		// re-derivable by hashing the cited file. The URI stays mandatory: it
+		// is what binds each passage to the generation the pack claims.
 		citationFields := assertAdversarialClosedSchemaObject(t, "context pack citation", citation, []string{
-			"path", "heading", "startLine", "endLine", "sourceHash", "passageHash", "tier", "uri",
-		}, nil)
+			"path", "heading", "startLine", "endLine", "passageHash", "tier", "uri",
+		}, []string{"sourceHash", "contextHash", "durability"})
 		assertAdversarialSchemaPattern(t, "citation path",
 			adversarialSchemaMap(t, citationFields, "path"),
 			[]string{
@@ -3023,6 +3032,11 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 			[]string{
 				"evaluatedAt", "evalFingerprint", "corpusFingerprint",
 				"modelFingerprint", "runtimeFingerprint",
+				// Segmentation identity distinguishes an actionable re-chunk
+				// from an informational corpus edit; the ratified scores are
+				// the calibration ratchet's floor.
+				"chunkerVersion", "parserVersion",
+				"ratifiedHardNegativeHits", "ratifiedAbstentionAccuracy",
 			})
 		for _, name := range []string{
 			"evalFingerprint", "corpusFingerprint",
@@ -3384,6 +3398,8 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		search, err := service.Search(ctx, SearchOptions{
 			Query: "A1B2C3D4", QueryClass: "exact",
 			AllowedTiers: []string{"truth"}, Limit: 5, TokenBudget: 512,
+			// The generation-scoped URI is the handle under test here.
+			Verbosity: VerbosityVerbose,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -3480,10 +3496,15 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		}()
 		successes := 0
 		for iteration := 0; iteration < 16; iteration++ {
-			pack, err := service.ContextPackRequired(
-				context.Background(), "engine frame checksum", "drafter",
-				[]string{"truth"}, 1024, []string{"docs/truth/engine.md"},
-			)
+			pack, err := service.ContextPackOptions(
+				context.Background(), ContextPackRequest{
+					Task: "engine frame checksum", Role: "drafter",
+					Tiers: []string{"truth"}, TokenBudget: 1024,
+					RequiredPaths: []string{"docs/truth/engine.md"},
+					// Generation scoping is asserted through the citation URI,
+					// which only a verbose pack carries.
+					Verbosity: VerbosityVerbose,
+				})
 			if err != nil {
 				continue
 			}

@@ -115,7 +115,11 @@
               "evalFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
               "corpusFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
               "modelFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
-              "runtimeFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+              "runtimeFingerprint": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+              "chunkerVersion": {"type": "string", "minLength": 1, "maxLength": 100},
+              "parserVersion": {"type": "string", "minLength": 1, "maxLength": 100},
+              "ratifiedHardNegativeHits": {"type": "integer", "minimum": 0},
+              "ratifiedAbstentionAccuracy": {"type": "number", "minimum": 0, "maximum": 1}
             }
           }
         }

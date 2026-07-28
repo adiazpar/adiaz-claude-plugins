@@ -102,6 +102,7 @@ func (service *Service) RunProjectBenchmark(
 	}
 	defer lease.Release()
 	service.PinGeneration(generation)
+	defer service.flushTelemetry()
 	evalFingerprint, _ := CanonicalDigest(cases)
 	report := ProjectBenchmarkReport{
 		SchemaVersion: 1, RunID: nowRunID("benchmark"), Mode: mode,

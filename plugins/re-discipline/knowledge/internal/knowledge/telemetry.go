@@ -56,6 +56,45 @@ func (service *Service) recordTelemetry(observation telemetryObservation) {
 		return
 	}
 	service.telemetryMu.Lock()
+	if service.pinnedGeneration != nil {
+		// A pinned service is a measurement run: thousands of queries issued
+		// back to back against one frozen generation. Persisting each one costs
+		// a read, a lock create, an atomic write and a lock remove - six file
+		// operations per query, which measured as the single largest remaining
+		// cost of a full benchmark. Buffer them instead and fold the whole run
+		// into one read-modify-write at flushTelemetry.
+		//
+		// The counters are identical either way; only the moment they land
+		// moves. A run that dies before flushing loses its own aggregate
+		// metrics, never a durable artifact: the benchmark report is written
+		// separately. Every interactive path is unpinned and still persists per
+		// call, so status in a normal session is unaffected.
+		service.telemetryBuffer = append(service.telemetryBuffer, observation)
+		service.telemetryMu.Unlock()
+		return
+	}
+	service.telemetryMu.Unlock()
+	service.persistTelemetry(observation)
+}
+
+// flushTelemetry folds every observation buffered during a pinned measurement
+// run into the persisted aggregate in one read-modify-write.
+func (service *Service) flushTelemetry() {
+	service.telemetryMu.Lock()
+	buffered := service.telemetryBuffer
+	service.telemetryBuffer = nil
+	service.telemetryMu.Unlock()
+	if len(buffered) == 0 {
+		return
+	}
+	service.persistTelemetry(buffered...)
+}
+
+func (service *Service) persistTelemetry(observations ...telemetryObservation) {
+	if len(observations) == 0 {
+		return
+	}
+	service.telemetryMu.Lock()
 	defer service.telemetryMu.Unlock()
 	telemetryProcessMu.Lock()
 	defer telemetryProcessMu.Unlock()
@@ -88,6 +127,24 @@ func (service *Service) recordTelemetry(observation telemetryObservation) {
 	} else if !errors.Is(readErr, os.ErrNotExist) {
 		return
 	}
+	for _, observation := range observations {
+		applyTelemetryObservation(&aggregate, observation)
+	}
+	sort.Slice(aggregate.Entries, func(i, j int) bool {
+		if aggregate.Entries[i].Operation != aggregate.Entries[j].Operation {
+			return aggregate.Entries[i].Operation < aggregate.Entries[j].Operation
+		}
+		return aggregate.Entries[i].EffectiveProfile <
+			aggregate.Entries[j].EffectiveProfile
+	})
+	_ = AtomicWriteJSON(path, aggregate, 0o600)
+}
+
+// applyTelemetryObservation folds one observation into the bounded aggregate.
+func applyTelemetryObservation(
+	aggregate *TelemetryAggregate,
+	observation telemetryObservation,
+) {
 	profile := observation.EffectiveProfile
 	if separator := strings.IndexByte(profile, '@'); separator >= 0 {
 		profile = profile[:separator]
@@ -146,17 +203,12 @@ func (service *Service) recordTelemetry(observation telemetryObservation) {
 		entry.Results, uint64(maxInt(0, observation.Results)))
 	entry.Omissions = saturatingAdd(
 		entry.Omissions, uint64(maxInt(0, observation.Omissions)))
-	sort.Slice(aggregate.Entries, func(i, j int) bool {
-		if aggregate.Entries[i].Operation != aggregate.Entries[j].Operation {
-			return aggregate.Entries[i].Operation < aggregate.Entries[j].Operation
-		}
-		return aggregate.Entries[i].EffectiveProfile <
-			aggregate.Entries[j].EffectiveProfile
-	})
-	_ = AtomicWriteJSON(path, aggregate, 0o600)
 }
 
 func (service *Service) telemetryStatus() map[string]any {
+	// Report what the aggregate will contain, not what a mid-run buffer has
+	// not written yet.
+	service.flushTelemetry()
 	mode := service.effectiveSettings().Telemetry.Mode
 	if mode != "metrics-only" {
 		return map[string]any{"mode": "off", "persisted": false}

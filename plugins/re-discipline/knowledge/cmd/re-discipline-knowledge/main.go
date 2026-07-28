@@ -194,6 +194,10 @@ func run(ctx context.Context, args []string) error {
 	limit := flags.Int("limit", 12, "maximum passages")
 	tokenBudget := flags.Int("token-budget", 1024, "hard estimated-token budget")
 	role := flags.String("role", "manager", "manager or drafter")
+	verbosity := flags.String(
+		"verbosity", "compact",
+		"compact omits re-derivable citation and provenance metadata; verbose keeps it",
+	)
 	task := flags.String("task", "", "context-pack task")
 	output := flags.String("output", "", "managed context-pack materialization path")
 	expectedDigest := flags.String(
@@ -253,7 +257,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		value, err := service.DeterministicReplay(ctx, knowledge.SearchOptions{
 			Query: *query, QueryClass: *queryClass, AllowedTiers: splitCSV(*tiers),
-			Limit: *limit, TokenBudget: *tokenBudget,
+			Limit: *limit, TokenBudget: *tokenBudget, Verbosity: *verbosity,
 		})
 		if err != nil {
 			return err
@@ -263,7 +267,10 @@ func run(ctx context.Context, args []string) error {
 		if strings.TrimSpace(*task) == "" {
 			return fmt.Errorf("--task is required")
 		}
-		pack, err := service.ContextPack(ctx, *task, *role, splitCSV(*tiers), *tokenBudget)
+		pack, err := service.ContextPackOptions(ctx, knowledge.ContextPackRequest{
+			Task: *task, Role: *role, Tiers: splitCSV(*tiers),
+			TokenBudget: *tokenBudget, Verbosity: *verbosity,
+		})
 		if err != nil {
 			return err
 		}

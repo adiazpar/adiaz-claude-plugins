@@ -27,13 +27,15 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:97ff3e1df21a2c568411505858d081cb411ee9495b3d57904436a836f1697019",
+        "digest": "sha256:7c04b2fa09d4ba2c965d8a6a3b8e3de5a230abdc7d995c825f2025df0bcccb32",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
         "corpusFingerprint": "sha256:218f26f0e320200ccc40c25286facc699ab1f0aac4c14759dd2e4b1179c0459d",
         "modelFingerprint": "sha256:b03281aea63b190f059608dfc3262d65a814e32c746e5b54cd2b643f53cb8630",
-        "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55"
+        "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55",
+        "chunkerVersion": "section-block-v3",
+        "parserVersion": "markdown-structure-v1"
       }
     },
     {
@@ -59,13 +61,15 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:cc0fbea1b6c0322d528d55618fec9c27380791202e6c4e3db0fdf536871a33a6",
+        "digest": "sha256:c64fc864065ddc77569a16437e89027a51558b43cc0da7f9de69a22961e3e945",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
         "corpusFingerprint": "sha256:218f26f0e320200ccc40c25286facc699ab1f0aac4c14759dd2e4b1179c0459d",
         "modelFingerprint": "sha256:b03281aea63b190f059608dfc3262d65a814e32c746e5b54cd2b643f53cb8630",
-        "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55"
+        "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55",
+        "chunkerVersion": "section-block-v3",
+        "parserVersion": "markdown-structure-v1"
       }
     },
     {
@@ -91,13 +95,15 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:b7d5dce54f2dd4333cac8cae6e98273d13685fb4ccb49a41dffe0fe386634bcf",
+        "digest": "sha256:d002513de7778c0efed20b2d11cfb06cb4442e7237f9c0e10f5a182096bbc29f",
         "status": "passed",
         "evaluatedAt": "2026-07-26T13:52:57Z",
         "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
         "corpusFingerprint": "sha256:218f26f0e320200ccc40c25286facc699ab1f0aac4c14759dd2e4b1179c0459d",
         "modelFingerprint": "sha256:b03281aea63b190f059608dfc3262d65a814e32c746e5b54cd2b643f53cb8630",
-        "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55"
+        "runtimeFingerprint": "sha256:745c97b13a6b0c01239882986b0118bc9e8ca19cb78443f69849dd70d6516e55",
+        "chunkerVersion": "section-block-v3",
+        "parserVersion": "markdown-structure-v1"
       }
     }
   ]

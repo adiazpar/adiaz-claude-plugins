@@ -899,6 +899,9 @@ func TestAdversarialReplayAcrossEveryEffectiveFallback(t *testing.T) {
 			options := SearchOptions{
 				Query: "engine frame serialization checksum", QueryClass: "conceptual",
 				AllowedTiers: []string{"truth"}, Limit: 12, TokenBudget: 1024,
+				// Requested-profile identity is verbose provenance; a compact
+				// response reports only what actually served.
+				Verbosity: VerbosityVerbose,
 			}
 			first, err := service.Search(ctx, options)
 			if err != nil {

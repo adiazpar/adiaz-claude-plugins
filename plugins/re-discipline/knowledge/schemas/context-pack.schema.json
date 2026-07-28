@@ -54,6 +54,7 @@
     "fallbackReason": {"type": ["string", "null"]},
     "tokenBudget": {"type": "integer", "minimum": 512, "maximum": 8192},
     "estimatedTokens": {"type": "integer", "minimum": 1, "maximum": 8192},
+    "verbosity": {"enum": ["compact", "verbose"]},
     "passages": {
       "type": "array",
       "maxItems": 50,
@@ -64,10 +65,11 @@
         "properties": {
           "chunkId": {"type": "string", "minLength": 1},
           "passage": {"type": "string"},
+          "documentContext": {"type": "string", "maxLength": 384},
           "citation": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "heading", "startLine", "endLine", "sourceHash", "passageHash", "tier", "uri"],
+            "required": ["path", "heading", "startLine", "endLine", "passageHash", "tier", "uri"],
             "properties": {
               "path": {"type": "string", "minLength": 1, "pattern": "^(?:[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.\\.[^/\\\\:\\x00]+)(?:/(?:[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.\\.[^/\\\\:\\x00]+))*$"},
               "heading": {"type": "string"},
@@ -76,7 +78,9 @@
               "sourceHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
               "passageHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
               "tier": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset"]},
-              "uri": {"type": "string", "pattern": "^re-discipline://generation-[a-f0-9]{20}/(?:chunks|sources)/.+"}
+              "uri": {"type": "string", "pattern": "^re-discipline://generation-[a-f0-9]{20}/(?:chunks|sources)/.+"},
+              "contextHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "durability": {"enum": ["durable", "ephemeral"]}
             }
           }
         }

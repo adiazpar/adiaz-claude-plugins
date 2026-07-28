@@ -27,6 +27,16 @@ invalid config, unresolved source boundary, stale citation, corrupt index, or
 unsupported effective profile. Allow automatic index reconciliation, but do
 not repair canonical files or download a model implicitly.
 
+Read `benchmark.staleSeverity` from that check and state which kind of
+staleness prompted the run. `actionable` (`model-fingerprint`,
+`runtime-fingerprint`, `chunker-version`, `parser-version`,
+`benchmark-not-passed`, `benchmark-suite`, `evaluated-at`) means the measured
+behavior itself may no longer hold, and re-measuring is the point.
+`informational` (`corpus-fingerprint`, `eval-fingerprint`) means only the
+corpus or the evaluation set moved; the prior measurement still describes how
+the profile behaves, so record the drift and do not present the run as
+correcting a fault.
+
 Pin the corpus fingerprint, Git and dirty-state identity, evaluation
 fingerprint, requested profile, model checksums, and every effective profile
 under test.
