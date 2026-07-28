@@ -30,9 +30,9 @@ Run the initializer once in each project. It creates or reconciles:
 |---|---|
 | `.re-discipline/project-profile.md` | Single source for shared re-discipline laws plus project identity, framing, source of record, tooling, paths, and environment. |
 | `.re-discipline/config.json` | Small strict-JSON bootstrap and recovery manifest. New projects select `shared-only` memory and proposal-only writes. |
-| `.re-discipline/settings/README.md` | Guide to every project-facing knowledge setting, default, owner, generated file, and recovery rule. |
-| `.re-discipline/settings/knowledge.jsonc` | Commented human-editable source, context-budget, local-model, and local-telemetry policy. |
-| `.re-discipline/settings/retrieval-profile.json` | Generated, content-hashed accepted project retrieval profile. Never hand-edit it. |
+| `.re-discipline/knowledge/README.md` | Two-line pointer: the knowledge system is machine-managed; ask the agent to change behavior. |
+| `.re-discipline/knowledge/policy.jsonc` | Commented AI-curated source, context-budget, local-model, and local-telemetry policy, edited by the agent on user request. |
+| `.re-discipline/knowledge/retrieval-profile.json` | Generated, content-hashed accepted project retrieval profile. Never hand-edit it. |
 | `.re-discipline/memory/` | Tracked shared operational recall, with pending proposals isolated from accepted topics. |
 | `.re-discipline/knowledge/evals/` | Ratified project retrieval judgments used for benchmark and calibration. |
 | `.re-discipline/cache/` | Disposable local indexes, benchmark reports, and calibration candidates. |
@@ -107,13 +107,15 @@ profile, effective profile, active lanes, models, and fallback reason. Any
 future optional provider, external-root, or hardware grant must be introduced
 as explicit machine-local policy rather than a tracked-project capability.
 
-### Settings And Ownership
+### State And Ownership
 
-Keep complex project-facing controls under the documented
-`.re-discipline/settings/` directory:
+The knowledge system owns its machine-managed state under
+`.re-discipline/knowledge/`; users change behavior by asking the agent in
+plain language (`references/reporting.md`):
 
-- edit `knowledge.jsonc` for understandable policy;
-- let calibration and profile-decision workflows generate
+- the agent edits `policy.jsonc` on user request
+  (`references/knowledge-internals.md` documents every field);
+- calibration and profile-decision workflows generate
   `retrieval-profile.json`;
 - keep the root `config.json` tiny enough for hooks to recover and validate
   without loading the full knowledge runtime.
