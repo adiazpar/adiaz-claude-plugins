@@ -9,7 +9,7 @@
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" session-start",
             "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'session-start'\"",
-            "timeout": 10,
+            "timeout": 15,
             "statusMessage": "Checking re-discipline project state"
           }
         ]

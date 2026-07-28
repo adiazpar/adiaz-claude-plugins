@@ -70,7 +70,7 @@ func BuildUserStatus(system map[string]any) UserStatusBlock {
 		user.Knowledge = "needs attention: the knowledge system is paused"
 		user.Attention = append(user.Attention,
 			"The knowledge system's internal configuration file is damaged, so search is paused. "+
-				"Say \"repair the knowledge configuration\" and I will fix it.")
+				"Say 'repair the knowledge configuration' and I will fix it.")
 		return user
 	}
 
@@ -89,7 +89,7 @@ func BuildUserStatus(system map[string]any) UserStatusBlock {
 		user.Knowledge = "needs attention: the search index is damaged"
 		user.Attention = append(user.Attention,
 			"The search index is damaged and will be rebuilt on the next search. "+
-				"Nothing is lost; say \"rebuild the knowledge index\" to do it now.")
+				"Nothing is lost; say 'rebuild the knowledge index' to do it now.")
 	default:
 		user.Knowledge = "working (building on first use)"
 	}

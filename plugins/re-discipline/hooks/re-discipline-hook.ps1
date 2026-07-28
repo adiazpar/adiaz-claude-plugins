@@ -120,12 +120,16 @@ function Get-ManagedProfileState {
     $minor = [int]$match.Groups[2].Value
     $patch = [int]$match.Groups[3].Value
     $version = "$major.$minor.$patch"
-    if ($major -gt 0 -or $minor -gt 6) {
-        return @{ Managed = $false; Newer = $true; Version = $version }
+    if ($major -gt 0 -or $minor -gt 7) {
+        return @{ Managed = $false; Newer = $true; NeedsMigration = $false; Version = $version }
     }
+    # v0.7 is current; v0.6 is supported as migration input - the packaged
+    # ensure operation performs the layout migration, so the in-script
+    # recovery (which only knows the current layout) must skip it.
     return @{
-        Managed = ($major -eq 0 -and $minor -eq 6)
+        Managed = ($major -eq 0 -and ($minor -eq 6 -or $minor -eq 7))
         Newer = $false
+        NeedsMigration = ($major -eq 0 -and $minor -eq 6)
         Version = $version
     }
 }
@@ -329,21 +333,21 @@ function Get-BootstrapConfig {
         return @{ Valid = $false; Message = "config.json is malformed"; Value = $null }
     }
     if (-not (Test-ExactProperties $config @(
-        "schemaVersion", "settingsDirectory", "memory", "knowledge"
+        "schemaVersion", "knowledgeDirectory", "memory", "knowledge"
     ))) {
         return @{ Valid = $false; Message = "config.json has unsupported keys"; Value = $null }
     }
-    if ([int]$config.schemaVersion -ne 1) {
-        $message = if ([int]$config.schemaVersion -gt 1) {
+    if ([int]$config.schemaVersion -ne 2) {
+        $message = if ([int]$config.schemaVersion -gt 2) {
             "config.json uses a newer schema and was not downgraded"
         }
         else {
-            "config.json schemaVersion must be 1"
+            "config.json schemaVersion must be 2"
         }
         return @{ Valid = $false; Message = $message; Value = $null }
     }
-    if ([string]$config.settingsDirectory -ne "settings") {
-        return @{ Valid = $false; Message = "config.json settingsDirectory is unsafe"; Value = $null }
+    if ([string]$config.knowledgeDirectory -ne "knowledge") {
+        return @{ Valid = $false; Message = "config.json knowledgeDirectory is unsafe"; Value = $null }
     }
     if (-not (Test-ExactProperties $config.memory @("mode", "writePolicy"))) {
         return @{ Valid = $false; Message = "config.json memory policy is invalid"; Value = $null }
@@ -362,8 +366,8 @@ function Get-BootstrapConfig {
     if (
         $config.knowledge.enabled -isnot [bool] -or
         [string]$config.knowledge.profile -ne "plugin:balanced-v1" -or
-        [string]$config.knowledge.settingsFile -ne "settings/knowledge.jsonc" -or
-        [string]$config.knowledge.projectProfile -ne "settings/retrieval-profile.json"
+        [string]$config.knowledge.settingsFile -ne "knowledge/policy.jsonc" -or
+        [string]$config.knowledge.projectProfile -ne "knowledge/retrieval-profile.json"
     ) {
         return @{ Valid = $false; Message = "config.json knowledge policy is invalid"; Value = $null }
     }
@@ -1119,6 +1123,12 @@ function Invoke-ConfigurationRecovery {
     if (-not $ProfileState.Managed) {
         return @{ Recovered = $recovered; Warnings = $warnings; Mode = $null }
     }
+    if ($ProfileState.NeedsMigration) {
+        # A v0.6 layout is migrated by the packaged ensure operation; this
+        # in-script recovery only knows the current layout and must not
+        # materialize v0.7 files into a v0.6 tree.
+        return @{ Recovered = $recovered; Warnings = $warnings; Mode = $null }
+    }
 
     Restore-ManagedFile -Root $Root `
         -RelativePath ".re-discipline/config.json" `
@@ -1139,9 +1149,9 @@ function Invoke-ConfigurationRecovery {
     $mode = [string]$result.Value.memory.mode
 
     $required = @(
-        @(".re-discipline/settings/README.md", "settings-README.md"),
-        @(".re-discipline/settings/knowledge.jsonc", "knowledge.jsonc"),
-        @(".re-discipline/settings/retrieval-profile.json", "retrieval-profile.json"),
+        @(".re-discipline/knowledge/README.md", "knowledge-README.md"),
+        @(".re-discipline/knowledge/policy.jsonc", "policy.jsonc"),
+        @(".re-discipline/knowledge/retrieval-profile.json", "retrieval-profile.json"),
         @(".re-discipline/memory/INDEX.md", "memory-INDEX.md"),
         @(".re-discipline/knowledge/evals/README.md", "knowledge-evals-README.md")
     )
@@ -1202,19 +1212,19 @@ use_memories = $enabled
         }
     }
 
-    $knowledgePath = Join-Path $Root ".re-discipline/settings/knowledge.jsonc"
+    $knowledgePath = Join-Path $Root ".re-discipline/knowledge/policy.jsonc"
     if (
         (Test-Path -LiteralPath $knowledgePath -PathType Leaf) -and
         -not (Test-KnowledgeSettings -Path $knowledgePath)
     ) {
-        $warnings.Add("settings/knowledge.jsonc is malformed or unsupported")
+        $warnings.Add("knowledge/policy.jsonc is malformed or unsupported")
     }
-    $retrievalPath = Join-Path $Root ".re-discipline/settings/retrieval-profile.json"
+    $retrievalPath = Join-Path $Root ".re-discipline/knowledge/retrieval-profile.json"
     if (
         (Test-Path -LiteralPath $retrievalPath -PathType Leaf) -and
         -not (Test-RetrievalProfile -Path $retrievalPath)
     ) {
-        $warnings.Add("settings/retrieval-profile.json is malformed or unsupported")
+        $warnings.Add("knowledge/retrieval-profile.json is malformed or unsupported")
     }
 
     $expected = $mode -ne "shared-only"
@@ -1326,11 +1336,13 @@ function Get-KnowledgeHealthSummary {
     $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
     $process.StartInfo.FileName = $executable
     $process.StartInfo.Arguments = [string]::Join(" ", @(
-        "status",
+        "ensure",
         "--asset-root",
         (ConvertTo-NativeProcessArgument -Value $assetRoot),
         "--project-root",
-        (ConvertTo-NativeProcessArgument -Value $Root)
+        (ConvertTo-NativeProcessArgument -Value $Root),
+        "--budget-ms",
+        "7000"
     ))
     $process.StartInfo.UseShellExecute = $false
     $process.StartInfo.CreateNoWindow = $true
@@ -1343,7 +1355,7 @@ function Get-KnowledgeHealthSummary {
         }
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(3000)) {
+        if (-not $process.WaitForExit(9000)) {
             try {
                 $process.Kill()
             }
@@ -1358,32 +1370,35 @@ function Get-KnowledgeHealthSummary {
             return "Knowledge health status reported degraded state; run the packaged status command directly."
         }
 
-        # Only ACTIONABLE benchmark staleness is surfaced at session start.
-        # Corpus and evaluation-set drift are informational: documents change
-        # every day in a living project, and reporting that as a warning
-        # teaches sessions to ignore the warning that matters. A model,
-        # runtime, or chunker change is different, because the measured
-        # behavior itself may no longer hold.
-        $status = $null
+        # Two-audience reporting: only the payload's plain-language attention
+        # items reach the session, plus a single commit note when a legacy
+        # layout was migrated. Repairs are silent self-healing; machinery
+        # state stays in the system block for the agent's own status call.
+        $payload = $null
         try {
-            $status = $stdout.Result | ConvertFrom-Json
+            $payload = $stdout.Result | ConvertFrom-Json
         }
         catch {
             return ""
         }
-        if ($null -eq $status -or $null -eq $status.benchmark) {
+        if ($null -eq $payload) {
             return ""
         }
-        if ($status.benchmark.staleActionable -ne $true) {
+        $lines = New-Object System.Collections.Generic.List[string]
+        if ($null -ne $payload.ensure -and $payload.ensure.migrated -eq $true) {
+            $lines.Add("Upgraded internal config layout - commit when ready.")
+        }
+        if ($null -ne $payload.user -and $null -ne $payload.user.attention) {
+            foreach ($item in @($payload.user.attention)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$item)) {
+                    $lines.Add([string]$item)
+                }
+            }
+        }
+        if ($lines.Count -eq 0) {
             return ""
         }
-        $reasons = @($status.benchmark.actionableStaleReasons) |
-            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
-        if ($reasons.Count -gt 0) {
-            $joined = [string]::Join(",", $reasons)
-            return "Knowledge benchmark evidence is actionably stale ($joined); re-run benchmark-knowledge before relying on measured retrieval behavior."
-        }
-        return "Knowledge benchmark evidence is actionably stale; re-run benchmark-knowledge before relying on measured retrieval behavior."
+        return [string]::Join("`n", $lines)
     }
     catch {
         return "Knowledge health status could not run; run the packaged status command directly."
@@ -1424,7 +1439,7 @@ if ([string]::IsNullOrWhiteSpace($projectRoot)) {
 
 $canonicalProfile = Join-Path $projectRoot ".re-discipline/project-profile.md"
 $profileState = Get-ManagedProfileState -ProfilePath $canonicalProfile
-$onboardReminder = "Invoke the re-discipline onboard skill before substantive work. Read the canonical profile, active manager adapter, docs indexes, and active campaign masterfiles. Use the shared knowledge server for bounded, citable context."
+$onboardReminder = "Invoke the re-discipline onboard skill before substantive work. Read the canonical profile, active manager adapter, docs indexes, and active campaign masterfiles. Use the shared knowledge server for bounded, citable context. Print only the plain-language onboarding screen; knowledge internals are read silently."
 $recoveryReminder = "Legacy or incomplete re-discipline project detected without a supported managed profile. Invoke init-project in migration or recovery mode before substantive work; legacy host profiles are recovery input only."
 $checkpointReminder = "Context is about to compact. If a campaign is active, invoke checkpoint-campaign and preserve current state, decisions, evidence boundaries, source handles, and dead ends. If it is solved, invoke close-campaign."
 $subagentReminder = "You are a drafter, not a ratifier. Read the canonical project profile, your exact brief, and its immutable context pack when present. Preserve source citations and epistemic tiers. Write only in the granted workspace; never accept memory, promote truth, change retrieval profiles, close a campaign, commit, push, or spawn another agent."
