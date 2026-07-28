@@ -128,6 +128,23 @@ write or self-assert that receipt. Ship a global profile only from the
 authoritative plugin repository after cross-project CI and release evaluation.
 Never copy project data upstream automatically.
 
+## Measurement Health
+
+Read-only status carries what would otherwise be learned only when something
+already failed:
+
+- evidence-pin health - `intact`, `drifted`, `broken` - over the documents
+  ratified evaluation cases depend on. A broken pin means a case's ground truth
+  may no longer hold; re-answer the case, do not re-stamp the pin. Drift is
+  advisory and gates nothing.
+- hard-negative coverage over today's evaluation set. The guard fails a case on
+  a single hit, so a clean run overstates itself unless the fraction of cases
+  that declare a negative is stated beside it. Coverage is visibility, never a
+  gate.
+- campaign masterfile staleness, when `CAMPAIGN.md` falls behind the newest
+  file under its own campaign directory. The masterfile is the cold-resume
+  surface and the only campaign file that rots by standing still.
+
 ## Memory Proposals
 
 Treat every memory candidate as provisional. Store it only under

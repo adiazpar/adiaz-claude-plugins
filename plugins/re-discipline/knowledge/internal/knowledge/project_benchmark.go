@@ -37,19 +37,25 @@ type UnsupportedProjectProfile struct {
 }
 
 type ProjectBenchmarkReport struct {
-	SchemaVersion       int                         `json:"schemaVersion"`
-	RunID               string                      `json:"runId"`
-	Mode                string                      `json:"mode"`
-	Suite               string                      `json:"suite"`
-	RequestedProfile    string                      `json:"requestedProfile"`
-	Generation          GenerationSummary           `json:"generation"`
-	EvalFingerprint     string                      `json:"evalFingerprint"`
-	Profiles            []ProjectProfileBenchmark   `json:"profiles"`
-	UnsupportedProfiles []UnsupportedProjectProfile `json:"unsupportedProfiles"`
-	Passed              bool                        `json:"passed"`
-	Complete            bool                        `json:"complete"`
-	DurationMillis      int64                       `json:"durationMillis"`
-	ReportPath          string                      `json:"reportPath"`
+	SchemaVersion    int               `json:"schemaVersion"`
+	RunID            string            `json:"runId"`
+	Mode             string            `json:"mode"`
+	Suite            string            `json:"suite"`
+	RequestedProfile string            `json:"requestedProfile"`
+	Generation       GenerationSummary `json:"generation"`
+	EvalFingerprint  string            `json:"evalFingerprint"`
+	// HardNegativeCoverage says how much of this evaluation set actually
+	// exercises the hard-negative guard. The guard fails a case on a single hit,
+	// which makes a clean run read as suite-wide protection; it is only ever
+	// protection for the cases that declare a negative. Reporting the fraction
+	// keeps the run from overstating what it measured. It gates nothing.
+	HardNegativeCoverage HardNegativeCoverage        `json:"hardNegativeCoverage"`
+	Profiles             []ProjectProfileBenchmark   `json:"profiles"`
+	UnsupportedProfiles  []UnsupportedProjectProfile `json:"unsupportedProfiles"`
+	Passed               bool                        `json:"passed"`
+	Complete             bool                        `json:"complete"`
+	DurationMillis       int64                       `json:"durationMillis"`
+	ReportPath           string                      `json:"reportPath"`
 }
 
 // RunProjectBenchmark measures the accepted profile against ratified project
@@ -108,8 +114,10 @@ func (service *Service) RunProjectBenchmark(
 		SchemaVersion: 1, RunID: nowRunID("benchmark"), Mode: mode,
 		Suite: "project-benchmark-v1", RequestedProfile: active.RequestedIdentity,
 		Generation: PublicGeneration(generation), EvalFingerprint: evalFingerprint,
-		Profiles: []ProjectProfileBenchmark{}, UnsupportedProfiles: []UnsupportedProjectProfile{},
-		Passed: true, Complete: true,
+		HardNegativeCoverage: MeasureHardNegativeCoverage(cases),
+		Profiles:             []ProjectProfileBenchmark{},
+		UnsupportedProfiles:  []UnsupportedProjectProfile{},
+		Passed:               true, Complete: true,
 	}
 	rows := []EffectiveProfile{active.Effective}
 	if mode == "full" {

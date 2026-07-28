@@ -62,7 +62,16 @@ onboarding.
 
 List directories directly under `active/`. For each campaign, read
 `active/<slug>/CAMPAIGN.md`, focusing on Objective, Current state, Open
-questions, Dead ends, and the disposition manifest.
+questions, Dead ends, and the disposition manifest. Read
+`active/<slug>/REVIEWS.md` when it exists, for what has already been checked
+and which holds are still unresolved.
+
+Status reports a `campaigns` block. When a campaign is marked `stale`, its
+masterfile is older than the newest file under its own directory by more than
+the reported margin: work continued and the cold-resume surface did not.
+Report that alongside the campaign and recommend `checkpoint-campaign`. Do not
+treat a stale masterfile as current state and do not silently rewrite it during
+onboarding.
 
 Treat names below each campaign's `subagents/` directory as opaque workspace
 keys. New chronological IDs and legacy task-only or provider-prefixed names
@@ -82,7 +91,18 @@ Report:
 - settings and source-policy validity;
 - latest benchmark age, and its `actionableStaleReasons` when
   `benchmark.staleActionable` is true;
+- evidence-pin health, but only when `pins.drifted` or `pins.broken` is above
+  zero;
+- masterfile staleness for any campaign the `campaigns` block marks `stale`;
 - pending memory-proposal count.
+
+Evidence pins tie an evaluation case to what its cited documents claim.
+`broken` means a pinned document is gone or now asserts something else, so the
+case's ground truth may no longer hold and re-answering it is the repair;
+`drifted` means only the file's bytes moved and is advisory. Report a single
+line when either is non-zero and stay silent when the census is clean - a
+report that always mentions pins teaches sessions to skip the line that
+matters.
 
 Benchmark staleness carries two severities and they are not the same news.
 `staleActionable` means the models, the runtime contract, or the chunker moved
@@ -123,11 +143,12 @@ Mission: <one sentence>
 Current focus: <one or two lines>
 
 Active campaigns:
-- <slug>: <status>; open questions: <count>
+- <slug>: <status>; open questions: <count><; masterfile stale: <n>d behind>
 - none (cold start)
 
 Knowledge: <healthy|degraded|unavailable>; generation: <id|none>
 Benchmark: <age> days old<; re-run warranted: reason,reason | (corpus drift only)>
+Evidence pins: <n broken, n drifted of n>
 Retrieval: requested <profile>; effective <profile>; fallback: <reason|none>
 Pending memory proposals: <count>
 Delegation backend: <native|provider>
@@ -136,6 +157,9 @@ Recruiting candidates: <candidate names|none>
 Recent history: <latest chronicle and outcome>
 Ready to: <resume named campaign, open a requested campaign, or await direction>
 ```
+
+Omit the `Evidence pins` line when the census is clean. Every other line is
+always present.
 
 Stop after orientation. Do not begin substantive investigation until the user
 directs it.

@@ -101,10 +101,20 @@ Report:
 - mode and pinned corpus/evaluation identities;
 - requested and effective profiles, active lanes, models, and fallbacks;
 - hard-gate results;
+- hard-negative coverage from `hardNegativeCoverage`, as cases-with-negatives
+  over total cases;
 - metric table by effective profile and token budget;
 - regressions and unsupported capability combinations;
 - cache report path;
 - whether an explicit calibration or profile decision is warranted.
+
+State hard-negative coverage even when every gate passed. The guard fails a
+case on a single hit, so a clean run reads as protection across the whole
+suite; it is only ever protection for the cases that declare a negative. A
+suite where a minority of cases do is a weaker guarantee than the pass line
+suggests, and the number is the only thing that says so. It changes no
+pass/fail decision - do not treat low coverage as a failure, and do not add
+hard negatives to close the gap without ratifying each one.
 
 Recommend `calibrate-knowledge` only when measured evidence shows a retrieval
 or token-budget problem. Never change behavior from this skill.
