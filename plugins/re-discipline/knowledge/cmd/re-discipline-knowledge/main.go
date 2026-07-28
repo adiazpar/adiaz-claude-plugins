@@ -183,6 +183,32 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		return printJSON(result)
+	case "ensure":
+		flags := flag.NewFlagSet("ensure", flag.ContinueOnError)
+		assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
+		projectRoot := flags.String("project-root", "", "managed project root or nested path")
+		budgetMs := flags.Int("budget-ms", 7000, "cheap-repair time budget in milliseconds")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		asset, err := filepath.Abs(*assetRoot)
+		if err != nil {
+			return err
+		}
+		root := *projectRoot
+		if root == "" {
+			root, err = knowledge.FindProjectRoot(".")
+			if err != nil {
+				return err
+			}
+		}
+		// EnsureProject owns its own recover/migrate sequencing; it must not
+		// go through the generic pre-command recovery gate below.
+		payload, err := knowledge.EnsureProject(ctx, root, filepath.Dir(asset), *budgetMs)
+		if err != nil {
+			return err
+		}
+		return printJSON(payload)
 	}
 	switch args[0] {
 	case "preflight", "status", "index", "replay", "context-pack",
@@ -328,7 +354,7 @@ func printJSON(value any) error {
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: re-discipline-knowledge <serve|recover|preflight|status|index|replay|context-pack|benchmark|calibrate|pin-evals|promote-profile|verify-pack> [options]")
+	return fmt.Errorf("usage: re-discipline-knowledge <serve|recover|ensure|preflight|status|index|replay|context-pack|benchmark|calibrate|pin-evals|promote-profile|verify-pack> [options]")
 }
 
 func splitCSV(value string) []string {
