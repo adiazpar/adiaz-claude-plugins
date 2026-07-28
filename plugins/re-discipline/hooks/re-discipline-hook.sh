@@ -333,10 +333,17 @@ writePolicy'
 }
 
 # Shared TOML structure scanner. This mirrors tomlCodeLines, openTOMLMultiline,
-# tomlBracketDelta, and stripTOMLComment in the packaged Go recovery scanner so
-# the hook and the server agree on which lines carry TOML structure. Interior
-# lines of a multi-line string, array, or inline table are value content and are
-# never tables, assignments, or comments.
+# tomlBracketDelta, stripTOMLComment, and tomlKeySegments in the packaged Go
+# recovery scanner so the hook and the server agree on which lines carry TOML
+# structure and on what a dotted key names. Interior lines of a multi-line
+# string, array, or inline table are value content and are never tables,
+# assignments, or comments.
+#
+# toml_key_path accepts bare, "basic"-quoted and literal-quoted key segments and
+# returns their canonical dotted form, or "" when the key is malformed. Quoting
+# is the only way to write a Windows path as a key, so a scanner that accepts
+# only bare keys reports the section Codex itself writes - [projects."C:\Users\x"]
+# - as malformed, and a host judged malformed never receives its memory policy.
 toml_scan_awk='
 function toml_trim(value) {
   gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
@@ -443,6 +450,80 @@ function toml_is_code(raw,   at, rest, line, equals, value, opened) {
   return 1
 }
 
+function toml_key_path(key,   rest, out, count, quote, segment, character, position, span, closed) {
+  rest = key
+  out = ""
+  count = 0
+  while (1) {
+    sub(/^[[:space:]]+/, "", rest)
+    if (rest == "") {
+      return ""
+    }
+    quote = substr(rest, 1, 1)
+    if (quote == "\"" || quote == "\047") {
+      segment = ""
+      closed = 0
+      span = length(rest)
+      position = 2
+      while (position <= span) {
+        character = substr(rest, position, 1)
+        if (quote == "\"" && character == "\\") {
+          if (position + 1 > span) {
+            return ""
+          }
+          segment = segment substr(rest, position + 1, 1)
+          position += 2
+          continue
+        }
+        if (character == quote) {
+          closed = 1
+          position++
+          break
+        }
+        segment = segment character
+        position++
+      }
+      if (!closed) {
+        return ""
+      }
+      rest = substr(rest, position)
+    } else {
+      segment = ""
+      span = length(rest)
+      position = 1
+      while (position <= span) {
+        character = substr(rest, position, 1)
+        if (character == "." || character ~ /[[:space:]]/) {
+          break
+        }
+        segment = segment character
+        position++
+      }
+      if (segment !~ /^[A-Za-z0-9_-]+$/) {
+        return ""
+      }
+      rest = substr(rest, position)
+    }
+    if (segment == "") {
+      return ""
+    }
+    count++
+    if (count == 1) {
+      out = segment
+    } else {
+      out = out "." segment
+    }
+    sub(/^[[:space:]]+/, "", rest)
+    if (rest == "") {
+      return out
+    }
+    if (substr(rest, 1, 1) != ".") {
+      return ""
+    }
+    rest = substr(rest, 2)
+  }
+}
+
 function toml_continues() {
   return (toml_delim != "" || toml_depth > 0)
 }
@@ -464,8 +545,10 @@ toml_boolean() {
         next
       }
       line = toml_trim(toml_strip_comment($0))
-      if (line ~ /^\[[^]]+\]$/) {
-        section = substr(line, 2, length(line) - 2)
+      if (substr(line, 1, 1) == "[" &&
+          substr(line, length(line), 1) == "]" &&
+          toml_key_path(substr(line, 2, length(line) - 2)) != "") {
+        section = toml_key_path(substr(line, 2, length(line) - 2))
       } else if (section == wanted_section) {
         expression = "^" wanted_key "[[:space:]]*=[[:space:]]*(true|false)$"
         if (line ~ expression) {
@@ -487,13 +570,8 @@ toml_boolean() {
 
 validate_toml_policy_container() {
   awk "$toml_scan_awk"'
-    function without_quotes(value) {
-      gsub(/["\047]/, "", value)
-      return value
-    }
-    function managed_path(value,    normalized) {
-      normalized = without_quotes(value)
-      return normalized ~ /^(features|memories)(\.|$)/
+    function managed_path(value) {
+      return value ~ /^(features|memories)(\.|$)/
     }
     BEGIN { active = "" }
     {
@@ -508,25 +586,36 @@ validate_toml_policy_container() {
       if (line == "") {
         next
       }
-      compact = line
-      gsub(/[[:space:]]/, "", compact)
-      if (substr(compact, 1, 2) == "[[") {
+      if (substr(line, 1, 2) == "[[") {
         exit 1
       }
-      if (compact ~ /^\[[A-Za-z0-9_.-]+\]$/) {
-        table = substr(compact, 2, length(compact) - 2)
-        if (managed_path(table) && table != "features" && table != "memories") {
+      if (substr(line, 1, 1) == "[") {
+        if (substr(line, length(line), 1) != "]") {
+          exit 1
+        }
+        raw_table = toml_trim(substr(line, 2, length(line) - 2))
+        table = toml_key_path(raw_table)
+        if (table == "") {
+          exit 1
+        }
+        # A managed table must be spelled bare. The setter matches the managed
+        # keys inside it by their literal text, so accepting an alternate
+        # spelling here would let it append a second copy of a key that is
+        # already present.
+        if (managed_path(table) && raw_table != "features" &&
+            raw_table != "memories") {
           exit 1
         }
         active = table
         next
       }
-      if (substr(compact, 1, 1) == "[") {
-        exit 1
-      }
-      if (line ~ /^[A-Za-z0-9_.-]+[[:space:]]*=/) {
-        equals = index(line, "=")
-        left = toml_trim(substr(line, 1, equals - 1))
+      equals = index(line, "=")
+      if (equals > 1) {
+        raw_left = toml_trim(substr(line, 1, equals - 1))
+        left = toml_key_path(raw_left)
+        if (left == "") {
+          exit 1
+        }
         right = toml_trim(substr(line, equals + 1))
         multiline = (continued ||
                      substr(right, 1, 3) == "\"\"\"" ||
@@ -539,20 +628,17 @@ validate_toml_policy_container() {
             right !~ /^(true|false|[+-]?(inf|nan)|[+-]?[0-9][0-9A-Za-z_.:+-]*)$/) {
           exit 1
         }
-        left_compact = left
-        gsub(/[[:space:]]/, "", left_compact)
-        normalized = without_quotes(left_compact)
-        if (active == "" && managed_path(left_compact)) {
+        if (active == "" && managed_path(left)) {
           exit 1
         }
         if (active == "features" &&
-            normalized ~ /^memories(\.|$)/ &&
-            left_compact != "memories") {
+            left ~ /^memories(\.|$)/ &&
+            raw_left != "memories") {
           exit 1
         }
         if (active == "memories" &&
-            normalized ~ /^(generate_memories|use_memories)(\.|$)/ &&
-            left_compact !~ /^(generate_memories|use_memories)$/) {
+            left ~ /^(generate_memories|use_memories)(\.|$)/ &&
+            raw_left !~ /^(generate_memories|use_memories)$/) {
           exit 1
         }
         next

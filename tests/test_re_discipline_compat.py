@@ -1948,6 +1948,86 @@ class HookTests(unittest.TestCase):
         self.assertIn('hashy = "value#notacomment"', text)
         self.assertEqual(text.count("memories = true"), 1)
 
+    QUOTED_HEADER_CODEX_CONFIG = (
+        'model = "gpt-test"\n'
+        "\n"
+        '[projects."C:\\\\Users\\\\x"]\n'
+        'trust_level = "trusted"\n'
+        "\n"
+        "[projects.'C:\\Users\\y']\n"
+        'trust_level = "trusted"\n'
+        "\n"
+        '[mcp_servers."alpha beta".tools]\n'
+        'command = "npx"\n'
+    )
+
+    MALFORMED_QUOTED_CODEX_CONFIG = (
+        'model = "gpt-test"\n'
+        "\n"
+        '[projects."C:\\\\Users\\\\x]\n'
+        'trust_level = "trusted"\n'
+    )
+
+    def assert_quoted_toml_header_config_repaired(self, runner) -> None:
+        """A quoted table header is ordinary Codex configuration.
+
+        Quoting is the only way to spell a Windows path as a TOML key, and a
+        per-project section is exactly where Codex writes one. Scanners that
+        accepted only bare dotted keys reported such a file as malformed at
+        every session start, and a configuration judged malformed is preserved
+        untouched - so the managed memory policy never applied to it.
+        """
+        original = self.QUOTED_HEADER_CODEX_CONFIG.encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_control_plane(root, "plugin:balanced-v1")
+            codex_path = root / ".codex" / "config.toml"
+            codex_path.parent.mkdir()
+            codex_path.write_bytes(original)
+
+            result = runner("session-start", root, host="codex")
+            repaired = codex_path.read_bytes()
+            again = runner("session-start", root, host="codex")
+            settled = codex_path.read_bytes()
+
+        context = self.hook_context(result)
+        self.hook_context(again)
+        self.assertNotIn("preserved", context)
+        self.assertNotIn("malformed", context)
+        self.assertTrue(repaired.startswith(original), repaired)
+        self.assertEqual(repaired, settled)
+
+        text = repaired.decode("utf-8")
+        self.assertIn("[features]\nmemories = false", text)
+        self.assertIn("generate_memories = false", text)
+        self.assertIn("use_memories = false", text)
+        self.assertIn('[projects."C:\\\\Users\\\\x"]', text)
+        self.assertIn("[projects.'C:\\Users\\y']", text)
+        self.assertIn('[mcp_servers."alpha beta".tools]', text)
+
+    def assert_unbalanced_quoted_toml_config_preserved(self, runner) -> None:
+        """Accepting quoted segments must not accept an unbalanced one."""
+        original = self.MALFORMED_QUOTED_CODEX_CONFIG.encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_control_plane(root, "plugin:balanced-v1")
+            codex_path = root / ".codex" / "config.toml"
+            codex_path.parent.mkdir()
+            codex_path.write_bytes(original)
+
+            result = runner("session-start", root, host="codex")
+            preserved = codex_path.read_bytes()
+
+        context = self.hook_context(result)
+        self.assertEqual(preserved, original)
+        self.assertIn("preserved", context)
+
+    def test_hook_repairs_configuration_with_quoted_toml_headers(self) -> None:
+        self.assert_quoted_toml_header_config_repaired(self.run_hook)
+
+    def test_hook_preserves_unbalanced_quoted_toml_headers(self) -> None:
+        self.assert_unbalanced_quoted_toml_config_preserved(self.run_hook)
+
     def test_hook_is_silent_outside_initialized_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = self.run_hook("session-start", Path(directory))
@@ -2506,6 +2586,12 @@ class HookTests(unittest.TestCase):
 
     def test_posix_hook_repairs_configuration_with_multiline_toml(self) -> None:
         self.assert_multiline_toml_config_repaired(self.run_posix_hook)
+
+    def test_posix_hook_repairs_configuration_with_quoted_toml_headers(self) -> None:
+        self.assert_quoted_toml_header_config_repaired(self.run_posix_hook)
+
+    def test_posix_hook_preserves_unbalanced_quoted_toml_headers(self) -> None:
+        self.assert_unbalanced_quoted_toml_config_preserved(self.run_posix_hook)
 
     def test_posix_hook_does_not_follow_managed_directory_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

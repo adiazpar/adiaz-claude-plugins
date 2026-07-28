@@ -449,7 +449,118 @@ func nestedJSONKey(value any, target string, top bool) bool {
 	return false
 }
 
-var tomlBareKeyRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\s*\.\s*[A-Za-z0-9_-]+)*$`)
+var tomlBareSegmentRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// tomlKeySegments splits a TOML dotted key into its decoded segments.
+//
+// A key segment may be bare, basic-quoted, or literal-quoted. Accepting only
+// bare segments made an ordinary Codex configuration - `[projects."C:\\Users\\x"]`
+// is what the tool itself writes for a per-project section - report as
+// malformed at every session start, and a host whose configuration is judged
+// malformed never receives its memory policy. Quoting is the only way to write
+// a Windows path as a key at all, so rejecting it rejected the common case.
+//
+// Escape handling inside a basic-quoted segment matches tomlBracketDelta and
+// stripTOMLComment: a backslash escapes the character after it. Segments are
+// returned decoded, so `"a"` and bare `a` are the same key, as TOML requires.
+func tomlKeySegments(key string) ([]string, bool) {
+	segments := []string{}
+	rest := key
+	for {
+		rest = strings.TrimLeft(rest, " \t")
+		if rest == "" {
+			return nil, false
+		}
+		var segment string
+		var ok bool
+		switch rest[0] {
+		case '"':
+			segment, rest, ok = decodeTOMLBasicSegment(rest)
+		case '\'':
+			segment, rest, ok = decodeTOMLLiteralSegment(rest)
+		default:
+			end := strings.IndexAny(rest, " \t.")
+			if end < 0 {
+				end = len(rest)
+			}
+			segment, rest, ok = rest[:end], rest[end:], true
+			if !tomlBareSegmentRE.MatchString(segment) {
+				return nil, false
+			}
+		}
+		// An empty segment is legal TOML and pathological in practice. The hook
+		// scanners report a malformed key by returning an empty path, so an
+		// empty segment is the one shape they cannot express; refusing it in
+		// all four keeps them from disagreeing.
+		if !ok || segment == "" {
+			return nil, false
+		}
+		segments = append(segments, segment)
+		rest = strings.TrimLeft(rest, " \t")
+		if rest == "" {
+			return segments, true
+		}
+		if rest[0] != '.' {
+			return nil, false
+		}
+		rest = rest[1:]
+	}
+}
+
+// decodeTOMLBasicSegment decodes a leading "..." segment and returns it with
+// the unread remainder.
+//
+// A backslash escapes the character after it and is otherwise not interpreted.
+// That is exactly what tomlBracketDelta and stripTOMLComment already do when
+// they walk a string, and holding all four scanners to one rule matters more
+// here than resolving \n or \uXXXX: a decoded segment is only ever used to
+// detect duplicate keys and to recognize the managed namespaces, never to
+// reproduce the key's text.
+func decodeTOMLBasicSegment(value string) (string, string, bool) {
+	var decoded strings.Builder
+	escaped := false
+	for index, char := range value {
+		if index == 0 {
+			continue
+		}
+		switch {
+		case escaped:
+			decoded.WriteRune(char)
+			escaped = false
+		case char == '\\':
+			escaped = true
+		case char == '"':
+			return decoded.String(), value[index+1:], true
+		default:
+			decoded.WriteRune(char)
+		}
+	}
+	return "", "", false
+}
+
+// decodeTOMLLiteralSegment reads a leading '...' segment verbatim.
+func decodeTOMLLiteralSegment(value string) (string, string, bool) {
+	end := strings.IndexByte(value[1:], '\'')
+	if end < 0 {
+		return "", "", false
+	}
+	return value[1 : 1+end], value[end+2:], true
+}
+
+// canonicalTOMLKey joins decoded segments into the dotted form the key maps
+// are indexed by.
+//
+// A quoted segment containing a dot therefore reads as two segments here.
+// That is deliberate: the hook scanners join the same way, and every outcome
+// of the conflation is a refusal - `["features.memories"]` is rejected as a
+// managed key declared as a table, and `[a.b]` beside `["a.b"]` is rejected as
+// a duplicate. A refusal preserves the file untouched. Escaping the dot would
+// make one scanner accept what the others refuse, and a host whose
+// configuration two scanners disagree about is worse than a pathological key
+// being refused.
+func canonicalTOMLKey(segments []string) string {
+	return strings.Join(segments, ".")
+}
 
 // openTOMLMultiline reports the delimiter of a multi-line basic or literal
 // string opened by value and not closed on the same line.
@@ -564,15 +675,18 @@ func parseTOMLKeys(body []byte) (map[string]int, map[string]string, error) {
 			return nil, nil, fmt.Errorf("unsupported TOML table syntax at line %d", index+1)
 		}
 		if strings.HasPrefix(line, "[") {
-			if !strings.HasSuffix(line, "]") || strings.Count(line, "[") != 1 ||
-				strings.Count(line, "]") != 1 {
+			if !strings.HasSuffix(line, "]") {
 				return nil, nil, fmt.Errorf("malformed TOML table at line %d", index+1)
 			}
-			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
-			if !tomlBareKeyRE.MatchString(name) {
+			// The header's own brackets are the delimiters; anything else that
+			// looks like one is either inside a quoted segment, where it is
+			// content, or outside it, where the segmenter rejects the header.
+			name := strings.TrimSpace(line[1 : len(line)-1])
+			segments, ok := tomlKeySegments(name)
+			if !ok {
 				return nil, nil, fmt.Errorf("unsupported TOML table at line %d", index+1)
 			}
-			section = normalizeTOMLKey(name)
+			section = canonicalTOMLKey(segments)
 			if prior, duplicate := tables[section]; duplicate {
 				return nil, nil, fmt.Errorf(
 					"duplicate TOML table %q at lines %d and %d",
@@ -603,10 +717,11 @@ func parseTOMLKeys(body []byte) (map[string]int, map[string]string, error) {
 			return nil, nil, fmt.Errorf("malformed TOML assignment at line %d", index+1)
 		}
 		key := strings.TrimSpace(line[:equal])
-		if !tomlBareKeyRE.MatchString(key) {
+		segments, ok := tomlKeySegments(key)
+		if !ok {
 			return nil, nil, fmt.Errorf("unsupported TOML key at line %d", index+1)
 		}
-		full := normalizeTOMLKey(key)
+		full := canonicalTOMLKey(segments)
 		if section != "" {
 			full = section + "." + full
 		}
@@ -651,7 +766,14 @@ func stripTOMLComment(line string) string {
 	return line
 }
 
+// normalizeTOMLKey renders a dotted key in the canonical form the key maps are
+// indexed by. A key that does not parse is returned with only its whitespace
+// normalized: callers that care about validity use tomlKeySegments directly,
+// and the ones that call this have already been through parseTOMLKeys.
 func normalizeTOMLKey(key string) string {
+	if segments, ok := tomlKeySegments(key); ok {
+		return canonicalTOMLKey(segments)
+	}
 	parts := strings.Split(key, ".")
 	for index := range parts {
 		parts[index] = strings.TrimSpace(parts[index])
