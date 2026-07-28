@@ -676,7 +676,10 @@ func toolDefinitions() []map[string]any {
 		"type": "array", "uniqueItems": true, "maxItems": 20,
 		"items": map[string]any{
 			"type": "string", "minLength": 1, "maxLength": 500,
-			"description": "Exact managed source path that must be present in the pack or the call fails.",
+			"description": "Exact managed source path whose best-matching indexed passage " +
+				"must be present in the pack, or the call fails. The document is served as " +
+				"the one chunk selected by the same ranking as ordinary retrieval, so a " +
+				"source larger than the budget can still be pinned; read the path for the rest.",
 		},
 	}
 	return []map[string]any{
