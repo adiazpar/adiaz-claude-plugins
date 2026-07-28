@@ -30,9 +30,9 @@ Every initialized project has:
 | `.re-discipline/config.json` | Small strict-JSON bootstrap, recovery, and project memory policy. |
 | `.re-discipline/project-profile.md` | Canonical shared laws, identity, and domain facts. |
 | `.re-discipline/local-paths.md` | Untracked machine-local path values shared by every manager host. |
-| `.re-discipline/settings/README.md` | Documented project-facing settings and ownership boundaries. |
-| `.re-discipline/settings/knowledge.jsonc` | Commented human-editable knowledge policy. |
-| `.re-discipline/settings/retrieval-profile.json` | Generated, accepted production retrieval profile. |
+| `.re-discipline/knowledge/README.md` | Two-line pointer: machine-managed; ask the agent to change behavior. |
+| `.re-discipline/knowledge/policy.jsonc` | Commented AI-curated knowledge policy; the manager edits it on user request. |
+| `.re-discipline/knowledge/retrieval-profile.json` | Generated, accepted production retrieval profile. |
 | `.re-discipline/memory/INDEX.md` | Shared operational recall and proposal-governance contract. |
 | `.re-discipline/memory/proposals/` | Tracked provisional recall excluded from normal retrieval. |
 | `.re-discipline/memory/topics/` | Manager-reviewed and user-ratified shared recall. |
@@ -166,6 +166,12 @@ descriptive staffing personas; put required tools, paths, constraints,
 deliverables, evidence standards, budgets, and exclusive live surfaces
 directly into each dispatch brief.
 
+Adapters state current configuration only: present tense, no dates, no
+migration narration, no "older guidance is obsolete" prose. History belongs
+in `docs/history/`; retired guidance is deleted, not memorialized. A resync
+flags violating prose in existing adapters and proposes the current-state
+replacement; it never silently rewrites project-owned notes.
+
 When old profiles repeat a fact, move one reconciled value to the canonical
 profile. Move unique host behavior into the matching manager adapter outside
 its managed block. Never silently choose between contradictory copies; show
@@ -190,9 +196,9 @@ Render the source-owned templates to these exact paths:
 | Template | Project path |
 |---|---|
 | `config.json` | `.re-discipline/config.json` |
-| `settings-README.md` | `.re-discipline/settings/README.md` |
-| `knowledge.jsonc` | `.re-discipline/settings/knowledge.jsonc` |
-| `retrieval-profile.json` | `.re-discipline/settings/retrieval-profile.json` |
+| `knowledge-README.md` | `.re-discipline/knowledge/README.md` |
+| `policy.jsonc` | `.re-discipline/knowledge/policy.jsonc` |
+| `retrieval-profile.json` | `.re-discipline/knowledge/retrieval-profile.json` |
 | `memory-INDEX.md` | `.re-discipline/memory/INDEX.md` |
 | `knowledge-evals-README.md` | `.re-discipline/knowledge/evals/README.md` |
 
@@ -203,7 +209,7 @@ just to track an empty directory.
 
 The bootstrap is strict JSON. Require the packaged schema, reject unknown
 fields, require repository-relative fixed settings paths, and reject a newer
-schema rather than downgrading it. `knowledge.jsonc` is the only commented
+schema rather than downgrading it. `policy.jsonc` is the only commented
 human-editable settings file. The retrieval profile is generated strict JSON:
 initialize it from packaged `balanced-v1` and never hand-edit or silently
 promote it.
@@ -295,8 +301,15 @@ After any write:
     evidence under `active/<slug>/evidence/` remains valid. Report every
     unresolved legacy archive dependency instead of declaring migration
     complete.
-13. Report canonical profile line and byte counts, remaining placeholders,
-    and intentional migration or recovery references.
+13. Record canonical profile line and byte counts, remaining placeholders,
+    and intentional migration or recovery references in the setup record;
+    report to the user in plain language per
+    `<plugin-root>/references/reporting.md`:
+
+    ```user-facing
+    Project initialized: profile, adapters, and knowledge system are in
+    place and verified. <n> follow-ups: <list|none>.
+    ```
 14. Parse `.re-discipline/config.json` against the packaged schema and verify
     every referenced settings path stays inside `.re-discipline/`.
 15. Parse commented knowledge settings and strict retrieval-profile JSON;
@@ -351,7 +364,7 @@ semantic migration as incomplete, and do not claim a successful resync.
 
 ## Managed Configuration Recovery
 
-The `re-discipline:shared-laws v0.6.0` marker declares that the bootstrap,
+The `re-discipline:shared-laws v0.7.0` marker declares that the bootstrap,
 required settings, and selected host memory policy are expected. At
 SessionStart and before knowledge-server startup:
 

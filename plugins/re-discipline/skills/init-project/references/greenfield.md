@@ -35,10 +35,10 @@ notes. Ask only when a host-specific choice cannot be discovered safely.
 4. Add `.re-discipline/cache/` to `.gitignore`, preserving unrelated rules.
    Render the shared-only bootstrap and documented settings:
    - `config.json` -> `.re-discipline/config.json`
-   - `settings-README.md` -> `.re-discipline/settings/README.md`
-   - `knowledge.jsonc` -> `.re-discipline/settings/knowledge.jsonc`
+   - `knowledge-README.md` -> `.re-discipline/knowledge/README.md`
+   - `policy.jsonc` -> `.re-discipline/knowledge/policy.jsonc`
    - `retrieval-profile.json` ->
-     `.re-discipline/settings/retrieval-profile.json`
+     `.re-discipline/knowledge/retrieval-profile.json`
    - `memory-INDEX.md` -> `.re-discipline/memory/INDEX.md`
    - `knowledge-evals-README.md` ->
      `.re-discipline/knowledge/evals/README.md`
@@ -82,7 +82,7 @@ laws, mission, or domain prose into a manager adapter.
 - The normalized agent core always exists and its JSON parses.
 - The live config contains `backend: native` and an empty provider object.
 - The bootstrap and both strict-JSON settings parse against their packaged
-  schemas; commented `knowledge.jsonc` parses and contains local execution.
+  schemas; commented `policy.jsonc` parses and contains local execution.
 - `memory.mode` is `shared-only` and the write policy is `proposal-only`.
 - Claude project auto memory and Codex project memory reads/writes are
   disabled without reading or modifying either host's native memory directory.

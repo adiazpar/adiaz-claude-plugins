@@ -100,9 +100,17 @@ Read the rewritten masterfile as if the session had no prior context. Confirm
 that its links resolve, its next action is executable, and every new artifact
 has a disposition.
 
-Report the Current state line count, removed scratch, retained artifacts, the
-number of unresolved holds still in the ledger, and the resume action. If the closure bar is already met, recommend `close-campaign`
-instead of describing the campaign as both open and solved.
+Report to the user in plain language per
+`<plugin-root>/references/reporting.md`; machinery identities go into the
+campaign or run record, not the screen. Print to the user only:
+
+```user-facing
+Campaign <slug> checkpointed: masterfile rewritten for a cold resume,
+<n> scratch files swept, <n> unresolved holds. Resume with: <action>.
+```
+
+If the closure bar is already met, recommend `close-campaign` instead of
+describing the campaign as both open and solved.
 
 Do not commit unless the user explicitly asks.
 

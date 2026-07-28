@@ -14,8 +14,13 @@ and obtain the missing choice before mutating anything.
 
 ## Step 1: Establish Authority And Target
 
+Measurement freshness (benchmark staleness, evidence-pin health) is
+checked and repaired here, at gate time, as part of this skill's own run -
+it is never surfaced during onboarding or session start.
+
+
 Read `<plugin-root>/references/knowledge-governance.md`, the active bootstrap
-config, `.re-discipline/settings/README.md`, the current accepted profile, and
+config, `.re-discipline/knowledge/README.md`, the current accepted profile, and
 the candidate report.
 
 - For a project profile, require a direct manager and explicit user approval.
@@ -69,7 +74,7 @@ For a project profile:
    the promotion receipt, and the bootstrap pointer before changing the active
    file.
 5. Atomically replace
-   `.re-discipline/settings/retrieval-profile.json` with the validated,
+   `.re-discipline/knowledge/retrieval-profile.json` with the validated,
    receipt-stamped profile in one operation. Never copy an unsigned candidate
    directly into production and never write a receipt or hash in a separate
    partially applied step.
@@ -102,7 +107,10 @@ Never reconstruct a prior profile by hand.
 
 ## Step 4: Verify And Report
 
-Report:
+Report to the user in plain language per
+`<plugin-root>/references/reporting.md`; machinery identities go into the
+campaign or run record, not the screen. Record in the decision or
+campaign record:
 
 - action and target scope;
 - old and new requested-profile identities;
@@ -113,7 +121,15 @@ Report:
 - exact files changed or removed;
 - whether tracked changes remain for user review.
 
-Do not edit `.re-discipline/settings/knowledge.jsonc` as a ranking-profile
+Print to the user only:
+
+```user-facing
+Search profile decision applied: <accepted the tuned profile|kept the
+current profile|rolled back>. The change is recorded in
+<campaign or decision record path>.
+```
+
+Do not edit `.re-discipline/knowledge/policy.jsonc` as a ranking-profile
 side effect. Do not accept memory or alter source authority.
 
 Do not commit unless the user explicitly asks.

@@ -15,7 +15,9 @@ rederive every claim that could affect durable truth.
 
 Read `brief.md`, its named immutable `context-pack.json`, and `report.md` in
 full. Verify the pack digest, budget, allowed tiers, corpus generation,
-requested and effective retrieval profiles, active lanes, and fallback reason.
+requested and effective retrieval profiles, active lanes, and fallback
+reason - silently; report only failures, in plain language
+(`<plugin-root>/references/reporting.md`).
 Treat the directory segment as an opaque workspace key. New keys carry
 timestamp, executor, and task text; legacy task-only or provider-prefixed keys
 remain valid. Never parse, normalize, or rename either form during review.

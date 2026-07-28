@@ -68,7 +68,7 @@ Do not commit unless the user explicitly asks.
 
 ## Step 3: Compile An Immutable Context Pack
 
-Read the campaign, `.re-discipline/settings/knowledge.jsonc`, and
+Read the campaign, `.re-discipline/knowledge/policy.jsonc`, and
 `<plugin-root>/references/knowledge-governance.md`. Select an explicit drafter
 token budget and the narrowest allowed epistemic tiers and paths that satisfy
 the objective.
