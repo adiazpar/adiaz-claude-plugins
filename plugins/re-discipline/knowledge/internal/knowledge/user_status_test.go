@@ -7,13 +7,13 @@ import (
 
 func TestBuildUserStatusTranslatesMachineryToPlainLanguage(t *testing.T) {
 	healthy := map[string]any{
-		"configuration":    map[string]any{"valid": true, "memoryMode": "shared-only"},
-		"index":            map[string]any{"present": true, "integrity": true, "fresh": false},
-		"requestedProfile": "plugin:balanced-v1",
-		"effectiveProfile": "hybrid-local-v1@abc",
-		"fallbackReason":   nil,
-		"benchmark":        map[string]any{"staleActionable": false},
-		"pins":             EvidencePinHealth{Total: 3, Intact: 3},
+		"configuration":          map[string]any{"valid": true, "memoryMode": "shared-only"},
+		"index":                  map[string]any{"present": true, "integrity": true, "fresh": false},
+		"requestedProfile":       "plugin:balanced-v1",
+		"effectiveProfile":       "hybrid-local-v1@abc",
+		"fallbackReason":         nil,
+		"benchmark":              map[string]any{"staleActionable": false},
+		"pins":                   EvidencePinHealth{Total: 3, Intact: 3},
 		"memoryProposalsPending": 9,
 	}
 	user := BuildUserStatus(healthy)

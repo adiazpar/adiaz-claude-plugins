@@ -336,12 +336,12 @@ func (service *Service) systemStatus(ctx context.Context) (map[string]any, error
 			"executable":  sortedModelIdentityValues(service.ModelManifest.ExecutableModels),
 			"unavailable": service.ModelManifest.UnavailableModels,
 		},
-		"fallbackReason": selected.FallbackReason,
-		"runtime":        selected.Runtime,
-		"benchmark":      service.benchmarkStatus(selected.Effective.Benchmark, generation, runtimeIdentity),
-		"pins":           service.EvidencePinCensus(),
-		"campaigns":      service.campaignStatus(),
-		"telemetry":      service.telemetryStatus(),
+		"fallbackReason":         selected.FallbackReason,
+		"runtime":                selected.Runtime,
+		"benchmark":              service.benchmarkStatus(selected.Effective.Benchmark, generation, runtimeIdentity),
+		"pins":                   service.EvidencePinCensus(),
+		"campaigns":              service.campaignStatus(),
+		"telemetry":              service.telemetryStatus(),
 		"memoryProposalsPending": pendingProposals,
 	}
 	return status, nil

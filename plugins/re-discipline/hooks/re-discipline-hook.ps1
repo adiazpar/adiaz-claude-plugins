@@ -1316,6 +1316,36 @@ function ConvertTo-NativeProcessArgument {
     return $builder.ToString()
 }
 
+# Resolve the same per-platform layout the POSIX launcher
+# (knowledge/bin/re-discipline-knowledge) resolves. hooks.json routes this
+# script through powershell.exe, so Windows is the shipping path, but
+# PowerShell also runs this hook on macOS and Linux, where a hardcoded .exe
+# silently skips every packaged operation.
+function Get-PackagedRuntimePath {
+    param([Parameter(Mandatory = $true)][string]$BinRoot)
+
+    # Windows PowerShell 5.1 predates $IsWindows and only runs on Windows.
+    $onWindows = $true
+    $windowsFlag = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
+    if ($null -ne $windowsFlag) {
+        $onWindows = [bool]$windowsFlag.Value
+    }
+    if ($onWindows) {
+        return (Join-Path $BinRoot "re-discipline-knowledge.exe")
+    }
+
+    $platform = if ($IsMacOS) { "darwin" } elseif ($IsLinux) { "linux" } else { "" }
+    $architecture = switch ([string][System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+        "X64" { "amd64" }
+        "Arm64" { "arm64" }
+        default { "" }
+    }
+    if ([string]::IsNullOrEmpty($platform) -or [string]::IsNullOrEmpty($architecture)) {
+        return ""
+    }
+    return (Join-Path $BinRoot "$platform-$architecture/re-discipline-knowledge")
+}
+
 function Get-KnowledgeHealthSummary {
     param([Parameter(Mandatory = $true)][string]$Root)
 
@@ -1323,9 +1353,10 @@ function Get-KnowledgeHealthSummary {
         return "Knowledge health status is unavailable because the plugin root is missing."
     }
 
-    $executable = Join-Path $pluginRoot "knowledge/bin/re-discipline-knowledge.exe"
+    $executable = Get-PackagedRuntimePath -BinRoot (Join-Path $pluginRoot "knowledge/bin")
     $assetRoot = Join-Path $pluginRoot "knowledge"
     if (
+        [string]::IsNullOrEmpty($executable) -or
         -not (Test-Path -LiteralPath $executable -PathType Leaf) -or
         -not (Test-Path -LiteralPath $assetRoot -PathType Container)
     ) {
