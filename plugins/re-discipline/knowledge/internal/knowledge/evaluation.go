@@ -411,10 +411,21 @@ func benchmarkCases(
 	row EffectiveProfile,
 	cases []EvalCase,
 ) (ProfileBenchmark, error) {
-	generation, _, selected, _, err := service.ensure(ctx)
+	// Pin and lease the generation this profile starts on, exactly as the
+	// project benchmark does. Without the pin every one of the several thousand
+	// queries a full run issues re-enters IndexManager.ensure, which spawns two
+	// git subprocesses, re-runs the database integrity check, and can re-walk
+	// the corpus. The generation cannot change during a run over an immutable
+	// fixture, so the measurements and their digests are unaffected; only the
+	// per-query freshness re-proof is removed.
+	generation, selected, lease, err := service.leaseMeasurementGeneration(
+		ctx, "packaged-benchmark")
 	if err != nil {
 		return ProfileBenchmark{}, err
 	}
+	defer lease.Release()
+	service.PinGeneration(generation)
+	defer service.flushTelemetry()
 	outcomes := make([]CaseOutcome, 0, len(cases))
 	passed := true
 	for _, eval := range cases {
@@ -771,10 +782,20 @@ func runEvaluationCase(
 			outcome.DuplicateTokens += EstimateTokens(result.Passage)
 		}
 		seenPassages[result.Citation.ContentHash] = true
+		// A compact response omits the generation URI because it is the
+		// generation ID and the chunk ID concatenated, both of which the
+		// response already carries. Check the reconstructed handle instead, so
+		// the same generation-scoping guarantee is measured either way.
+		handle := result.Citation.URI
+		if handle == "" {
+			handle = "re-discipline://" + first.Metadata.Generation +
+				"/chunks/" + result.ChunkID
+		}
 		if result.Citation.Path == "" || result.Citation.StartLine < 1 ||
 			result.Citation.EndLine < result.Citation.StartLine ||
 			len(result.Citation.ContentHash) != 64 ||
-			!strings.HasPrefix(result.Citation.URI,
+			result.Citation.PassageHash != result.Citation.ContentHash ||
+			!strings.HasPrefix(handle,
 				"re-discipline://"+first.Metadata.Generation+"/chunks/") {
 			citationMetadataSafe = false
 		}
@@ -1459,6 +1480,17 @@ func validateContextPackSemantics(pack ContextPack) error {
 	if len(pack.Passages) > 50 {
 		return errors.New("context pack passage cardinality is invalid")
 	}
+	if pack.Verbosity != "" && pack.Verbosity != VerbosityCompact &&
+		pack.Verbosity != VerbosityVerbose {
+		return errors.New("context pack verbosity is invalid")
+	}
+	// A compact pack drops the document hash, which is re-derivable by hashing
+	// the cited file. It keeps the generation-scoped URI: that handle is the
+	// only thing binding each passage to the generation the pack claims, and a
+	// pack is a stored artifact that gets re-verified somewhere else. A pack
+	// written before this field existed carries no verbosity and is held to the
+	// original contract, so nothing that was invalid before becomes valid now.
+	compactCitations := pack.Verbosity == VerbosityCompact
 	seenChunks, seenHandles := map[string]bool{}, map[string]bool{}
 	for _, result := range pack.Passages {
 		if result.ChunkID == "" || seenChunks[result.ChunkID] ||
@@ -1469,11 +1501,15 @@ func validateContextPackSemantics(pack ContextPack) error {
 		citation := result.Citation
 		if err := validateEvalPath(citation.Path); err != nil ||
 			citation.StartLine < 1 || citation.EndLine < citation.StartLine ||
-			!hexDigestRE.MatchString(citation.SourceHash) ||
 			!hexDigestRE.MatchString(citation.PassageHash) ||
 			citation.PassageHash != SHA256String(result.Passage) ||
 			!AllowedTiers[citation.Tier] || !contains(tiers, citation.Tier) {
 			return errors.New("context pack passage citation is invalid")
+		}
+		if citation.SourceHash != "" || !compactCitations {
+			if !hexDigestRE.MatchString(citation.SourceHash) {
+				return errors.New("context pack passage citation is invalid")
+			}
 		}
 		prefix := "re-discipline://" + generationID + "/"
 		if !strings.HasPrefix(citation.URI, prefix+"chunks/") &&
@@ -1756,6 +1792,8 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 				Status: "passed", EvaluatedAt: RFC3339UTC(time.Now()),
 				EvalFingerprint: evalDigest, CorpusFingerprint: generation.CorpusFingerprint,
 				ModelFingerprint: mustDigest(service.ModelManifest.Models),
+				ChunkerVersion:   generation.ChunkerVersion,
+				ParserVersion:    generation.ParserVersion,
 				// Record what this profile was accepted at so a later
 				// calibration compares against the tighter of this and the
 				// incumbent's drifted live score.

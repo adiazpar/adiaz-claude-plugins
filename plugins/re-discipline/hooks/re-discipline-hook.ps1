@@ -1241,7 +1241,33 @@ function Get-KnowledgeHealthSummary {
         if ($process.ExitCode -ne 0) {
             return "Knowledge health status reported degraded state; run the packaged status command directly."
         }
-        return ""
+
+        # Only ACTIONABLE benchmark staleness is surfaced at session start.
+        # Corpus and evaluation-set drift are informational: documents change
+        # every day in a living project, and reporting that as a warning
+        # teaches sessions to ignore the warning that matters. A model,
+        # runtime, or chunker change is different, because the measured
+        # behavior itself may no longer hold.
+        $status = $null
+        try {
+            $status = $stdout.Result | ConvertFrom-Json
+        }
+        catch {
+            return ""
+        }
+        if ($null -eq $status -or $null -eq $status.benchmark) {
+            return ""
+        }
+        if ($status.benchmark.staleActionable -ne $true) {
+            return ""
+        }
+        $reasons = @($status.benchmark.actionableStaleReasons) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+        if ($reasons.Count -gt 0) {
+            $joined = [string]::Join(",", $reasons)
+            return "Knowledge benchmark evidence is actionably stale ($joined); re-run benchmark-knowledge before relying on measured retrieval behavior."
+        }
+        return "Knowledge benchmark evidence is actionably stale; re-run benchmark-knowledge before relying on measured retrieval behavior."
     }
     catch {
         return "Knowledge health status could not run; run the packaged status command directly."

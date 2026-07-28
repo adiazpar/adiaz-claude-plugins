@@ -80,8 +80,17 @@ Report:
 - requested and effective retrieval profiles;
 - active retrieval lanes, local model identities, and fallback reason;
 - settings and source-policy validity;
-- latest benchmark age;
+- latest benchmark age, and its `actionableStaleReasons` when
+  `benchmark.staleActionable` is true;
 - pending memory-proposal count.
+
+Benchmark staleness carries two severities and they are not the same news.
+`staleActionable` means the models, the runtime contract, or the chunker moved
+under the measurement, so what retrieval actually does may have changed and a
+re-run is warranted. `staleInformational` means only the corpus or the
+evaluation set drifted, which is ordinary in a living project and warrants no
+action. Give actionable staleness its own line. Mention informational drift as
+a parenthetical at most, and never recommend a benchmark because of it.
 
 List proposal filenames to count them, but do not read their content during
 ordinary onboarding. Pending proposals are not accepted project knowledge.
@@ -118,6 +127,7 @@ Active campaigns:
 - none (cold start)
 
 Knowledge: <healthy|degraded|unavailable>; generation: <id|none>
+Benchmark: <age> days old<; re-run warranted: reason,reason | (corpus drift only)>
 Retrieval: requested <profile>; effective <profile>; fallback: <reason|none>
 Pending memory proposals: <count>
 Delegation backend: <native|provider>

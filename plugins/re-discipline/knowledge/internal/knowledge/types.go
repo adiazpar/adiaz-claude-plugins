@@ -160,6 +160,18 @@ type BenchmarkEvidence struct {
 	CorpusFingerprint  string `json:"corpusFingerprint,omitempty"`
 	ModelFingerprint   string `json:"modelFingerprint,omitempty"`
 	RuntimeFingerprint string `json:"runtimeFingerprint,omitempty"`
+	// ChunkerVersion and ParserVersion record how the corpus was segmented when
+	// this profile was measured. The corpus fingerprint mixes both versions in
+	// with the document set, so a re-chunk and an ordinary documentation edit
+	// are indistinguishable there - and only one of them means the measured
+	// behavior itself may have changed. Recording them separately lets status
+	// tell an informational corpus edit apart from an actionable re-chunk.
+	//
+	// Both are optional. A profile measured before this field existed records
+	// neither, and status then declines to guess rather than telling every such
+	// project to re-run.
+	ChunkerVersion string `json:"chunkerVersion,omitempty"`
+	ParserVersion  string `json:"parserVersion,omitempty"`
 	// RatifiedHardNegativeHits and RatifiedAbstentionAccuracy record the
 	// values this profile was accepted at. calibrationNonInferior compares a
 	// candidate against the tighter of these and the incumbent's score on
@@ -366,16 +378,55 @@ func PublicGeneration(generation Generation) GenerationSummary {
 	}
 }
 
+// Verbosity selects how much re-derivable citation and provenance metadata a
+// response carries. It never changes which passages are selected, only what is
+// serialized beside them - and therefore how much of the caller's token budget
+// is left for evidence.
+//
+// A verbose search result measured 119 tokens of citation for a 56-token
+// passage. Of that, the generation URI, the document hash and the prelude hash
+// are 82 tokens that a caller cannot act on: the URI is generation + chunkId,
+// both already present, and read accepts the chunkId directly. Compact drops
+// exactly those and keeps path, heading, line range, passage hash and tier, so
+// every citation stays independently re-derivable.
+const (
+	VerbosityCompact = "compact"
+	VerbosityVerbose = "verbose"
+)
+
+// NormalizeVerbosity defaults an unset verbosity to compact and rejects
+// anything else. Compact is the default because the budget a caller states is
+// the budget it means to spend on evidence, not on repeating the generation
+// identity once per passage.
+func NormalizeVerbosity(value string) (string, error) {
+	switch value {
+	case "", VerbosityCompact:
+		return VerbosityCompact, nil
+	case VerbosityVerbose:
+		return VerbosityVerbose, nil
+	default:
+		return "", fmt.Errorf("unsupported verbosity %q", value)
+	}
+}
+
 type Citation struct {
-	Path        string `json:"path"`
-	Heading     string `json:"heading"`
-	StartLine   int    `json:"startLine"`
-	EndLine     int    `json:"endLine"`
+	Path      string `json:"path"`
+	Heading   string `json:"heading"`
+	StartLine int    `json:"startLine"`
+	EndLine   int    `json:"endLine"`
+	// ContentHash never reaches the wire; it is the in-process passage digest
+	// the evaluator and the packing loop compare against.
 	ContentHash string `json:"-"`
-	SourceHash  string `json:"sourceHash"`
+	// SourceHash and URI are omitted in compact responses. The document hash is
+	// re-derivable by hashing the cited file, and the URI is the generation ID
+	// and the chunk ID concatenated - both already carried by the response.
+	// omitempty keeps verbose output byte-identical to earlier releases, which
+	// matters because stored packs are re-marshalled and compared against their
+	// own recorded digest.
+	SourceHash  string `json:"sourceHash,omitempty"`
 	PassageHash string `json:"passageHash"`
 	Tier        string `json:"tier"`
-	URI         string `json:"uri"`
+	URI         string `json:"uri,omitempty"`
 	// omitempty for the same reason as SearchResult.DocumentContext: stored
 	// packs are re-marshalled and verified against their recorded digest.
 	ContextHash string `json:"contextHash,omitempty"`
@@ -387,10 +438,14 @@ type Citation struct {
 }
 
 type SearchResult struct {
-	ChunkID   string         `json:"chunkId"`
-	Score     int64          `json:"score"`
+	ChunkID string `json:"chunkId"`
+	// Score, Rerank and LaneRanks are ranking diagnostics. Nothing outside the
+	// retriever reads them, and no caller can act on them, so compact responses
+	// drop them. A packed result always carries a positive fusion score, so
+	// omitempty never hides a real value in a verbose response.
+	Score     int64          `json:"score,omitempty"`
 	Rerank    int64          `json:"rerankScore,omitempty"`
-	LaneRanks map[string]int `json:"laneRanks"`
+	LaneRanks map[string]int `json:"laneRanks,omitempty"`
 	Passage   string         `json:"passage"`
 	// DocumentContext is the epistemic header of the document this passage
 	// came from: what it claims, how strongly, when it was last verified, and
@@ -404,33 +459,66 @@ type SearchResult struct {
 	Citation        Citation `json:"citation"`
 }
 
+// RetrievalMetadata measured 242 tokens on a verbose search response, a
+// quarter of a 1024-token budget spent before a single passage. Compact keeps
+// the fields a caller or an evaluator acts on - which project, which
+// generation, which corpus state, which profile actually served, why it fell
+// back, and the replay handle - and omits the rest, all of which is constant
+// for the generation and available from status.
 type RetrievalMetadata struct {
 	Project             string   `json:"project"`
-	Worktree            string   `json:"worktree"`
-	GitRevision         string   `json:"gitRevision"`
-	DirtyFingerprint    string   `json:"dirtyFingerprint"`
+	Worktree            string   `json:"worktree,omitempty"`
+	GitRevision         string   `json:"gitRevision,omitempty"`
+	DirtyFingerprint    string   `json:"dirtyFingerprint,omitempty"`
 	Generation          string   `json:"generation"`
 	CorpusFingerprint   string   `json:"corpusFingerprint"`
-	ParserVersion       string   `json:"parserVersion"`
-	ChunkerVersion      string   `json:"chunkerVersion"`
-	RequestedProfile    string   `json:"requestedProfile"`
+	ParserVersion       string   `json:"parserVersion,omitempty"`
+	ChunkerVersion      string   `json:"chunkerVersion,omitempty"`
+	RequestedProfile    string   `json:"requestedProfile,omitempty"`
 	EffectiveProfile    string   `json:"effectiveProfile"`
-	ActiveLanes         []string `json:"activeLanes"`
-	Models              []string `json:"models"`
-	ModelFingerprint    string   `json:"modelFingerprint"`
-	RuntimeFingerprint  string   `json:"runtimeFingerprint"`
+	ActiveLanes         []string `json:"activeLanes,omitempty"`
+	Models              []string `json:"models,omitempty"`
+	ModelFingerprint    string   `json:"modelFingerprint,omitempty"`
+	RuntimeFingerprint  string   `json:"runtimeFingerprint,omitempty"`
 	FallbackReason      *string  `json:"fallbackReason"`
 	DeterministicReplay string   `json:"deterministicReplay"`
 	ServingStale        bool     `json:"servingStale,omitempty"`
 	WriterContention    bool     `json:"writerContention,omitempty"`
 }
 
+// Compact returns the projection a compact response carries.
+func (metadata RetrievalMetadata) Compact() RetrievalMetadata {
+	return RetrievalMetadata{
+		Project: metadata.Project, Generation: metadata.Generation,
+		CorpusFingerprint: metadata.CorpusFingerprint,
+		EffectiveProfile:  metadata.EffectiveProfile,
+		FallbackReason:    metadata.FallbackReason,
+		// The replay handle already digests the requested profile, the tiers,
+		// the limit and the budget, so it remains the reproducibility anchor
+		// after the individual fingerprints are dropped.
+		DeterministicReplay: metadata.DeterministicReplay,
+		ServingStale:        metadata.ServingStale,
+		WriterContention:    metadata.WriterContention,
+	}
+}
+
 type SearchResponse struct {
-	Query           string            `json:"query"`
-	QueryClass      string            `json:"queryClass"`
-	AllowedTiers    []string          `json:"allowedTiers"`
-	TokenBudget     int               `json:"tokenBudget"`
-	EstimatedTokens int               `json:"estimatedTokens"`
+	Query        string   `json:"query"`
+	QueryClass   string   `json:"queryClass"`
+	AllowedTiers []string `json:"allowedTiers"`
+	// Verbosity records which citation and metadata projection was serialized,
+	// so a caller reading a stored response knows whether an absent sourceHash
+	// means "compacted away" or "missing".
+	Verbosity       string `json:"verbosity,omitempty"`
+	TokenBudget     int    `json:"tokenBudget"`
+	EstimatedTokens int    `json:"estimatedTokens"`
+	// ContextTokens is how many of EstimatedTokens the per-passage document
+	// preludes consumed. The prelude stays charged against the caller budget -
+	// EstimatedTokens remains the single number that describes what was
+	// serialized, and the budget stays a hard ceiling - but a caller that wants
+	// to know what epistemic safety costs it can now read that separately
+	// instead of inferring it.
+	ContextTokens   int               `json:"contextTokens,omitempty"`
 	Results         []SearchResult    `json:"results"`
 	Omitted         int               `json:"omitted"`
 	OmittedByReason map[string]int    `json:"omittedByReason"`
@@ -462,8 +550,15 @@ type ContextPack struct {
 	FallbackReason   *string                   `json:"fallbackReason"`
 	TokenBudget      int                       `json:"tokenBudget"`
 	EstimatedTokens  int                       `json:"estimatedTokens"`
-	Passages         []ContextPassage          `json:"passages"`
-	Omitted          map[string]int            `json:"omitted"`
+	// Verbosity records which citation projection this pack carries, so a
+	// reader knows whether an absent sourceHash was compacted away or is
+	// missing. omitempty is load-bearing for the same reason as
+	// ContextPassage.DocumentContext: a pack written before this field existed
+	// is re-marshalled and compared against its own recorded digest, and an
+	// always-present field would invalidate every one of them.
+	Verbosity string           `json:"verbosity,omitempty"`
+	Passages  []ContextPassage `json:"passages"`
+	Omitted   map[string]int   `json:"omitted"`
 }
 
 type ContextGenerationIdentity struct {

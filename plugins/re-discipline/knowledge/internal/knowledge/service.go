@@ -39,6 +39,7 @@ type Service struct {
 	Warnings             []string
 	pinnedGeneration     *Generation
 	telemetryMu          sync.Mutex
+	telemetryBuffer      []telemetryObservation
 }
 
 // PinGeneration freezes this service on one immutable generation. A
@@ -329,17 +330,42 @@ func (service *Service) benchmarkStatus(
 	generation Generation,
 	runtimeIdentity RuntimeIdentity,
 ) map[string]any {
-	staleReasons := []string{}
+	// Staleness is two different claims wearing one name.
+	//
+	// ACTIONABLE means the measured behavior itself may no longer hold: the
+	// models, the runtime contract, or the way the corpus is segmented have
+	// changed under the measurement, or there is no valid measurement at all.
+	// Re-running the benchmark is the only way to learn what retrieval now
+	// does.
+	//
+	// INFORMATIONAL means the measurement is still a faithful description of
+	// how this profile behaves, but the corpus or the evaluation set has moved
+	// since it was taken. In a living project documents change every day, so
+	// reporting that at the same weight as a runtime change trains sessions to
+	// ignore the field entirely.
+	actionable := []string{}
+	informational := []string{}
 	if evidence.Status != "passed" || !sha256IdentityRE.MatchString(evidence.Digest) {
-		staleReasons = append(staleReasons, "benchmark-not-passed")
+		actionable = append(actionable, "benchmark-not-passed")
 	}
 	modelFingerprint := mustDigest(service.ModelManifest.Models)
 	if evidence.ModelFingerprint == "" || evidence.ModelFingerprint != modelFingerprint {
-		staleReasons = append(staleReasons, "model-fingerprint")
+		actionable = append(actionable, "model-fingerprint")
 	}
 	runtimeFingerprint, _ := CanonicalDigest(RuntimeContract(runtimeIdentity))
 	if evidence.RuntimeFingerprint == "" || evidence.RuntimeFingerprint != runtimeFingerprint {
-		staleReasons = append(staleReasons, "runtime-fingerprint")
+		actionable = append(actionable, "runtime-fingerprint")
+	}
+	// A recorded chunker or parser version that no longer matches the running
+	// one means the corpus was re-segmented after the measurement, which moves
+	// passage boundaries and therefore every ranking that depends on them.
+	// Absent values belong to a profile measured before this was recorded;
+	// guessing there would mark every existing project actionable at once.
+	if evidence.ChunkerVersion != "" && evidence.ChunkerVersion != ChunkerVersion {
+		actionable = append(actionable, "chunker-version")
+	}
+	if evidence.ParserVersion != "" && evidence.ParserVersion != ParserVersion {
+		actionable = append(actionable, "parser-version")
 	}
 	expectedEval := ""
 	switch evidence.Suite {
@@ -355,29 +381,47 @@ func (service *Service) benchmarkStatus(
 		}
 		if evidence.CorpusFingerprint == "" ||
 			evidence.CorpusFingerprint != generation.CorpusFingerprint {
-			staleReasons = append(staleReasons, "corpus-fingerprint")
+			informational = append(informational, "corpus-fingerprint")
 		}
 	default:
-		staleReasons = append(staleReasons, "benchmark-suite")
+		actionable = append(actionable, "benchmark-suite")
 	}
 	if expectedEval == "" || evidence.EvalFingerprint != expectedEval {
-		staleReasons = append(staleReasons, "eval-fingerprint")
+		informational = append(informational, "eval-fingerprint")
 	}
 	ageDays := -1
 	if evaluatedAt, err := time.Parse(time.RFC3339, evidence.EvaluatedAt); err == nil {
 		ageDays = int(time.Since(evaluatedAt).Hours() / 24)
 	} else {
-		staleReasons = append(staleReasons, "evaluated-at")
+		actionable = append(actionable, "evaluated-at")
+	}
+	actionable = SortedUnique(actionable)
+	informational = SortedUnique(informational)
+	severity := "none"
+	switch {
+	case len(actionable) > 0:
+		severity = "actionable"
+	case len(informational) > 0:
+		severity = "informational"
 	}
 	return map[string]any{
 		"suite": evidence.Suite, "digest": evidence.Digest,
 		"status": evidence.Status, "evaluatedAt": evidence.EvaluatedAt,
-		"ageDays": ageDays, "stale": len(staleReasons) > 0,
-		"staleReasons":       SortedUnique(staleReasons),
-		"evalFingerprint":    evidence.EvalFingerprint,
-		"corpusFingerprint":  evidence.CorpusFingerprint,
-		"modelFingerprint":   evidence.ModelFingerprint,
-		"runtimeFingerprint": evidence.RuntimeFingerprint,
+		"ageDays": ageDays,
+		"stale":   len(actionable) > 0 || len(informational) > 0,
+		"staleReasons": SortedUnique(
+			append(append([]string{}, actionable...), informational...)),
+		"staleSeverity":             severity,
+		"staleActionable":           len(actionable) > 0,
+		"staleInformational":        len(informational) > 0,
+		"actionableStaleReasons":    actionable,
+		"informationalStaleReasons": informational,
+		"evalFingerprint":           evidence.EvalFingerprint,
+		"corpusFingerprint":         evidence.CorpusFingerprint,
+		"modelFingerprint":          evidence.ModelFingerprint,
+		"runtimeFingerprint":        evidence.RuntimeFingerprint,
+		"chunkerVersion":            evidence.ChunkerVersion,
+		"parserVersion":             evidence.ParserVersion,
 	}
 }
 
@@ -469,11 +513,39 @@ func (service *Service) search(
 }
 
 func (service *Service) Orient(ctx context.Context, role string, tokenBudget int) (ContextPack, error) {
+	return service.OrientVerbosity(ctx, role, tokenBudget, "")
+}
+
+func (service *Service) OrientVerbosity(
+	ctx context.Context,
+	role string,
+	tokenBudget int,
+	verbosity string,
+) (ContextPack, error) {
 	if role == "" {
 		role = "manager"
 	}
 	tiers := []string{"profile", "navigation", "truth", "active", "memory"}
-	return service.ContextPack(ctx, "project profile current campaign orientation", role, tiers, tokenBudget)
+	return service.ContextPackOptions(ctx, ContextPackRequest{
+		Task:  "project profile current campaign orientation",
+		Role:  role,
+		Tiers: tiers, TokenBudget: tokenBudget, Verbosity: verbosity,
+	})
+}
+
+// ContextPackRequest is the full set of context-pack inputs. The narrower
+// ContextPack and ContextPackRequired entry points remain for callers that do
+// not choose a projection.
+type ContextPackRequest struct {
+	Task          string
+	Role          string
+	Tiers         []string
+	TokenBudget   int
+	RequiredPaths []string
+	// Verbosity is compact when unset. It selects the per-passage citation
+	// projection only; the pack envelope is the artifact's provenance and is
+	// identical in both forms.
+	Verbosity string
 }
 
 func (service *Service) ContextPack(
@@ -493,7 +565,24 @@ func (service *Service) ContextPackRequired(
 	tiers []string,
 	tokenBudget int,
 	requiredPaths []string,
+) (ContextPack, error) {
+	return service.ContextPackOptions(ctx, ContextPackRequest{
+		Task: task, Role: role, Tiers: tiers, TokenBudget: tokenBudget,
+		RequiredPaths: requiredPaths,
+	})
+}
+
+func (service *Service) ContextPackOptions(
+	ctx context.Context,
+	request ContextPackRequest,
 ) (pack ContextPack, err error) {
+	task, role := request.Task, request.Role
+	tiers, tokenBudget := request.Tiers, request.TokenBudget
+	requiredPaths := request.RequiredPaths
+	verbosity, verbosityErr := NormalizeVerbosity(request.Verbosity)
+	if verbosityErr != nil {
+		return ContextPack{}, verbosityErr
+	}
 	started := time.Now()
 	defer func() {
 		omissions := 0
@@ -508,7 +597,7 @@ func (service *Service) ContextPackRequired(
 		})
 	}()
 	pack, err = service.contextPackRequired(
-		ctx, task, role, tiers, tokenBudget, requiredPaths,
+		ctx, task, role, tiers, tokenBudget, requiredPaths, verbosity,
 	)
 	if errors.Is(err, errSourceChangedAfterIndex) && service.pinnedGeneration == nil {
 		if _, _, _, reconcileErr := service.Index.Reconcile(ctx); reconcileErr != nil {
@@ -516,7 +605,7 @@ func (service *Service) ContextPackRequired(
 				"context-pack source reconciliation failed: %w", reconcileErr)
 		}
 		return service.contextPackRequired(
-			ctx, task, role, tiers, tokenBudget, requiredPaths,
+			ctx, task, role, tiers, tokenBudget, requiredPaths, verbosity,
 		)
 	}
 	return pack, err
@@ -529,6 +618,7 @@ func (service *Service) contextPackRequired(
 	tiers []string,
 	tokenBudget int,
 	requiredPaths []string,
+	verbosity string,
 ) (ContextPack, error) {
 	if role != "manager" && role != "drafter" {
 		return ContextPack{}, errors.New("context pack role must be manager or drafter")
@@ -571,6 +661,7 @@ func (service *Service) contextPackRequired(
 	search, err := service.search(ctx, SearchOptions{
 		Query: task, QueryClass: "auto", AllowedTiers: tiers,
 		Limit: selected.Effective.Packing.MaxPassages, TokenBudget: tokenBudget,
+		Verbosity: verbosity, retainURI: true,
 	}, false)
 	if err != nil {
 		return ContextPack{}, err
@@ -614,11 +705,11 @@ func (service *Service) contextPackRequired(
 				"required path %q is outside the allowed epistemic tiers", clean)
 		}
 		requiredSeen[clean] = true
-		requiredResults = append(requiredResults, SearchResult{
+		requiredResults = append(requiredResults, projectSearchResult(SearchResult{
 			ChunkID: StableID("required", generation.ID, clean, citation.PassageHash),
 			Score:   1<<62 - 1, LaneRanks: map[string]int{"required": 1},
 			Passage: passage, Citation: citation,
-		})
+		}, verbosity, true))
 	}
 	if len(requiredResults) > 0 {
 		filtered := make([]SearchResult, 0, len(search.Results))
@@ -657,7 +748,8 @@ func (service *Service) contextPackRequired(
 		Models:           models,
 		FallbackReason:   selected.FallbackReason,
 		TokenBudget:      tokenBudget, EstimatedTokens: search.EstimatedTokens,
-		Passages: passages,
+		Verbosity: verbosity,
+		Passages:  passages,
 		Omitted: map[string]int{
 			"candidatePassages": search.Omitted,
 			"budget":            search.OmittedByReason["budget"],

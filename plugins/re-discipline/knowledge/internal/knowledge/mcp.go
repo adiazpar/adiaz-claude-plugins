@@ -489,6 +489,7 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 			ProjectRoot string `json:"projectRoot"`
 			Role        string `json:"role"`
 			TokenBudget int    `json:"tokenBudget"`
+			Verbosity   string `json:"verbosity"`
 		}
 		if err := decodeToolInput(body, &input); err != nil {
 			return nil, err
@@ -497,7 +498,8 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 		if err != nil {
 			return nil, err
 		}
-		return service.Orient(ctx, input.Role, input.TokenBudget)
+		return service.OrientVerbosity(
+			ctx, input.Role, input.TokenBudget, input.Verbosity)
 	case "search":
 		var input struct {
 			ProjectRoot  string   `json:"projectRoot"`
@@ -506,6 +508,7 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 			AllowedTiers []string `json:"allowedTiers"`
 			Limit        int      `json:"limit"`
 			TokenBudget  int      `json:"tokenBudget"`
+			Verbosity    string   `json:"verbosity"`
 		}
 		if err := decodeToolInput(body, &input); err != nil {
 			return nil, err
@@ -526,7 +529,7 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 		return service.Search(ctx, SearchOptions{
 			Query: input.Query, QueryClass: input.QueryClass,
 			AllowedTiers: input.AllowedTiers, Limit: input.Limit,
-			TokenBudget: input.TokenBudget,
+			TokenBudget: input.TokenBudget, Verbosity: input.Verbosity,
 		})
 	case "read":
 		var input struct {
@@ -556,6 +559,7 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 			AllowedTiers  []string `json:"allowedTiers"`
 			TokenBudget   int      `json:"tokenBudget"`
 			RequiredPaths []string `json:"requiredPaths"`
+			Verbosity     string   `json:"verbosity"`
 		}
 		if err := decodeToolInput(body, &input); err != nil {
 			return nil, err
@@ -564,10 +568,11 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 		if err != nil {
 			return nil, err
 		}
-		return service.ContextPackRequired(
-			ctx, input.Task, input.Role, input.AllowedTiers,
-			input.TokenBudget, input.RequiredPaths,
-		)
+		return service.ContextPackOptions(ctx, ContextPackRequest{
+			Task: input.Task, Role: input.Role, Tiers: input.AllowedTiers,
+			TokenBudget: input.TokenBudget, RequiredPaths: input.RequiredPaths,
+			Verbosity: input.Verbosity,
+		})
 	case "context_pack_materialize":
 		var input struct {
 			ProjectRoot    string   `json:"projectRoot"`
@@ -576,6 +581,7 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 			AllowedTiers   []string `json:"allowedTiers"`
 			TokenBudget    int      `json:"tokenBudget"`
 			RequiredPaths  []string `json:"requiredPaths"`
+			Verbosity      string   `json:"verbosity"`
 			Path           string   `json:"path"`
 			ExpectedDigest string   `json:"expectedDigest"`
 			ExpectedPackID string   `json:"expectedPackId"`
@@ -587,10 +593,11 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 		if err != nil {
 			return nil, err
 		}
-		pack, err := service.ContextPackRequired(
-			ctx, input.Task, input.Role, input.AllowedTiers,
-			input.TokenBudget, input.RequiredPaths,
-		)
+		pack, err := service.ContextPackOptions(ctx, ContextPackRequest{
+			Task: input.Task, Role: input.Role, Tiers: input.AllowedTiers,
+			TokenBudget: input.TokenBudget, RequiredPaths: input.RequiredPaths,
+			Verbosity: input.Verbosity,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -658,6 +665,13 @@ func toolDefinitions() []map[string]any {
 		"readOnlyHint": true, "destructiveHint": false,
 		"idempotentHint": true, "openWorldHint": false,
 	}
+	verbosity := map[string]any{
+		"type": "string", "enum": []string{"compact", "verbose"},
+		"default": "compact",
+		"description": "compact (default) omits re-derivable citation and provenance metadata " +
+			"so the token budget is spent on evidence; verbose carries the document hash, " +
+			"the generation URI, the prelude hash and the full retrieval provenance.",
+	}
 	requiredPaths := map[string]any{
 		"type": "array", "uniqueItems": true, "maxItems": 20,
 		"items": map[string]any{
@@ -679,6 +693,7 @@ func toolDefinitions() []map[string]any {
 				"projectRoot": projectRoot,
 				"role":        map[string]any{"type": "string", "enum": []string{"manager", "drafter"}, "default": "manager"},
 				"tokenBudget": integerSchema(512, 8192),
+				"verbosity":   verbosity,
 			}, nil),
 			"annotations": readOnly,
 		},
@@ -691,6 +706,7 @@ func toolDefinitions() []map[string]any {
 				"queryClass":   map[string]any{"type": "string", "enum": []string{"auto", "exact", "conceptual", "orientation", "current", "provenance", "dependency", "contradiction"}, "default": "auto"},
 				"allowedTiers": tiers, "limit": integerSchema(1, 50),
 				"tokenBudget": integerSchema(128, 4096),
+				"verbosity":   verbosity,
 			}, []string{"query"}),
 			"annotations": readOnly,
 		},
@@ -713,7 +729,7 @@ func toolDefinitions() []map[string]any {
 				"task":         map[string]any{"type": "string", "minLength": 1, "maxLength": 2000},
 				"role":         map[string]any{"type": "string", "enum": []string{"manager", "drafter"}},
 				"allowedTiers": tiers, "tokenBudget": integerSchema(512, 8192),
-				"requiredPaths": requiredPaths,
+				"requiredPaths": requiredPaths, "verbosity": verbosity,
 			}, []string{"task", "role"}),
 			"annotations": readOnly,
 		},
@@ -725,7 +741,7 @@ func toolDefinitions() []map[string]any {
 				"task":         map[string]any{"type": "string", "minLength": 1, "maxLength": 2000},
 				"role":         map[string]any{"type": "string", "enum": []string{"manager", "drafter"}},
 				"allowedTiers": tiers, "tokenBudget": integerSchema(512, 8192),
-				"requiredPaths": requiredPaths,
+				"requiredPaths": requiredPaths, "verbosity": verbosity,
 				"path": map[string]any{
 					"type": "string", "minLength": 1, "maxLength": 500,
 					"description": "Approved active/.../subagents/.../context-pack.json or recruiting run path.",

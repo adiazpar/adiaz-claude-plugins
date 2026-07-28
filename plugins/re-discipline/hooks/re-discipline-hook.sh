@@ -806,13 +806,33 @@ knowledge_health_summary() {
     return 0
   fi
 
-  "$executable" status \
+  health_output="$("$executable" status \
     --asset-root "$asset_root" \
-    --project-root "$root" >/dev/null 2>&1
+    --project-root "$root" 2>/dev/null)"
   health_status=$?
   if [ "$health_status" -ne 0 ]; then
     printf '%s' 'Knowledge health status reported degraded state; run the packaged status command directly.'
+    return 0
   fi
+
+  # Only ACTIONABLE benchmark staleness is surfaced at session start. Corpus
+  # and evaluation-set drift are informational: documents change every day in a
+  # living project, and reporting that as a warning teaches sessions to ignore
+  # the warning that matters. A model, runtime, or chunker change is different,
+  # because the measured behavior itself may no longer hold.
+  health_compact="$(printf '%s' "$health_output" | tr -d ' \n\t\r')"
+  case "$health_compact" in
+    *'"staleActionable":true'*)
+      health_reasons="$(printf '%s' "$health_compact" |
+        sed -n 's/.*"actionableStaleReasons":\[\([^]]*\)\].*/\1/p' | tr -d '"')"
+      if [ -n "$health_reasons" ]; then
+        printf 'Knowledge benchmark evidence is actionably stale (%s); re-run benchmark-knowledge before relying on measured retrieval behavior.' \
+          "$health_reasons"
+      else
+        printf '%s' 'Knowledge benchmark evidence is actionably stale; re-run benchmark-knowledge before relying on measured retrieval behavior.'
+      fi
+      ;;
+  esac
 }
 
 active_campaign_reminder() {

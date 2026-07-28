@@ -18,6 +18,16 @@ type SearchOptions struct {
 	AllowedTiers []string
 	Limit        int
 	TokenBudget  int
+	// Verbosity is compact when unset. See NormalizeVerbosity.
+	Verbosity string
+	// retainURI keeps the generation-scoped citation handle even in a compact
+	// response. A live search response states its generation once in metadata
+	// and is consumed immediately, so repeating it per result buys nothing. A
+	// context pack is a stored artifact that is handed to another process and
+	// re-verified there, and its per-passage URI is the only thing binding each
+	// citation to the generation the pack claims - a forged pack that swaps its
+	// generation ID is caught by exactly that check.
+	retainURI bool
 }
 
 type candidate struct {
@@ -71,6 +81,11 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	if options.TokenBudget < 128 || options.TokenBudget > 8192 {
 		return SearchResponse{}, errors.New("token budget must be between 128 and 8192")
 	}
+	verbosity, err := NormalizeVerbosity(options.Verbosity)
+	if err != nil {
+		return SearchResponse{}, err
+	}
+	options.Verbosity = verbosity
 	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(retriever.Generation.Database))
 	if err != nil {
 		return SearchResponse{}, err
@@ -207,8 +222,10 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 		Tiers      []string
 		Limit      int
 		Budget     int
+		Verbosity  string `json:",omitempty"`
 	}{retriever.Generation.ID, retriever.Profile.EffectiveIdentity, options.Query,
-		options.QueryClass, tiers, options.Limit, options.TokenBudget}
+		options.QueryClass, tiers, options.Limit, options.TokenBudget,
+		verboseReplayTag(verbosity)}
 	replay, _ := CanonicalDigest(replayInput)
 	replay = compactReplayHandle(replay)
 
@@ -225,13 +242,21 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	// the full budget admits a passage that finalizeSearchResponse must then
 	// strip, and because the loop has already skipped every smaller candidate,
 	// the response comes back empty with budget left unspent.
+	metadata := retriever.metadata(replay)
+	if verbosity == VerbosityCompact {
+		metadata = metadata.Compact()
+	}
 	contentBudget := options.TokenBudget - responseTokenOverhead(SearchResponse{
 		Query: options.Query, QueryClass: options.QueryClass, AllowedTiers: tiers,
+		Verbosity:   verbosity,
 		TokenBudget: options.TokenBudget, Results: []SearchResult{},
-		Omitted: len(ranked), OmittedByReason: map[string]int{
+		// ContextTokens widens the envelope as it grows, so reserve against the
+		// largest value it could take rather than against zero.
+		ContextTokens: options.TokenBudget,
+		Omitted:       len(ranked), OmittedByReason: map[string]int{
 			"resultLimit": 0, "documentCap": 0, "staleSource": 0, "budget": len(ranked),
 		},
-		Metadata: retriever.metadata(replay),
+		Metadata: metadata,
 	})
 	if contentBudget < 0 {
 		contentBudget = 0
@@ -275,6 +300,7 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 				Durability:  CitationDurability(row.Chunk.Tier),
 			},
 		}
+		result = projectSearchResult(result, verbosity, options.retainURI)
 		// Charge the passage what it actually costs on the wire. A citation
 		// carries three content hashes, a generation URI, and JSON field names,
 		// so a fixed-constant estimate understates it badly enough that the
@@ -296,15 +322,60 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 		usedBytes += bytes
 		perDocument[row.Chunk.Path]++
 	}
+	contextTokens := 0
+	for _, result := range results {
+		contextTokens += EstimateTokens(result.DocumentContext)
+	}
 	response := SearchResponse{
 		Query: options.Query, QueryClass: options.QueryClass, AllowedTiers: tiers,
-		TokenBudget: options.TokenBudget, Results: results, Omitted: omitted,
+		Verbosity:   verbosity,
+		TokenBudget: options.TokenBudget, ContextTokens: contextTokens,
+		Results: results, Omitted: omitted,
 		OmittedByReason: omittedByReason,
-		Metadata:        retriever.metadata(replay),
+		Metadata:        metadata,
 	}
 	return finalizeSearchResponse(
 		response, options.TokenBudget, retriever.Profile.Effective.Packing.MaxBytes,
 	)
+}
+
+// projectSearchResult reduces a fully populated result to the requested
+// projection. The verbose form is the canonical one; compact removes only
+// fields that are re-derivable from what remains, so a compact citation still
+// pins a passage to a path, a line range and a content digest.
+func projectSearchResult(
+	result SearchResult,
+	verbosity string,
+	retainURI bool,
+) SearchResult {
+	if verbosity != VerbosityCompact {
+		return result
+	}
+	result.Score = 0
+	result.Rerank = 0
+	result.LaneRanks = nil
+	result.Citation.SourceHash = ""
+	if !retainURI {
+		result.Citation.URI = ""
+	}
+	result.Citation.ContextHash = ""
+	// Durable is the default every non-ephemeral tier derives; only a mortal
+	// handle is news a caller has to act on.
+	if result.Citation.Durability == "durable" {
+		result.Citation.Durability = ""
+	}
+	return result
+}
+
+// verboseReplayTag keeps the replay handle of a compact response identical to
+// what the same query produced before verbosity existed, while still making a
+// verbose response a distinct replay input: the two serialize differently and
+// must not share a handle.
+func verboseReplayTag(verbosity string) string {
+	if verbosity == VerbosityVerbose {
+		return VerbosityVerbose
+	}
+	return ""
 }
 
 func compactReplayHandle(digest string) string {
@@ -377,6 +448,10 @@ func finalizeSearchResponse(
 		response.Omitted++
 		response.OmittedByReason["budget"]++
 		response.EstimatedTokens = 0
+		response.ContextTokens = 0
+		for _, result := range response.Results {
+			response.ContextTokens += EstimateTokens(result.DocumentContext)
+		}
 	}
 }
 
