@@ -25,7 +25,11 @@ const (
 	// index that is merely less useful can be tolerated; one that is less safe
 	// cannot.
 	ChunkerVersion = "section-block-v4"
-	SchemaVersion  = 1
+	// BootstrapSchemaVersion is the .re-discipline/config.json contract; v2
+	// introduced the machine-managed knowledge/ layout. Knowledge policy
+	// (knowledge/policy.jsonc) keeps its own independent schema version.
+	BootstrapSchemaVersion = 2
+	SettingsSchemaVersion  = 1
 )
 
 var AllowedTiers = map[string]bool{
@@ -57,10 +61,10 @@ func CitationDurability(tier string) string {
 }
 
 type BootstrapConfig struct {
-	SchemaVersion     int             `json:"schemaVersion"`
-	SettingsDirectory string          `json:"settingsDirectory"`
-	Memory            MemoryConfig    `json:"memory"`
-	Knowledge         KnowledgeConfig `json:"knowledge"`
+	SchemaVersion      int             `json:"schemaVersion"`
+	KnowledgeDirectory string          `json:"knowledgeDirectory"`
+	Memory             MemoryConfig    `json:"memory"`
+	Knowledge          KnowledgeConfig `json:"knowledge"`
 }
 
 type MemoryConfig struct {

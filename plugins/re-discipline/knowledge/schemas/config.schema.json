@@ -4,10 +4,10 @@
   "title": "Re-Discipline bootstrap configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "settingsDirectory", "memory", "knowledge"],
+  "required": ["schemaVersion", "knowledgeDirectory", "memory", "knowledge"],
   "properties": {
-    "schemaVersion": {"const": 1},
-    "settingsDirectory": {"const": "settings"},
+    "schemaVersion": {"const": 2},
+    "knowledgeDirectory": {"const": "knowledge"},
     "memory": {
       "type": "object",
       "additionalProperties": false,
@@ -24,8 +24,8 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "profile": {"const": "plugin:balanced-v1"},
-        "settingsFile": {"const": "settings/knowledge.jsonc"},
-        "projectProfile": {"const": "settings/retrieval-profile.json"}
+        "settingsFile": {"const": "knowledge/policy.jsonc"},
+        "projectProfile": {"const": "knowledge/retrieval-profile.json"}
       }
     }
   }
