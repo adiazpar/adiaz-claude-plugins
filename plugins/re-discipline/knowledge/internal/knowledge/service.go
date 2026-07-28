@@ -254,7 +254,23 @@ func (service *Service) selectProfileRow(
 	return service.finalizeSelectedProfile(selected, runtime)
 }
 
+// Status reports project knowledge and memory state as two blocks: a
+// plain-language `user` block hosts print verbatim, and a `system` block
+// carrying the full technical payload for agents. See BuildUserStatus for
+// the translation rules.
 func (service *Service) Status(ctx context.Context) (map[string]any, error) {
+	system, err := service.systemStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"user":   BuildUserStatus(system),
+		"system": system,
+	}, nil
+}
+
+func (service *Service) systemStatus(ctx context.Context) (map[string]any, error) {
+	pendingProposals := countPendingProposals(service.Boundary.Root)
 	if service.Configuration.Valid && !service.Configuration.Bootstrap.Knowledge.Enabled {
 		return map[string]any{
 			"schemaVersion": 1,
@@ -267,6 +283,7 @@ func (service *Service) Status(ctx context.Context) (map[string]any, error) {
 			"knowledge": map[string]any{
 				"enabled": false, "indexBuilt": false,
 			},
+			"memoryProposalsPending": pendingProposals,
 		}, nil
 	}
 	runtimeIdentity, err := ProbeRuntimeIdentity(service.ModelManifest)
@@ -325,6 +342,7 @@ func (service *Service) Status(ctx context.Context) (map[string]any, error) {
 		"pins":           service.EvidencePinCensus(),
 		"campaigns":      service.campaignStatus(),
 		"telemetry":      service.telemetryStatus(),
+		"memoryProposalsPending": pendingProposals,
 	}
 	return status, nil
 }

@@ -105,7 +105,7 @@ func assertMCPStatusReportsInvalid(t *testing.T, root, expectedText string) {
 		initializeMessage(1, false),
 		toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
 	)
-	status := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
 	configuration := asObject(t, status["configuration"])
 	if configuration["valid"] != false {
 		t.Fatalf("safely diagnosable malformed configuration was reported valid: %#v", status)
@@ -213,7 +213,7 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 		initializeMessage(1, false),
 		toolCallMessage(2, "status", map[string]any{}),
 	)
-	status := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
 	configuration := asObject(t, status["configuration"])
 	if configuration["memoryMode"] != "shared-only" ||
 		configuration["nativeMemoryTouched"] != false {
