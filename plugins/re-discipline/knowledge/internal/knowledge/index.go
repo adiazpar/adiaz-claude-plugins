@@ -117,12 +117,19 @@ func (manager IndexManager) ensure(
 	}
 	current, err := manager.LoadCurrent()
 	modelFingerprint := modelIndexFingerprint(manager.Manifest)
+	settingsFingerprint := IndexingSettingsDigest(manager.Settings)
 	currentGitRevision, currentDirtyFingerprint := gitState(manager.Boundary.Root)
 	corruptPath := ""
 	if err != nil {
 		corruptPath = manager.corruptCurrentDatabase()
 	}
+	// The settings fingerprint is checked on the fast path specifically. Every
+	// other freshness signal here is derived from a file the corpus contains,
+	// and a source-class toggle changes no such file - so without this the fast
+	// path proves the index matches the documents it already knows about and
+	// says nothing about the documents it was told to start indexing.
 	if err == nil && current.ModelFingerprint == modelFingerprint &&
+		current.SettingsFingerprint == settingsFingerprint &&
 		current.Runtime == runtimeIdentity && current.ParserVersion == ParserVersion &&
 		current.ChunkerVersion == ChunkerVersion &&
 		current.GitRevision == currentGitRevision &&
@@ -175,6 +182,7 @@ func (manager IndexManager) ensure(
 				current.DirtyFingerprint = currentDirtyFingerprint
 				current.ServingStale =
 					current.CorpusFingerprint != inventory.Fingerprint ||
+						current.SettingsFingerprint != settingsFingerprint ||
 						revisionStale
 				current.WriterContention = true
 				inventory.Diagnostics = append(inventory.Diagnostics,
@@ -193,7 +201,13 @@ func (manager IndexManager) ensure(
 		}
 	}
 	reusePath := ""
+	// The settings fingerprint is compared here too, not only on the fast path.
+	// A toggle that adds a class the project has no files for leaves the corpus
+	// fingerprint identical, so without this the generation would be accepted
+	// unchanged and every later call would re-walk the corpus to rediscover the
+	// same nothing.
 	if err == nil && current.CorpusFingerprint == inventory.Fingerprint &&
+		current.SettingsFingerprint == settingsFingerprint &&
 		current.ModelFingerprint == modelFingerprint &&
 		current.Runtime == runtimeIdentity &&
 		current.GitRevision == currentGitRevision {
@@ -367,13 +381,16 @@ func (manager IndexManager) build(
 	}
 	buildTime := time.Now().UTC()
 	createdAt := RFC3339UTC(buildTime)
+	settingsFingerprint := IndexingSettingsDigest(manager.Settings)
 	idInput := struct {
-		Corpus  string
-		Models  string
-		Runtime RuntimeIdentity
-		Nonce   string
+		Corpus   string
+		Settings string
+		Models   string
+		Runtime  RuntimeIdentity
+		Nonce    string
 	}{
-		inventory.Fingerprint, modelIndexFingerprint(manager.Manifest), runtimeIdentity,
+		inventory.Fingerprint, settingsFingerprint,
+		modelIndexFingerprint(manager.Manifest), runtimeIdentity,
 		buildTime.Format(time.RFC3339Nano) + fmt.Sprintf("-%d", os.Getpid()),
 	}
 	digest, err := CanonicalDigest(idInput)
@@ -410,8 +427,9 @@ func (manager IndexManager) build(
 	}
 	generation := Generation{
 		ID: id, Database: finalPath, CorpusFingerprint: inventory.Fingerprint,
-		ModelFingerprint: modelIndexFingerprint(manager.Manifest),
-		Project:          project, Worktree: "worktree:" + SHA256String(manager.Boundary.Root)[:16],
+		SettingsFingerprint: settingsFingerprint,
+		ModelFingerprint:    modelIndexFingerprint(manager.Manifest),
+		Project:             project, Worktree: "worktree:" + SHA256String(manager.Boundary.Root)[:16],
 		GitRevision: gitRevision, DirtyFingerprint: dirty,
 		ParserVersion: ParserVersion, ChunkerVersion: ChunkerVersion,
 		CreatedAt: createdAt, Runtime: runtimeIdentity,

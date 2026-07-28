@@ -284,6 +284,8 @@ func (service *Service) Status(ctx context.Context) (map[string]any, error) {
 		indexIntegrity = verifyDatabase(generation.Database) == nil
 		indexFresh = indexIntegrity &&
 			generation.ModelFingerprint == modelIndexFingerprint(service.ModelManifest) &&
+			generation.SettingsFingerprint ==
+				IndexingSettingsDigest(service.Index.Settings) &&
 			generation.Runtime == runtimeIdentity &&
 			generation.ParserVersion == ParserVersion &&
 			generation.ChunkerVersion == ChunkerVersion &&
