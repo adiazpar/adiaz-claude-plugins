@@ -12,9 +12,9 @@ adapter.
   `.re-discipline/local-paths.md` when the task requires them.
 - Read the active manager adapter for host-specific tools and configuration.
 - Read `.re-discipline/agents/config.json`; `native` means the active host.
-- Read `.re-discipline/config.json` only as the small bootstrap manifest. Read
-  documented project-facing knowledge policy under
-  `.re-discipline/settings/`.
+- Read `.re-discipline/config.json` only as the small bootstrap manifest. The
+  machine-managed knowledge state lives under `.re-discipline/knowledge/`;
+  its fields are documented in `<plugin-root>/references/knowledge-internals.md`.
 - Use an external provider only when the user explicitly selected it or live
   config records that selection.
 - Put concrete required tools, paths, deliverables, evidence standards,
@@ -24,7 +24,8 @@ adapter.
 - Do not commit unless the user explicitly asks.
 
 Use the same local knowledge server for every adapter. Preserve the distinction
-between requested and effective retrieval profiles, and report every fallback.
+between requested and effective retrieval profiles, and record every fallback
+in campaign artifacts - not narrated to the user (see `reporting.md`).
 Select only a separately benchmarked effective fallback profile; never
 improvise a lane combination.
 
