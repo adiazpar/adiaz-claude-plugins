@@ -99,6 +99,12 @@ retrospective voice. Include:
 Add the chronicle to `docs/history/INDEX.md`, remove the campaign from
 `docs/INDEX.md`, and verify `docs/truth/INDEX.md`.
 
+If this campaign serves a `docs/goals/<slug>.md`, replace its row in that
+goal's campaign table with the chronicle path, and move any question or held
+finding that outlived it into the goal's carried-across section. That
+substitution is what turns a campaign about to be deleted into a permanent
+link; without it the arc loses its own history one closure at a time.
+
 Distill any durable operational recall only into a pending file under
 `.re-discipline/memory/proposals/`. Invoke `review-memory` only after
 presenting the exact proposal and obtaining the user's explicit accept or
@@ -124,6 +130,11 @@ improve the chronicle or disposition first.
 Before removal, resolve every campaign-owned pending memory proposal or replace
 its scratch-only citation with a durable source. Do not leave accepted recall
 or an evaluation case pointing only to the campaign being deleted.
+
+Confirm no other campaign's context pack or brief cites a path under this
+campaign. A pack materialized inside campaign A that quotes campaign B's
+reports survives B's closure as a dangling citation, and nothing else detects
+it: a pack dies with its own campaign, not with the one it cites.
 
 ## Step 8: Verify And Report
 
