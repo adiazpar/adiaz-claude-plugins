@@ -11,6 +11,7 @@ decision, memory review, and drafter context pack.
 | `docs/truth/**` | Verified current claims within their stated scope. | Yes, when the query permits truth. |
 | `docs/history/**` | Retrospective provenance and leads. | Only when explicitly permitted. |
 | `active/*/CAMPAIGN.md` | Provisional campaign state. | Only when explicitly permitted. |
+| `active/*/REVIEWS.md` | Provisional campaign state: the manager's review ledger and its unresolved holds. | Only when explicitly permitted. |
 | `active/*/subagents/*/report.md`, stamped | A drafter finding a manager rederived. Provisional, never empirical support. | Yes for a manager, labelled a reviewed drafter claim. |
 | `active/*/subagents/*/report.md`, unstamped | A drafter claim nobody has checked. | No. Tier `draft` is in no default tier set and must be requested by name. |
 | `docs/backlog/**` | Deferred intent. | Only when explicitly permitted. |
@@ -23,6 +24,13 @@ Apply tier and access filters before relevance ranking. Never make truth,
 history, campaign work, backlog, or memory interchangeable through a score.
 Use source passages and citations as evidence; never cite an embedding,
 generated summary, rank, or database row as the source of a claim.
+
+`CAMPAIGN.md` and `REVIEWS.md` share the `active` tier because they are one
+logical masterfile split only by growth rate: state is rewritten every
+checkpoint and stays small enough to re-read cold, the ledger only appends. The
+ledger is not `campaign` tier - that tier means a drafter finding a manager
+rederived, and the ledger carries the manager's own dispositions rather than
+any drafter's prose.
 
 A drafter report's tier is content-dependent: a report carrying a manager's
 review stamp indexes as `campaign`, an unstamped one as `draft`. The split

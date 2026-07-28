@@ -8,7 +8,12 @@
     "truth": true,
     "history": true,
     "backlog": true,
+
+    // Index active/*/CAMPAIGN.md and active/*/REVIEWS.md in the `active` tier.
+    // The two are one logical campaign masterfile split only because state is
+    // rewritten each checkpoint while the review ledger only appends.
     "activeCampaigns": true,
+
     "sharedMemory": true,
 
     // Index drafter reports under active/*/subagents/*/report.md. A report a

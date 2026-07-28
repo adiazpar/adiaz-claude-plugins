@@ -48,7 +48,7 @@ do not grant network access.
 | `sources.truth` | `true` | Index `docs/truth/**` with current-truth tier labels. |
 | `sources.history` | `true` | Index `docs/history/**` as provenance, never current authority. |
 | `sources.backlog` | `true` | Index `docs/backlog/**` as deferred intent. |
-| `sources.activeCampaigns` | `true` | Index active `CAMPAIGN.md` masterfiles as provisional work. |
+| `sources.activeCampaigns` | `true` | Index active `CAMPAIGN.md` masterfiles and their `REVIEWS.md` review ledgers as provisional work in the `active` tier. Both halves of one campaign masterfile follow one toggle. |
 | `sources.sharedMemory` | `true` | Index accepted `memory/topics/**`; proposals remain excluded. |
 | `sources.drafterReports` | `true` | Index `active/*/subagents/*/report.md`. A report a manager has stamped as reviewed enters the `campaign` tier; an unstamped one enters `draft`, which is in no default tier set and must be requested by name. |
 | `sources.additional` | `[]` | Optional explicitly classified project-relative Markdown source classes. Each entry requires `path`, a Markdown filename `pattern`, and the non-claim authority `tier` allowed by the current schema. This tracked setting cannot grant external roots, bypass the denylist, or turn a source into admitted truth. |

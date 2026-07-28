@@ -380,6 +380,54 @@ class SkillMetadataTests(unittest.TestCase):
         self.assertIn("temporary campaign evidence", combined)
         self.assertIn("no durable root-level replacement evidence directory", combined)
 
+    def test_review_ledger_survives_its_own_campaign_lifecycle(self) -> None:
+        # REVIEWS.md is the designated destination of record for HOLD
+        # dispositions, and closure deletes the directory holding it. Every
+        # skill that writes, works, or destroys the ledger must name it, or the
+        # holds it carries are erased by the step that removes the campaign.
+        template = read(PLUGIN / "templates" / "campaign-reviews.md")
+        self.assertIn("## Unresolved Holds", template)
+
+        for skill in ("open-campaign", "review-subagent"):
+            body = read(PLUGIN / "skills" / skill / "SKILL.md")
+            with self.subTest(skill=skill):
+                self.assertIn("REVIEWS.md", body)
+
+        checkpoint = read(PLUGIN / "skills" / "checkpoint-campaign" / "SKILL.md")
+        self.assertIn("active/<slug>/REVIEWS.md", checkpoint)
+        self.assertIn("Unresolved Holds", checkpoint)
+        self.assertIn("templates/campaign-reviews.md", checkpoint)
+
+        close = read(PLUGIN / "skills" / "close-campaign" / "SKILL.md")
+        self.assertIn("active/<slug>/REVIEWS.md", close)
+        self.assertIn("Unresolved Holds", close)
+        self.assertIn("templates/campaign-reviews.md", close)
+        # The audit must precede the recursive removal, and the chronicle must
+        # carry the ledger's only durable projection.
+        audit = close.index("Unresolved Holds")
+        removal = close.index("## Step 7: Remove Scratch Safely")
+        self.assertLess(audit, removal)
+        chronicle = close.split("## Step 5: Write The Chronicle", 1)[1].split(
+            "## Step 6:",
+            1,
+        )[0]
+        self.assertIn("review ledger's outcome summary", chronicle)
+
+    def test_indexed_source_classes_are_documented_where_maintainers_read(
+        self,
+    ) -> None:
+        settings_readme = read(PLUGIN / "templates" / "project" / "settings-README.md")
+        governance = read(PLUGIN / "references" / "knowledge-governance.md")
+        sources = read(PLUGIN / "knowledge" / "internal" / "knowledge" / "sources.go")
+
+        for base in ("CAMPAIGN.md", "REVIEWS.md"):
+            with self.subTest(base=base):
+                self.assertIn(f'BaseOnly: "{base}"', sources)
+                self.assertIn(base, settings_readme)
+                self.assertIn(base, governance)
+
+        self.assertIn("`active/*/REVIEWS.md`", governance)
+
 
 class ProjectTemplateTests(unittest.TestCase):
     def setUp(self) -> None:

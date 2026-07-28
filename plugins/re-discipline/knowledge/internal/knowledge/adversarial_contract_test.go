@@ -167,6 +167,12 @@ future-experiment-kappa remains intent, not current truth.
 
 campaign-provisional-delta is unresolved.
 `)
+	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "REVIEWS.md"), `# Review Ledger: fixture-campaign
+
+## Unresolved Holds
+
+review-ledger-hold-sigma still needs a decisive observation.
+`)
 	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "notes.md"), "must-not-index-active-notes\n")
 	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "subagents", "run-01", "report.md"), "unstamped-drafter-report\n")
 
@@ -975,6 +981,11 @@ func TestAdversarialSourceTiersSecretsAndBoundary(t *testing.T) {
 		"docs/history/retired.md":                    "history",
 		"docs/backlog/experiment.md":                 "backlog",
 		"active/fixture-campaign/CAMPAIGN.md":        "active",
+		// The review ledger is the other half of one campaign masterfile, so it
+		// shares the masterfile's tier rather than joining reviewed drafter
+		// reports in `campaign`: it carries the manager's own dispositions, not
+		// any drafter's claims.
+		"active/fixture-campaign/REVIEWS.md": "active",
 		// Indexed by default since 0.6.6, and unstamped, so it lands in
 		// `draft` - a tier in no default tier set, which a caller has to ask
 		// for by name.
