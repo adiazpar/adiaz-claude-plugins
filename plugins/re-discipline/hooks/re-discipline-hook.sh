@@ -307,12 +307,12 @@ validate_bootstrap() {
   validate_json_syntax "$config_path" 0 || return 1
   expected_keys='enabled
 knowledge
+knowledgeDirectory
 memory
 mode
 profile
 projectProfile
 schemaVersion
-settingsDirectory
 settingsFile
 writePolicy'
   actual_keys="$(extract_json_keys "$config_path" | LC_ALL=C sort)"
@@ -320,14 +320,14 @@ writePolicy'
     return 1
   fi
   compact="$(tr -d '\r\n\t ' <"$config_path")"
-  printf '%s' "$compact" | grep -Eq '"schemaVersion":1' || return 1
-  printf '%s' "$compact" | grep -Eq '"settingsDirectory":"settings"' || return 1
+  printf '%s' "$compact" | grep -Eq '"schemaVersion":2' || return 1
+  printf '%s' "$compact" | grep -Eq '"knowledgeDirectory":"knowledge"' || return 1
   printf '%s' "$compact" | grep -Eq '"mode":"(shared-only|hybrid|native)"' || return 1
   printf '%s' "$compact" | grep -Eq '"writePolicy":"proposal-only"' || return 1
   printf '%s' "$compact" | grep -Eq '"enabled":(true|false)' || return 1
   printf '%s' "$compact" | grep -Eq '"profile":"plugin:balanced-v1"' || return 1
-  printf '%s' "$compact" | grep -Eq '"settingsFile":"settings/knowledge.jsonc"' || return 1
-  printf '%s' "$compact" | grep -Eq '"projectProfile":"settings/retrieval-profile.json"' || return 1
+  printf '%s' "$compact" | grep -Eq '"settingsFile":"knowledge/policy.jsonc"' || return 1
+  printf '%s' "$compact" | grep -Eq '"projectProfile":"knowledge/retrieval-profile.json"' || return 1
   memory_mode="$(printf '%s' "$compact" | sed -n 's/.*"mode":"\([^"]*\)".*/\1/p')"
   [ -n "$memory_mode" ]
 }
@@ -775,8 +775,11 @@ validate_host_policy() {
 get_profile_state() {
   profile_path="$1"
   profile_version="$(sed -n 's/.*re-discipline:shared-laws v\([0-9][0-9.]*\).*/\1/p' "$profile_path" 2>/dev/null | head -n 1)"
+  # v0.7 is current; v0.6 is supported migration input handled by the
+  # packaged ensure operation, so the in-script recovery skips it.
   case "$profile_version" in
-    0.6.*) printf '%s\n' managed ;;
+    0.7.*) printf '%s\n' managed ;;
+    0.6.*) printf '%s\n' migratable ;;
     "")
       printf '%s\n' legacy
       ;;
@@ -806,9 +809,9 @@ configuration_recovery() {
     return 0
   fi
 
-  restore_managed_file "$root" ".re-discipline/settings/README.md" "settings-README.md"
-  restore_managed_file "$root" ".re-discipline/settings/knowledge.jsonc" "knowledge.jsonc"
-  restore_managed_file "$root" ".re-discipline/settings/retrieval-profile.json" "retrieval-profile.json"
+  restore_managed_file "$root" ".re-discipline/knowledge/README.md" "knowledge-README.md"
+  restore_managed_file "$root" ".re-discipline/knowledge/policy.jsonc" "policy.jsonc"
+  restore_managed_file "$root" ".re-discipline/knowledge/retrieval-profile.json" "retrieval-profile.json"
   restore_managed_file "$root" ".re-discipline/memory/INDEX.md" "memory-INDEX.md"
   restore_managed_file "$root" ".re-discipline/knowledge/evals/README.md" "knowledge-evals-README.md"
 
@@ -831,30 +834,30 @@ configuration_recovery() {
     fi
   done
 
-  knowledge_path="$root/.re-discipline/settings/knowledge.jsonc"
+  knowledge_path="$root/.re-discipline/knowledge/policy.jsonc"
   if ! validate_json_syntax "$knowledge_path" 1; then
-    append_warning "settings/knowledge.jsonc is malformed or unsupported"
+    append_warning "knowledge/policy.jsonc is malformed or unsupported"
   else
     knowledge_compact="$(tr -d '\r\n\t ' <"$knowledge_path" 2>/dev/null)"
     printf '%s' "$knowledge_compact" | grep -Eq '"schemaVersion":1' ||
-      append_warning "settings/knowledge.jsonc is malformed or unsupported"
+      append_warning "knowledge/policy.jsonc is malformed or unsupported"
     printf '%s' "$knowledge_compact" | grep -Eq '"execution":"local"' ||
-      append_warning "settings/knowledge.jsonc must keep model execution local"
+      append_warning "knowledge/policy.jsonc must keep model execution local"
   fi
 
-  retrieval_path="$root/.re-discipline/settings/retrieval-profile.json"
+  retrieval_path="$root/.re-discipline/knowledge/retrieval-profile.json"
   if ! validate_json_syntax "$retrieval_path" 0; then
-    append_warning "settings/retrieval-profile.json is malformed or unsupported"
+    append_warning "knowledge/retrieval-profile.json is malformed or unsupported"
   else
     retrieval_compact="$(tr -d '\r\n\t ' <"$retrieval_path" 2>/dev/null)"
     printf '%s' "$retrieval_compact" | grep -Eq '"schemaVersion":1' ||
-      append_warning "settings/retrieval-profile.json is malformed or unsupported"
+      append_warning "knowledge/retrieval-profile.json is malformed or unsupported"
     # Mirror profileIdentityRE in the packaged server. A project that has ever
     # calibrated and promoted a candidate carries "project:candidate-<hex>",
     # not the packaged baseline identity.
     printf '%s' "$retrieval_compact" |
       grep -Eq '"profileId":"[a-z0-9]+(-[a-z0-9]+)*(:[a-z0-9]+(-[a-z0-9]+)*)?"' ||
-      append_warning "settings/retrieval-profile.json has an unsupported profile"
+      append_warning "knowledge/retrieval-profile.json has an unsupported profile"
   fi
 
   repair_host_policy "$root" "$enabled"
@@ -892,33 +895,50 @@ knowledge_health_summary() {
     return 0
   fi
 
-  health_output="$("$executable" status \
+  health_output="$("$executable" ensure \
     --asset-root "$asset_root" \
-    --project-root "$root" 2>/dev/null)"
+    --project-root "$root" \
+    --budget-ms 7000 2>/dev/null)"
   health_status=$?
   if [ "$health_status" -ne 0 ]; then
     printf '%s' 'Knowledge health status reported degraded state; run the packaged status command directly.'
     return 0
   fi
 
-  # Only ACTIONABLE benchmark staleness is surfaced at session start. Corpus
-  # and evaluation-set drift are informational: documents change every day in a
-  # living project, and reporting that as a warning teaches sessions to ignore
-  # the warning that matters. A model, runtime, or chunker change is different,
-  # because the measured behavior itself may no longer hold.
+  # Two-audience reporting: only the payload's plain-language attention items
+  # reach the session, plus a single commit note when a legacy layout was
+  # migrated. Repairs are silent self-healing; machinery state stays in the
+  # system block for the agent's own status call.
   health_compact="$(printf '%s' "$health_output" | tr -d ' \n\t\r')"
+  health_lines=""
   case "$health_compact" in
-    *'"staleActionable":true'*)
-      health_reasons="$(printf '%s' "$health_compact" |
-        sed -n 's/.*"actionableStaleReasons":\[\([^]]*\)\].*/\1/p' | tr -d '"')"
-      if [ -n "$health_reasons" ]; then
-        printf 'Knowledge benchmark evidence is actionably stale (%s); re-run benchmark-knowledge before relying on measured retrieval behavior.' \
-          "$health_reasons"
-      else
-        printf '%s' 'Knowledge benchmark evidence is actionably stale; re-run benchmark-knowledge before relying on measured retrieval behavior.'
-      fi
+    *'"migrated":true'*)
+      health_lines='Upgraded internal config layout - commit when ready.'
       ;;
   esac
+  attention_items="$(printf '%s' "$health_output" | awk '
+    BEGIN { collecting = 0 }
+    index($0, "\"attention\"") > 0 { collecting = 1 }
+    collecting {
+      line = $0
+      while (match(line, /"[^"]*"/)) {
+        value = substr(line, RSTART + 1, RLENGTH - 2)
+        if (collecting == 2 && value != "") { print value }
+        if (value == "attention") { collecting = 2 }
+        line = substr(line, RSTART + RLENGTH)
+      }
+      if (collecting == 2 && index($0, "]") > 0) { exit }
+    }
+  ')"
+  if [ -n "$attention_items" ]; then
+    if [ -n "$health_lines" ]; then
+      health_lines="${health_lines}
+${attention_items}"
+    else
+      health_lines="$attention_items"
+    fi
+  fi
+  printf '%s' "$health_lines"
 }
 
 active_campaign_reminder() {
@@ -949,7 +969,7 @@ fi
 
 canonical_profile="$project_root/.re-discipline/project-profile.md"
 profile_state="$(get_profile_state "$canonical_profile")"
-onboard_reminder='Invoke the re-discipline onboard skill before substantive work. Read the canonical profile, active manager adapter, docs indexes, and active campaign masterfiles. Use the shared knowledge server for bounded, citable context.'
+onboard_reminder='Invoke the re-discipline onboard skill before substantive work. Read the canonical profile, active manager adapter, docs indexes, and active campaign masterfiles. Use the shared knowledge server for bounded, citable context. Print only the plain-language onboarding screen; knowledge internals are read silently.'
 recovery_reminder='Legacy or incomplete re-discipline project detected without a supported managed profile. Invoke init-project in migration or recovery mode before substantive work; legacy host profiles are recovery input only.'
 checkpoint_reminder='Context is about to compact. If a campaign is active, invoke checkpoint-campaign and preserve current state, decisions, evidence boundaries, source handles, and dead ends. If it is solved, invoke close-campaign.'
 subagent_reminder='You are a drafter, not a ratifier. Read the canonical project profile, your exact brief, and its immutable context pack when present. Preserve source citations and epistemic tiers. Write only in the granted workspace; never accept memory, promote truth, change retrieval profiles, close a campaign, commit, push, or spawn another agent.'
