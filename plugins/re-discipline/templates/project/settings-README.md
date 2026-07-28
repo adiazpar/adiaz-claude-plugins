@@ -50,12 +50,13 @@ do not grant network access.
 | `sources.backlog` | `true` | Index `docs/backlog/**` as deferred intent. |
 | `sources.activeCampaigns` | `true` | Index active `CAMPAIGN.md` masterfiles as provisional work. |
 | `sources.sharedMemory` | `true` | Index accepted `memory/topics/**`; proposals remain excluded. |
+| `sources.drafterReports` | `true` | Index `active/*/subagents/*/report.md`. A report a manager has stamped as reviewed enters the `campaign` tier; an unstamped one enters `draft`, which is in no default tier set and must be requested by name. |
 | `sources.additional` | `[]` | Optional explicitly classified project-relative Markdown source classes. Each entry requires `path`, a Markdown filename `pattern`, and the non-claim authority `tier` allowed by the current schema. This tracked setting cannot grant external roots, bypass the denylist, or turn a source into admitted truth. |
 | `models.execution` | `"local"` | Embeddings and reranking execute locally. |
 | `telemetry.mode` | `"metrics-only"` | Local aggregate metrics without query/passage text; `"off"` disables them. |
-| `budgets.searchTokens` | `1024` | Maximum estimated tokens for a normal search response. |
-| `budgets.managerContextTokens` | `2048` | Default ceiling for manager context packs. |
-| `budgets.drafterContextTokens` | `1024` | Default ceiling for drafter context packs. |
+| `budgets.searchTokens` | `3072` | Maximum estimated tokens for a normal search response. The response envelope is charged against this same budget, so a ceiling near the median result cost returns one passage. |
+| `budgets.managerContextTokens` | `6144` | Default ceiling for manager context packs. |
+| `budgets.drafterContextTokens` | `3072` | Default ceiling for drafter context packs. |
 | `budgets.maxPassages` | `12` | Maximum passages before a smaller caller limit. |
 | `budgets.maxBytes` | `32768` | Absolute returned-context byte ceiling. |
 

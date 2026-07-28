@@ -168,7 +168,7 @@ future-experiment-kappa remains intent, not current truth.
 campaign-provisional-delta is unresolved.
 `)
 	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "notes.md"), "must-not-index-active-notes\n")
-	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "subagents", "run-01", "report.md"), "must-not-index-drafter-report\n")
+	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "subagents", "run-01", "report.md"), "unstamped-drafter-report\n")
 
 	writeTestFile(t, filepath.Join(root, ".re-discipline", "memory", "INDEX.md"), "# Shared memory index\n")
 	writeTestFile(t, filepath.Join(root, ".re-discipline", "memory", "topics", "navigation.md"), `# Navigation recall
@@ -975,6 +975,10 @@ func TestAdversarialSourceTiersSecretsAndBoundary(t *testing.T) {
 		"docs/history/retired.md":                    "history",
 		"docs/backlog/experiment.md":                 "backlog",
 		"active/fixture-campaign/CAMPAIGN.md":        "active",
+		// Indexed by default since 0.6.6, and unstamped, so it lands in
+		// `draft` - a tier in no default tier set, which a caller has to ask
+		// for by name.
+		"active/fixture-campaign/subagents/run-01/report.md": "draft",
 	}
 	for path, tier := range expected {
 		if tiers[path] != tier {
@@ -986,7 +990,6 @@ func TestAdversarialSourceTiersSecretsAndBoundary(t *testing.T) {
 		"docs/truth/local-paths.md",
 		"docs/truth/private-key.pem",
 		"active/fixture-campaign/notes.md",
-		"active/fixture-campaign/subagents/run-01/report.md",
 	} {
 		if _, ok := tiers[forbidden]; ok {
 			t.Errorf("forbidden or provisional source was indexed: %s", forbidden)

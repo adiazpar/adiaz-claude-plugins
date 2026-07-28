@@ -444,6 +444,40 @@ class ProjectTemplateTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn(path, tree)
 
+    def test_new_project_knowledge_settings_match_the_server_defaults(self) -> None:
+        """The template and DefaultKnowledgeSettings are one decision.
+
+        A new project takes its controls from the template, and a project with
+        no settings file at all takes them from the Go default. When the two
+        disagree, the shipped default silently stops being the shipped default.
+        """
+        body = read(self.templates / "knowledge.jsonc")
+        stripped = "\n".join(
+            "" if line.lstrip().startswith("//") else line
+            for line in body.splitlines()
+        )
+        settings = json.loads(stripped)
+
+        self.assertTrue(settings["sources"]["drafterReports"])
+        self.assertEqual(
+            settings["budgets"],
+            {
+                "searchTokens": 3072,
+                "managerContextTokens": 6144,
+                "drafterContextTokens": 3072,
+                "maxPassages": 12,
+                "maxBytes": 32768,
+            },
+        )
+
+        defaults = read(
+            PLUGIN / "knowledge" / "internal" / "knowledge" / "config.go"
+        ).split("func DefaultKnowledgeSettings()", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("DrafterReports: true", defaults)
+        self.assertIn("SearchTokens: 3072", defaults)
+        self.assertIn("ManagerContextTokens: 6144", defaults)
+        self.assertIn("DrafterContextTokens: 3072", defaults)
+
     def test_project_retrieval_profile_tracks_packaged_baseline(self) -> None:
         project_profile = json.loads(read(self.templates / "retrieval-profile.json"))
         packaged_profile = json.loads(
@@ -466,6 +500,7 @@ class ProjectTemplateTests(unittest.TestCase):
             "sources.backlog",
             "sources.activeCampaigns",
             "sources.sharedMemory",
+            "sources.drafterReports",
             "models.execution",
             "telemetry.mode",
             "budgets.searchTokens",
@@ -482,7 +517,7 @@ class ProjectTemplateTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertIn(field, body)
 
-        for default in ("1024", "2048", "12", "32768", "shared-only"):
+        for default in ("3072", "6144", "12", "32768", "shared-only"):
             with self.subTest(default=default):
                 self.assertIn(default, body)
         self.assertIn("never silently replaced", body)

@@ -45,12 +45,17 @@ func DefaultKnowledgeSettings() KnowledgeSettings {
 		Sources: SourceSettings{
 			Truth: true, History: true, Backlog: true,
 			ActiveCampaigns: true, SharedMemory: true,
+			DrafterReports: true,
 		},
 		Models:    ModelSettings{Execution: "local"},
 		Telemetry: Telemetry{Mode: "metrics-only"},
+		// The response envelope is charged against the same budget as the
+		// passages it introduces. It measures about 332 tokens, so a 1024
+		// search budget left roughly 692 for content against a median result
+		// cost of 393, and retrieval behaved as top-1.
 		Budgets: BudgetSettings{
-			SearchTokens: 1024, ManagerContextTokens: 2048,
-			DrafterContextTokens: 1024, MaxPassages: 12, MaxBytes: 32768,
+			SearchTokens: 3072, ManagerContextTokens: 6144,
+			DrafterContextTokens: 3072, MaxPassages: 12, MaxBytes: 32768,
 		},
 	}
 }
