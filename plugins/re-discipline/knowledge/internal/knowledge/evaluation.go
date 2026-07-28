@@ -1164,7 +1164,17 @@ func runContextPackCase(
 }
 
 func evaluationOutcomePassed(outcome CaseOutcome) bool {
-	return outcome.GatePassed
+	// The hard gate is per-case SAFETY, mirroring hardMetricsPassed: no forbidden
+	// tier, malformed citation, stale content, budget overflow, or non-determinism.
+	// GatePassed folds in QualityPassed too (ExpectedFound, CompleteEvidence,
+	// CitationSafe's recall component, HardNegativeHits), which are exactly the
+	// retrieval-quality dimensions that trade off against recall and that
+	// hardMetricsPassed deliberately stopped treating as absolute. Gating on
+	// GatePassed reintroduced that perfection requirement per case, so a
+	// safety-clean baseline whose retrieval is merely imperfect on real project
+	// cases failed hard gates. Quality is graded for non-inferiority against the
+	// incumbent (applyProjectNonInferiority / calibrationNonInferior), not here.
+	return outcome.SafetyPassed
 }
 
 func contextPackOutcomesPassed(outcomes []ContextPackOutcome) bool {

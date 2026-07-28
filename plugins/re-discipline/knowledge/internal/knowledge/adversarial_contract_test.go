@@ -3945,6 +3945,135 @@ func TestAdversarialProjectBenchmarkUsesRatifiedProjectEvalsAndCacheOnly(t *test
 	}
 }
 
+// TestAdversarialProjectBenchmarkHardGatesGateSafetyNotQuality pins the hard
+// gate to per-case SAFETY. A model-free baseline whose retrieval is safe,
+// deterministic, and budget-compliant, but that legitimately falls short of
+// perfect recall/citation coverage on a case, must still pass hard gates:
+// retrieval-quality shortfalls are graded for non-inferiority against the
+// incumbent, not treated as absolute gate violations. Before the fix the hard
+// gate read outcome.GatePassed (safety AND per-case quality perfection), so a
+// single imperfect-but-safe case sank a spotless baseline.
+func TestAdversarialProjectBenchmarkHardGatesGateSafetyNotQuality(t *testing.T) {
+	root := makeAdversarialProject(t)
+	service := newAdversarialService(t, root, nil)
+	generation, _, _, _, err := service.ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := adversarialProjectBenchmarkCases(generation.CorpusFingerprint)
+	// The query surfaces engine.md (a truth-tier, well-formed, in-budget,
+	// deterministic result) while the case declares portability.md as its
+	// evidence. Free retrieval is therefore safety-clean but quality-imperfect:
+	// expectedFound/completeEvidence/citationSafe are all false, yet no safety,
+	// determinism, or budget property is violated. The context pack force-injects
+	// the required path, so the context-pack conjunct still passes.
+	cases = append(cases, EvalCase{
+		ID: "project-benchmark-quality-shortfall", Role: "manager",
+		Topic: "project-benchmark-quality-shortfall", Split: "development",
+		Query: "A1B2C3D4", QueryClass: "conceptual", AllowedTiers: []string{"truth"},
+		CorpusSnapshot:       generation.CorpusFingerprint,
+		ExpectedPaths:        []string{"docs/truth/portability.md"},
+		MinimumEvidencePaths: []string{"docs/truth/portability.md"},
+		ExpectedCitations:    []string{"docs/truth/portability.md"},
+		ForbiddenTiers:       []string{"history"},
+		TokenBudget:          1024, Answerable: boolPointer(true),
+	})
+	writeTestJSON(t, filepath.Join(
+		root, ".re-discipline", "knowledge", "evals", "project-benchmark.json"), cases)
+
+	report, err := service.RunProjectBenchmark(context.Background(), "quick")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Profiles) != 1 {
+		t.Fatalf("quick benchmark produced %d profiles, want 1", len(report.Profiles))
+	}
+	profile := report.Profiles[0]
+
+	// Precondition: the baseline is safety-clean on every case and the crafted
+	// case genuinely fails quality. If this stops holding the fixture no longer
+	// reproduces the bug and the assertion below would be vacuous.
+	sawQualityShortfall := false
+	for _, outcome := range profile.Cases {
+		if !outcome.SafetyPassed {
+			t.Fatalf("baseline case %q failed a safety gate: %#v",
+				outcome.CaseID, outcome)
+		}
+		if !outcome.QualityPassed {
+			sawQualityShortfall = true
+		}
+	}
+	if !sawQualityShortfall {
+		t.Fatal("fixture no longer produces a safe-but-quality-imperfect case")
+	}
+
+	if !profile.ContextPackPassed {
+		t.Fatalf("context-pack conjunct failed, confounding the hard-gate check: %#v",
+			profile.ContextPackCases)
+	}
+	if !profile.HardGatesPassed {
+		t.Fatal("hard gates failed on a safety-clean baseline with only a " +
+			"retrieval-quality shortfall; quality must be graded for " +
+			"non-inferiority, not gated absolutely")
+	}
+	if !report.Passed {
+		t.Fatal("quick project benchmark did not pass despite a safety-clean baseline")
+	}
+}
+
+// TestProjectNonInferiorityKeepsHardGatesSeparate pins the second axis: a
+// profile that clears every absolute hard gate but underperforms the lexical
+// baseline must keep hardGatesPassed=true and only lose nonInferiorToLexical.
+// The overall run still fails (report.Passed=false) so an inferior promoted
+// profile is rejected, but the per-profile hard-gate verdict must not be
+// corrupted, or a reader and calibration cannot tell "hard gates fail" from
+// "hard gates pass but loses to the baseline".
+func TestProjectNonInferiorityKeepsHardGatesSeparate(t *testing.T) {
+	report := &ProjectBenchmarkReport{
+		Passed: true, Complete: true,
+		Profiles: []ProjectProfileBenchmark{
+			{
+				ProfileName:     "lexical-graph-v1",
+				HardGatesPassed: true, NonInferiorToLexical: true,
+				MetricsBySplit: map[string]QualityMetrics{
+					"holdout": {
+						RecallAtK: 0.9, NDCG: 0.9,
+						CompleteEvidenceCoverage: 0.9, CitationRecall: 0.9,
+					},
+				},
+			},
+			{
+				// Passes every absolute hard gate but is strictly worse than the
+				// baseline on every non-inferiority axis.
+				ProfileName:     "hybrid-local-v1",
+				HardGatesPassed: true, NonInferiorToLexical: true,
+				MetricsBySplit: map[string]QualityMetrics{
+					"holdout": {
+						RecallAtK: 0.5, NDCG: 0.5,
+						CompleteEvidenceCoverage: 0.5, CitationRecall: 0.5,
+					},
+				},
+			},
+		},
+	}
+	applyProjectNonInferiority(report)
+
+	hybrid := report.Profiles[1]
+	if hybrid.NonInferiorToLexical {
+		t.Fatal("expected the underperforming profile to lose non-inferiority")
+	}
+	if !hybrid.HardGatesPassed {
+		t.Fatal("non-inferiority failure corrupted hardGatesPassed; the absolute " +
+			"hard-gate axis and the non-inferiority axis must stay separate")
+	}
+	if report.Passed {
+		t.Fatal("overall benchmark must fail when a promoted profile is inferior")
+	}
+	if base := report.Profiles[0]; !base.HardGatesPassed || !base.NonInferiorToLexical {
+		t.Fatalf("baseline profile must remain passing: %#v", base)
+	}
+}
+
 func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.T) {
 	root := makeAdversarialProject(t)
 	service := newAdversarialService(t, root, nil)
