@@ -1,4 +1,4 @@
-<!-- re-discipline:claude-adapter v0.6.0 -->
+<!-- re-discipline:claude-adapter v0.7.0 -->
 # {{PROJECT_NAME}} - Claude Code Manager Adapter
 
 Claude Code automatically loads this host adapter. The imported project

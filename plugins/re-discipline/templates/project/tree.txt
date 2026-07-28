@@ -2,12 +2,11 @@
 # Create empty directories locally. Add .gitkeep only when repository policy
 # requires it, and never inside the provider or recruiting state roots.
 .re-discipline
-.re-discipline/settings
+.re-discipline/knowledge
+.re-discipline/knowledge/evals
 .re-discipline/memory
 .re-discipline/memory/proposals
 .re-discipline/memory/topics
-.re-discipline/knowledge
-.re-discipline/knowledge/evals
 .re-discipline/cache
 .re-discipline/cache/knowledge
 .re-discipline/cache/knowledge/generations
