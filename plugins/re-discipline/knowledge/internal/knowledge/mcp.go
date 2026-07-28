@@ -273,8 +273,8 @@ func validateManagedRoot(value string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read managed re-discipline marker: %w", err)
 	}
-	if !strings.Contains(string(body), "<!-- re-discipline:shared-laws v0.6.0 -->") {
-		return "", errors.New("project root lacks supported re-discipline shared-laws v0.6.0 marker")
+	if !strings.Contains(string(body), SharedLawsMarker) {
+		return "", errors.New("project root lacks supported re-discipline shared-laws v0.7.0 marker")
 	}
 	configuration := LoadConfiguration(boundary.Root)
 	if configuration.Unsafe {
