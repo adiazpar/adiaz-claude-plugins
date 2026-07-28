@@ -57,8 +57,8 @@ func IndexingSettingsDigest(settings KnowledgeSettings) string {
 
 func DefaultBootstrapConfig() BootstrapConfig {
 	return BootstrapConfig{
-		SchemaVersion:     1,
-		SettingsDirectory: "settings",
+		SchemaVersion:      BootstrapSchemaVersion,
+		KnowledgeDirectory: "knowledge",
 		Memory: MemoryConfig{
 			Mode:        "shared-only",
 			WritePolicy: "proposal-only",
@@ -66,8 +66,8 @@ func DefaultBootstrapConfig() BootstrapConfig {
 		Knowledge: KnowledgeConfig{
 			Enabled:        true,
 			Profile:        "plugin:balanced-v1",
-			SettingsFile:   "settings/knowledge.jsonc",
-			ProjectProfile: "settings/retrieval-profile.json",
+			SettingsFile:   "knowledge/policy.jsonc",
+			ProjectProfile: "knowledge/retrieval-profile.json",
 		},
 	}
 }
@@ -359,13 +359,13 @@ func LoadConfiguration(root string) Configuration {
 }
 
 func ValidateBootstrap(config BootstrapConfig) error {
-	if config.SchemaVersion != 1 {
+	if config.SchemaVersion != BootstrapSchemaVersion {
 		return fmt.Errorf("unsupported bootstrap schemaVersion %d", config.SchemaVersion)
 	}
-	if config.SettingsDirectory != "settings" ||
-		config.Knowledge.SettingsFile != "settings/knowledge.jsonc" ||
-		config.Knowledge.ProjectProfile != "settings/retrieval-profile.json" {
-		return fmt.Errorf("bootstrap paths must use the managed settings directory")
+	if config.KnowledgeDirectory != "knowledge" ||
+		config.Knowledge.SettingsFile != "knowledge/policy.jsonc" ||
+		config.Knowledge.ProjectProfile != "knowledge/retrieval-profile.json" {
+		return fmt.Errorf("bootstrap paths must use the managed knowledge directory")
 	}
 	if config.Knowledge.Profile != "plugin:balanced-v1" {
 		return fmt.Errorf("unsupported requested profile %q", config.Knowledge.Profile)
@@ -382,7 +382,7 @@ func ValidateBootstrap(config BootstrapConfig) error {
 }
 
 func ValidateSettings(settings KnowledgeSettings) error {
-	if settings.SchemaVersion != 1 {
+	if settings.SchemaVersion != SettingsSchemaVersion {
 		return fmt.Errorf("unsupported knowledge settings schemaVersion %d", settings.SchemaVersion)
 	}
 	if settings.Models.Execution != "local" {
