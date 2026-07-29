@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
         manifest = json.loads(read(manifest_path))
 
         self.assertEqual(manifest["name"], "re-discipline")
-        self.assertEqual(manifest["version"], "0.7.0")
+        self.assertEqual(manifest["version"], "0.7.1")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue((PLUGIN / "hooks" / "hooks.json").is_file())
 
@@ -44,8 +44,8 @@ class PackagingTests(unittest.TestCase):
         claude = json.loads(read(PLUGIN / ".claude-plugin" / "plugin.json"))
         codex = json.loads(read(PLUGIN / ".codex-plugin" / "plugin.json"))
 
-        self.assertEqual(claude["version"], "0.7.0")
-        self.assertEqual(codex["version"], "0.7.0")
+        self.assertEqual(claude["version"], "0.7.1")
+        self.assertEqual(codex["version"], "0.7.1")
         self.assertEqual(claude["version"], codex["version"])
 
 
