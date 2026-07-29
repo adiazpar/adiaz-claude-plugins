@@ -3,9 +3,9 @@ name: onboard
 description: >-
   Orient a re-discipline project at session start or when asked to get caught
   up, show current project state, or resume an active campaign. Reads the
-  canonical profile, active manager adapter, truth and history indexes, active
-  campaign masterfiles, knowledge health, shared-memory status, and normalized
-  external-provider state.
+  canonical profile, active manager adapter, truth and history indexes, the
+  names of open campaigns, knowledge health, shared-memory status, and
+  normalized external-provider state.
 ---
 
 # Onboard A Re-Discipline Project
@@ -61,11 +61,22 @@ onboarding.
 
 ## Step 3: Read Active State
 
-List directories directly under `active/`. For each campaign, read
-`active/<slug>/CAMPAIGN.md`, focusing on Objective, Current state, Open
-questions, Dead ends, and the disposition manifest. Read
-`active/<slug>/REVIEWS.md` when it exists, for what has already been checked
-and which holds are still unresolved.
+List directories directly under `active/`. That listing is the authoritative
+set of open campaigns, and at session start it is the whole of what onboarding
+needs from `active/`.
+
+**Do not read campaign masterfiles during onboarding.** Take each campaign's
+one-line description from `docs/INDEX.md`, already read in Step 2. When the
+index does not describe a listed campaign, print the slug alone and report the
+index as out of date. Onboarding orients; it does not preload the working
+context of campaigns the session has not asked for. A project can carry many
+open campaigns, and their masterfiles are long, provisional, and mostly
+irrelevant to any one session.
+
+Read a campaign's `CAMPAIGN.md` — Objective, Current state, Open questions,
+Dead ends, the disposition manifest — and its `REVIEWS.md` when the user
+directs the session into that campaign. That is the cold-resume read, and a
+cold resume is always into a named campaign.
 
 Status reports a `campaigns` block. When a campaign is marked `stale`, its
 masterfile is older than the newest file under its own directory by more than
@@ -139,7 +150,7 @@ Mission: <one sentence>
 Current focus: <one or two lines>
 
 Active campaigns:
-- <slug>: <status>; open questions: <count><; masterfile stale: recommend checkpoint>
+- <slug>: <one-line description from docs/INDEX.md, or "no index entry"><; masterfile stale: recommend checkpoint>
 - none (cold start)
 
 Knowledge search: <user.knowledge>
@@ -158,6 +169,10 @@ Omit the "Needs your attention" section when there are no attention items.
 Every other line is always present. The knowledge and memory lines are the
 status `user` block verbatim; print nothing else about knowledge or memory
 internals.
+
+Campaign lines carry no open-question count and no per-campaign status text
+beyond the index description, because onboarding does not open masterfiles.
+Do not read one to enrich the screen.
 
 Stop after orientation. Do not begin substantive investigation until the user
 directs it.
