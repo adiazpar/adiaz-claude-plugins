@@ -26,8 +26,10 @@ thin manager adapters, not in a second project profile.
 
 ## Session Start
 
-Use the `onboard` skill. Read `docs/INDEX.md`, the truth and history indexes,
-and each relevant active `CAMPAIGN.md`. If this profile is missing or invalid,
+Use the `onboard` skill. Read `docs/INDEX.md` and the truth and history
+indexes. Do not read campaign masterfiles at session start: `docs/INDEX.md`
+names the open campaigns, and `active/<slug>/CAMPAIGN.md` is read only when the
+session is directed into that campaign. If this profile is missing or invalid,
 use `init-project` recovery rather than guessing project identity.
 
 Project knowledge and recall are governed by `.re-discipline/config.json`.
