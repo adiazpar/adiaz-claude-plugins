@@ -111,6 +111,8 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                 self.assertEqual(sh, expected[name], name)
 
     def test_lifecycle_hook_outputs_are_bounded_and_semantically_symmetric(self):
+        posix_hook = (HOOKS / "re-discipline-hook.sh").read_text(encoding="ascii")
+        self.assertNotIn(r"\(true\|false\)", posix_hook)
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             self.make_project(project)

@@ -11,7 +11,17 @@ json_string() {
 
 json_boolean() {
   key=$1
-  printf '%s' "$input" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p" | head -n 1
+  printf '%s' "$input" | awk -v key="\"$key\"" '
+    {
+      pattern = key "[[:space:]]*:[[:space:]]*(true|false)"
+      if (match($0, pattern)) {
+        value = substr($0, RSTART, RLENGTH)
+        sub(/^.*:[[:space:]]*/, "", value)
+        print value
+        exit
+      }
+    }
+  '
 }
 
 escape_json() {
