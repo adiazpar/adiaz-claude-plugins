@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,9 +210,14 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		return printJSON(payload)
+	case "migrate-project":
+		return runMigrationCommand(ctx, args[1:])
+	case "state", "query", "read", "trace", "context-pack-materialize",
+		"manager-apply", "curation-submit", "closure-apply":
+		return runPeerCommand(ctx, args[0], args[1:])
 	}
 	switch args[0] {
-	case "preflight", "status", "index", "replay", "context-pack",
+	case "preflight", "status", "index", "replay",
 		"calibrate", "promote-profile":
 	default:
 		return usageError()
@@ -228,20 +234,9 @@ func run(ctx context.Context, args []string) error {
 	tiers := flags.String("tiers", "profile,navigation,truth,memory", "comma-separated epistemic tiers")
 	limit := flags.Int("limit", 12, "maximum passages")
 	tokenBudget := flags.Int("token-budget", 1024, "hard estimated-token budget")
-	role := flags.String("role", "manager", "manager or drafter")
 	verbosity := flags.String(
 		"verbosity", "compact",
 		"compact omits re-derivable citation and provenance metadata; verbose keeps it",
-	)
-	task := flags.String("task", "", "context-pack task")
-	output := flags.String("output", "", "managed context-pack materialization path")
-	expectedDigest := flags.String(
-		"expected-digest", "",
-		"independently retained sha256 context-pack digest",
-	)
-	expectedPackID := flags.String(
-		"expected-pack-id", "",
-		"optional independently retained context-pack ID",
 	)
 	candidate := flags.String("candidate", "", "calibration candidate-profile.json path")
 	report := flags.String("report", "", "calibration report.json path")
@@ -298,34 +293,6 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		return printJSON(value)
-	case "context-pack":
-		if strings.TrimSpace(*task) == "" {
-			return fmt.Errorf("--task is required")
-		}
-		pack, err := service.ContextPackOptions(ctx, knowledge.ContextPackRequest{
-			Task: *task, Role: *role, Tiers: splitCSV(*tiers),
-			TokenBudget: *tokenBudget, Verbosity: *verbosity,
-		})
-		if err != nil {
-			return err
-		}
-		if *output != "" {
-			if *expectedDigest == "" {
-				return fmt.Errorf(
-					"--expected-digest is required when --output is used",
-				)
-			}
-			if err := service.MaterializeContextPackExpected(
-				*output, pack, *expectedDigest, *expectedPackID,
-			); err != nil {
-				return err
-			}
-			return printJSON(map[string]any{
-				"path": *output, "packId": pack.PackID, "digest": pack.Digest,
-				"materialized": true,
-			})
-		}
-		return printJSON(pack)
 	case "calibrate":
 		report, err := service.Calibrate(ctx)
 		if err != nil {
@@ -354,7 +321,165 @@ func printJSON(value any) error {
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: re-discipline-knowledge <serve|recover|ensure|preflight|status|index|replay|context-pack|benchmark|calibrate|pin-evals|promote-profile|verify-pack> [options]")
+	return fmt.Errorf("usage: re-discipline-knowledge <serve|state|query|read|trace|context-pack-materialize|manager-apply|curation-submit|closure-apply|recover|ensure|preflight|status|index|replay|benchmark|calibrate|pin-evals|promote-profile|verify-pack|migrate-project> [options]")
+}
+
+func runPeerCommand(ctx context.Context, command string, args []string) error {
+	flags := flag.NewFlagSet(command, flag.ContinueOnError)
+	assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
+	projectRoot := flags.String("project-root", "", "managed project root or nested path")
+	cacheRoot := flags.String("cache-root", "", "optional cache root")
+	disableDense := flags.Bool("disable-dense", false, "select predefined no-embedding fallback")
+	disableRerank := flags.Bool("disable-rerank", false, "select predefined no-reranker fallback")
+	input := flags.String("input", "", "strict JSON request path, or - for stdin")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *input == "" {
+		return fmt.Errorf("--input is required")
+	}
+	var contextPackRequest *knowledge.ContextPackMaterializeRequest
+	if command == "context-pack-materialize" {
+		var request knowledge.ContextPackMaterializeRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		if err := knowledge.ValidateContextPackMaterializeRequest(request); err != nil {
+			return err
+		}
+		contextPackRequest = &request
+	}
+	root := strings.TrimSpace(*projectRoot)
+	if root == "" {
+		var err error
+		root, err = knowledge.FindProjectRoot(".")
+		if err != nil {
+			return fmt.Errorf("--project-root is required outside an initialized project: %w", err)
+		}
+	}
+	asset, err := filepath.Abs(*assetRoot)
+	if err != nil {
+		return err
+	}
+	service, err := knowledge.NewService(knowledge.ServiceOptions{
+		ProjectRoot: root, AssetRoot: asset, CacheRoot: *cacheRoot,
+		DisableDense: *disableDense, DisableRerank: *disableRerank,
+	})
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "state":
+		var request knowledge.StateRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.State(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "query":
+		var request knowledge.FindingQueryOptions
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.Query(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "read":
+		var request knowledge.ExactReadRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.ReadExact(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "trace":
+		var request knowledge.TraceRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.Trace(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "context-pack-materialize":
+		value, err := service.ContextPackMaterialize(ctx, *contextPackRequest)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "manager-apply":
+		var request knowledge.ManagerApplyRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.ManagerApply(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "curation-submit":
+		var request knowledge.CurationSubmitRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.CurationSubmit(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "closure-apply":
+		var request knowledge.ClosureApplyRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.ClosureApply(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	default:
+		return usageError()
+	}
+}
+
+func decodeCLIRequest(input string, target any) error {
+	const maxRequestBytes = 4 << 20
+	var reader io.Reader
+	if input == "-" {
+		reader = os.Stdin
+	} else {
+		file, err := os.Open(input)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		reader = file
+	}
+	limited := io.LimitReader(reader, maxRequestBytes+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return err
+	}
+	if len(body) > maxRequestBytes {
+		return fmt.Errorf("request exceeds %d bytes", maxRequestBytes)
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("decode request: %w", err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return fmt.Errorf("decode request: trailing JSON value")
+	}
+	return nil
 }
 
 func splitCSV(value string) []string {
@@ -365,4 +490,143 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func runMigrationCommand(ctx context.Context, args []string) error {
+	_ = ctx // Migration operations are bounded filesystem transactions today.
+	flags := flag.NewFlagSet("migrate-project", flag.ContinueOnError)
+	project := flags.String("project", "", "managed 0.7 project root")
+	projectRoot := flags.String("project-root", "", "managed 0.7 project root")
+	previewMode := flags.Bool("preview", false, "build a read-only migration preview")
+	applyDigest := flags.String("apply", "", "exact approved preview plan digest")
+	resumeID := flags.String("resume", "", "migration transaction ID to resume")
+	statusMode := flags.Bool("status", false, "show migration state")
+	verifyMode := flags.Bool("verify", false, "build a read-only candidate certification receipt")
+	ratifyDigest := flags.String("ratify", "", "exact candidate certification digest to ratify")
+	coveragePath := flags.String("coverage", "", "coverage receipt JSON to submit")
+	gate := flags.String("gate", "", "certification gate to record")
+	gatePassed := flags.Bool("gate-passed", false, "record the named gate as passed")
+	artifact := flags.String("artifact", "", "project-relative or external gate artifact handle")
+	artifactDigest := flags.String("artifact-digest", "", "sha256 digest of the gate artifact")
+	output := flags.String("output", "", "external preview output directory")
+	live := flags.String("live-campaigns", "", "comma-separated manager-designated live campaign slugs")
+	actor := flags.String("actor", "manager", "manager identity recorded in receipts")
+	reviewer := flags.String("reviewer", "manager", "reviewer identity for gate receipts")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	root := strings.TrimSpace(*project)
+	if root == "" {
+		root = strings.TrimSpace(*projectRoot)
+	}
+	if root == "" {
+		var err error
+		root, err = knowledge.FindProjectRoot(".")
+		if err != nil {
+			return fmt.Errorf("--project is required outside an initialized project: %w", err)
+		}
+	}
+	actions := 0
+	for _, selected := range []bool{
+		*previewMode, *applyDigest != "", *resumeID != "", *statusMode,
+		*verifyMode, *ratifyDigest != "", *coveragePath != "", *gate != "",
+	} {
+		if selected {
+			actions++
+		}
+	}
+	if actions != 1 {
+		return fmt.Errorf("migrate-project requires exactly one of --preview, --apply, --resume, --status, --verify, --ratify, --coverage, or --gate")
+	}
+	liveCampaigns := splitCSV(*live)
+	if *previewMode {
+		value, err := knowledge.PreviewMigration(root, liveCampaigns)
+		if err != nil {
+			return err
+		}
+		if *output != "" {
+			if err := knowledge.WriteMigrationPreview(root, *output, value); err != nil {
+				return err
+			}
+		}
+		return printJSON(value)
+	}
+	engine, err := knowledge.NewMigrationEngine(root)
+	if err != nil {
+		return err
+	}
+	if *applyDigest != "" {
+		value, err := knowledge.PreviewMigration(root, liveCampaigns)
+		if err != nil {
+			return err
+		}
+		state, err := engine.Start(value.Plan, *applyDigest, *actor, "cli")
+		if err != nil {
+			return err
+		}
+		return printJSON(state)
+	}
+	if *resumeID != "" {
+		state, err := engine.Resume(*resumeID, *actor, "cli")
+		if err != nil {
+			return err
+		}
+		return printJSON(state)
+	}
+	if *statusMode {
+		state, err := engine.Status()
+		if os.IsNotExist(err) {
+			return printJSON(map[string]any{
+				"schemaVersion": 1, "state": "legacy",
+				"safeNextAction": "run migrate-project --preview; no mutation occurred",
+			})
+		}
+		if err != nil {
+			return err
+		}
+		return printJSON(state)
+	}
+	if *verifyMode {
+		value, err := engine.Verify()
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
+	if *coveragePath != "" {
+		body, err := os.ReadFile(*coveragePath)
+		if err != nil {
+			return err
+		}
+		var receipt knowledge.MigrationCoverageReceipt
+		decoder := json.NewDecoder(strings.NewReader(string(body)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&receipt); err != nil {
+			return fmt.Errorf("decode coverage receipt: %w", err)
+		}
+		value, err := engine.SubmitCoverage(receipt)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
+	if *gate != "" {
+		value, err := engine.RecordGate(knowledge.MigrationGateReceipt{
+			Gate: *gate, Passed: *gatePassed, Artifact: *artifact,
+			ArtifactDigest: *artifactDigest, Reviewer: *reviewer,
+		})
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
+	state, err := engine.Status()
+	if err != nil {
+		return err
+	}
+	state, err = engine.Ratify(state.TransactionID, *ratifyDigest, *actor, "cli")
+	if err != nil {
+		return err
+	}
+	return printJSON(state)
 }

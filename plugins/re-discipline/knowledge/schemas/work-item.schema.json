@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/work-item.schema.json",
+  "title": "Re-Discipline Work Item",
+  "type": "object",
+  "required": ["schemaVersion", "id", "createdAt", "updatedAt", "revision", "createdBy", "updatedBy", "digest", "correlationId", "campaignId", "kind", "title", "problem", "state", "priority", "acceptanceCriteria", "relations"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "id": {"type": "string", "pattern": "^W-[0-9]{4,}$"},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "revision": {"type": "integer", "minimum": 1},
+    "createdBy": {"type": "string", "minLength": 1},
+    "updatedBy": {"type": "string", "minLength": 1},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "correlationId": {"type": "string", "minLength": 1},
+    "campaignId": {"type": "string", "pattern": "^C-[A-Z0-9][A-Z0-9-]{0,62}$"},
+    "kind": {"enum": ["task", "question", "decision", "verification", "blocker"]},
+    "title": {"type": "string", "minLength": 1},
+    "problem": {"type": "string", "minLength": 1},
+    "state": {"enum": ["proposed", "ready", "active", "blocked", "deferred", "done", "cancelled", "superseded"]},
+    "priority": {"type": "string", "minLength": 1},
+    "milestones": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "acceptanceCriteria": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "relations": {
+      "type": "object",
+      "properties": {
+        "parentIds": {"$ref": "#/$defs/workIds"},
+        "childIds": {"$ref": "#/$defs/workIds"},
+        "dependsOn": {"$ref": "#/$defs/workIds"},
+        "blockedBy": {"$ref": "#/$defs/workIds"},
+        "spawnedByIds": {"$ref": "#/$defs/workIds"}
+      },
+      "additionalProperties": false
+    },
+    "activeRunIds": {"$ref": "#/$defs/runIds"},
+    "completedRunIds": {"$ref": "#/$defs/runIds"},
+    "findingIds": {"type": "array", "items": {"type": "string", "pattern": "^F-[0-9]{4,}$"}, "uniqueItems": true},
+    "decisionIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "owner": {"type": "string"},
+    "assignee": {"type": "string"},
+    "resumeNote": {"type": "string", "maxLength": 1000},
+    "outcome": {"type": "string"},
+    "deferment": {
+      "type": "object",
+      "required": ["reason", "revisitWhen", "owner", "blocksClosure"],
+      "properties": {
+        "reason": {"type": "string", "minLength": 1},
+        "revisitWhen": {"type": "string", "minLength": 1},
+        "owner": {"type": "string", "minLength": 1},
+        "blocksClosure": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "supersededBy": {"type": "string", "pattern": "^W-[0-9]{4,}$"}
+  },
+  "allOf": [
+    {"anyOf": [{"required": ["owner"]}, {"required": ["assignee"]}]},
+    {"if": {"properties": {"state": {"const": "deferred"}}}, "then": {"required": ["deferment"]}, "else": {"not": {"required": ["deferment"]}}},
+    {"if": {"properties": {"state": {"const": "done"}}}, "then": {"required": ["outcome"]}},
+    {"if": {"properties": {"state": {"const": "superseded"}}}, "then": {"required": ["supersededBy"]}, "else": {"not": {"required": ["supersededBy"]}}}
+  ],
+  "$defs": {
+    "workIds": {"type": "array", "items": {"type": "string", "pattern": "^W-[0-9]{4,}$"}, "uniqueItems": true},
+    "runIds": {"type": "array", "items": {"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4,}$"}, "uniqueItems": true}
+  },
+  "additionalProperties": false
+}

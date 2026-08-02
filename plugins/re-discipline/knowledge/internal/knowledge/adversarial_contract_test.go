@@ -82,20 +82,21 @@ framing: "an isolated knowledge-runtime fixture"
 
 The canonical fixture profile carries orientation-marker-alpha.
 
-<!-- re-discipline:shared-laws v0.7.0 -->
+<!-- re-discipline:shared-laws v0.8.0 -->
 The test fixture uses the supported managed-project contract.
 <!-- re-discipline:shared-laws:end -->
 `)
 	writeTestJSON(t, filepath.Join(root, ".re-discipline", "config.json"), DefaultBootstrapConfig())
 	writeTestFile(t, filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc"), `{
   // Comments must be accepted without weakening strict field validation.
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sources": {
     "truth": true,
-    "history": true,
+    "historyFindings": true,
     "backlog": true,
-    "activeCampaigns": true,
-    "sharedMemory": true
+    "activeFindings": true,
+    "sharedMemory": true,
+    "reportFallback": true
   },
   "models": {
     "execution": "local"
@@ -107,8 +108,12 @@ The test fixture uses the supported managed-project contract.
     "searchTokens": 1024,
     "managerContextTokens": 2048,
     "drafterContextTokens": 1024,
-    "maxPassages": 12,
+    "maxCards": 16,
     "maxBytes": 32768
+  },
+  "archive": {
+    "reportFallbackUntilMeasured": true,
+    "normalizationTriggerHits": 3
   }
 }
 `)
@@ -174,7 +179,8 @@ campaign-provisional-delta is unresolved.
 review-ledger-hold-sigma still needs a decisive observation.
 `)
 	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "notes.md"), "must-not-index-active-notes\n")
-	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "subagents", "run-01", "report.md"), "unstamped-drafter-report\n")
+	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "subagents", "run-01", "report.md"), "legacy-report-must-not-index\n")
+	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "runs", "R-20260802-0001", "report.md"), "immutable-unnormalized-run-report\n")
 
 	writeTestFile(t, filepath.Join(root, ".re-discipline", "memory", "INDEX.md"), "# Shared memory index\n")
 	writeTestFile(t, filepath.Join(root, ".re-discipline", "memory", "topics", "navigation.md"), `# Navigation recall
@@ -980,16 +986,10 @@ func TestAdversarialSourceTiersSecretsAndBoundary(t *testing.T) {
 		"docs/truth/engine.md":                       "truth",
 		"docs/history/retired.md":                    "history",
 		"docs/backlog/experiment.md":                 "backlog",
-		"active/fixture-campaign/CAMPAIGN.md":        "active",
-		// The review ledger is the other half of one campaign masterfile, so it
-		// shares the masterfile's tier rather than joining reviewed drafter
-		// reports in `campaign`: it carries the manager's own dispositions, not
-		// any drafter's claims.
-		"active/fixture-campaign/REVIEWS.md": "active",
-		// Indexed by default since 0.6.6, and unstamped, so it lands in
-		// `draft` - a tier in no default tier set, which a caller has to ask
-		// for by name.
-		"active/fixture-campaign/subagents/run-01/report.md": "draft",
+		// Raw run reports are immutable provenance fallback, never normalized
+		// campaign knowledge. The canonical 0.8 runs path is part of the source
+		// contract and legacy subagents paths are rejected below.
+		"active/fixture-campaign/runs/R-20260802-0001/report.md": "archive",
 	}
 	for path, tier := range expected {
 		if tiers[path] != tier {
@@ -1001,6 +1001,9 @@ func TestAdversarialSourceTiersSecretsAndBoundary(t *testing.T) {
 		"docs/truth/local-paths.md",
 		"docs/truth/private-key.pem",
 		"active/fixture-campaign/notes.md",
+		"active/fixture-campaign/CAMPAIGN.md",
+		"active/fixture-campaign/REVIEWS.md",
+		"active/fixture-campaign/subagents/run-01/report.md",
 	} {
 		if _, ok := tiers[forbidden]; ok {
 			t.Errorf("forbidden or provisional source was indexed: %s", forbidden)
@@ -1729,35 +1732,45 @@ func TestAdversarialReadRequiresBoundedRangeForLargeSources(t *testing.T) {
 		t,
 		&MCPServer{AssetRoot: adversarialAssetRoot(t), InitialRoot: root},
 		initializeMessage(1, false),
-		toolCallMessage(2, "read", map[string]any{"path": relative}),
+		toolCallMessage(2, "read", map[string]any{
+			"selector": "path", "value": relative,
+		}),
 		toolCallMessage(3, "read", map[string]any{
-			"path": relative, "startLine": 3, "endLine": 5,
+			"selector": "path", "value": relative,
+			"startLine": 3, "endLine": 5, "tokenBudget": 1024,
 		}),
 	)
 	assertToolError(t, rpcResponseByID(t, messages, 2), "range")
 	mcpRead := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
-	if mcpRead["passage"] != passage {
+	exactContent, ok := mcpRead["content"].(string)
+	if !ok || exactContent != passage {
 		t.Fatalf("MCP bounded read disagrees with service read: %#v", mcpRead)
 	}
-	mcpCitation := asObject(t, mcpRead["citation"])
-	if mcpCitation["path"] != relative ||
-		mcpCitation["passageHash"] != SHA256String(passage) {
-		t.Fatalf("MCP bounded read citation is incomplete: %#v", mcpCitation)
+	if mcpRead["selector"] != "path" || mcpRead["handle"] != "path:"+relative ||
+		mcpRead["path"] != relative || mcpRead["startLine"] != float64(3) ||
+		mcpRead["endLine"] != float64(5) ||
+		mcpRead["sha256"] != "sha256:"+citation.SourceHash || mcpRead["digest"] == "" {
+		t.Fatalf("MCP bounded exact read metadata is incomplete: %#v", mcpRead)
 	}
 }
 
 func TestAdversarialContextPackMaterializationAndTamperDefense(t *testing.T) {
 	root := makeAdversarialProject(t)
 	service := newAdversarialService(t, root, nil)
-	pack, err := service.ContextPack(
-		context.Background(), "engine frame checksum", "drafter", []string{"truth"}, 1024,
-	)
+	pack, err := service.ContextPackOptions(context.Background(), ContextPackRequest{
+		Target: ContextPackTarget{
+			Kind: "recruiting-run", CandidateSlug: "candidate-one",
+			RecruitingRunID: "20260726T010203Z",
+		},
+		Task: "engine frame checksum", Role: "drafter",
+		Tiers: []string{"truth"}, TokenBudget: 1024,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	valid := "active/fixture-campaign/subagents/run-02/context-pack.json"
-	if err := os.MkdirAll(filepath.Join(root, "active", "fixture-campaign", "subagents", "run-02"), 0o700); err != nil {
+	valid := ".re-discipline/agents/recruiting/candidate-one/runs/20260726T010203Z/context-pack.json"
+	if err := os.MkdirAll(filepath.Join(root, ".re-discipline", "agents", "recruiting", "candidate-one", "runs", "20260726T010203Z"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.MaterializeContextPack(valid, pack); err != nil {
@@ -1771,7 +1784,7 @@ func TestAdversarialContextPackMaterializationAndTamperDefense(t *testing.T) {
 		t.Fatalf("identical context pack materialization was not idempotent: %v", err)
 	}
 	different := pack
-	different.Query += " changed"
+	different.Task += " changed"
 	different, err = finalizeContextPack(different)
 	if err != nil {
 		t.Fatal(err)
@@ -1781,27 +1794,16 @@ func TestAdversarialContextPackMaterializationAndTamperDefense(t *testing.T) {
 	}
 
 	tampered := pack
-	tampered.Query += " tampered without digest update"
-	tamperedPath := "active/fixture-campaign/subagents/run-03/context-pack.json"
-	if err := os.MkdirAll(filepath.Join(root, "active", "fixture-campaign", "subagents", "run-03"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.MaterializeContextPack(tamperedPath, tampered); err == nil {
+	tampered.Task += " tampered without digest update"
+	if err := service.MaterializeContextPack(valid, tampered); err == nil {
 		t.Fatal("materializer wrote a context pack whose digest did not match its body")
-	}
-
-	recruiting := ".re-discipline/agents/recruiting/candidate-one/runs/20260726T010203Z/context-pack.json"
-	if err := os.MkdirAll(filepath.Join(root, ".re-discipline", "agents", "recruiting", "candidate-one", "runs", "20260726T010203Z"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.MaterializeContextPack(recruiting, pack); err != nil {
-		t.Fatalf("valid recruiting materialization failed: %v", err)
 	}
 
 	for _, invalid := range []string{
 		"active/fixture-campaign/context-pack.json",
-		"active/fixture-campaign/subagents/run-04/not-context-pack.json",
-		"active/Fixture Campaign/subagents/run-04/context-pack.json",
+		"active/fixture-campaign/runs/not-a-run/not-context-pack.json",
+		"active/Fixture Campaign/runs/R-20260802-0004/context-pack.json",
+		"active/fixture-campaign/subagents/run-04/context-pack.json",
 		".re-discipline/agents/recruiting/candidate-one/context-pack.json",
 		"docs/context-pack.json",
 		"../context-pack.json",
@@ -1812,10 +1814,10 @@ func TestAdversarialContextPackMaterializationAndTamperDefense(t *testing.T) {
 	}
 
 	outside := t.TempDir()
-	link := filepath.Join(root, "active", "fixture-campaign", "subagents", "escape-run")
+	link := filepath.Join(root, "active", "fixture-campaign", "runs", "R-20260802-0005")
 	if makeDirectoryLink(t, outside, link) {
 		if err := service.MaterializeContextPack(
-			"active/fixture-campaign/subagents/escape-run/context-pack.json", pack,
+			"active/fixture-campaign/runs/R-20260802-0005/context-pack.json", pack,
 		); err == nil {
 			t.Fatal("materializer escaped through a symlink or junction")
 		}
@@ -1830,7 +1832,7 @@ func TestAdversarialContextPackMaterializationAndTamperDefense(t *testing.T) {
 	if err := os.WriteFile(outsidePack, outsideBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fileLinkRelative := "active/fixture-campaign/subagents/file-link-run/context-pack.json"
+	fileLinkRelative := "active/fixture-campaign/runs/R-20260802-0006/context-pack.json"
 	fileLink := filepath.Join(root, filepath.FromSlash(fileLinkRelative))
 	if makeFileLink(t, outsidePack, fileLink) {
 		if err := service.MaterializeContextPack(fileLinkRelative, pack); err == nil {
@@ -1846,14 +1848,14 @@ func TestAdversarialContextPackMaterializationAndTamperDefense(t *testing.T) {
 	}
 
 	collisionParent := filepath.Join(
-		root, "active", "fixture-campaign", "subagents", "publish-collision",
+		root, "active", "fixture-campaign", "runs", "R-20260802-0007",
 	)
 	collisionTarget := filepath.Join(collisionParent, "context-pack.json")
 	if err := os.MkdirAll(collisionTarget, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.MaterializeContextPack(
-		"active/fixture-campaign/subagents/publish-collision/context-pack.json", pack,
+		"active/fixture-campaign/runs/R-20260802-0007/context-pack.json", pack,
 	); err == nil {
 		t.Fatal("materializer accepted a failed exclusive publish")
 	}
@@ -1878,7 +1880,7 @@ func TestAdversarialContextPackMaterializationAndTamperDefense(t *testing.T) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatal(err)
 	}
-	raw["query"] = "post-write tamper"
+	raw["task"] = "post-write tamper"
 	writeTestJSON(t, absolute, raw)
 	if _, err := VerifyContextPack(absolute); err == nil {
 		t.Fatal("context pack tampering was not detected")
@@ -2899,13 +2901,13 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 	t.Run("context pack closes every nested wire object", func(t *testing.T) {
 		schema := loadAdversarialSchema(t, "context-pack.schema.json")
 		root := assertAdversarialClosedSchemaObject(t, "context pack", schema, []string{
-			"schemaVersion", "packId", "digest", "query", "generation",
+			"schemaVersion", "packId", "digest", "task", "scope", "generation",
 			"role", "allowedTiers", "requestedProfile", "effectiveProfile",
 			"activeLanes", "models", "fallbackReason", "tokenBudget", "estimatedTokens",
-			"passages", "omitted",
-		}, []string{"verbosity"})
-
-		generation := adversarialSchemaMap(t, root, "generation")
+			"acceptedConstraints", "cards", "requiredHandles", "omitted",
+		}, nil)
+		defs := adversarialSchemaMap(t, schema, "$defs")
+		generation := adversarialSchemaMap(t, defs, "generation")
 		generationFields := assertAdversarialClosedSchemaObject(
 			t, "context pack generation", generation, []string{
 				"id", "corpusFingerprint", "modelFingerprint", "runtimeFingerprint",
@@ -2915,11 +2917,14 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 		for _, hash := range []string{
 			"corpusFingerprint", "modelFingerprint", "runtimeFingerprint",
 		} {
-			assertAdversarialSchemaPattern(t, "context pack generation "+hash,
-				adversarialSchemaMap(t, generationFields, hash),
-				[]string{"sha256:" + strings.Repeat("a", 64)},
-				[]string{strings.Repeat("a", 64), "sha256:abc"})
+			if adversarialSchemaMap(t, generationFields, hash)["$ref"] != "#/$defs/sha256" {
+				t.Errorf("context pack generation %s does not use the canonical digest schema", hash)
+			}
 		}
+		assertAdversarialSchemaPattern(t, "context pack sha256",
+			adversarialSchemaMap(t, defs, "sha256"),
+			[]string{"sha256:" + strings.Repeat("a", 64)},
+			[]string{strings.Repeat("a", 64), "sha256:abc"})
 
 		models := adversarialSchemaMap(t, root, "models")
 		if models["type"] != "array" || models["uniqueItems"] != true {
@@ -2934,56 +2939,48 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 			},
 			[]string{"../escape@1", "builtin:model", "builtin:model@a@b"})
 
-		passages := adversarialSchemaMap(t, root, "passages")
-		passageItem := adversarialSchemaMap(t, passages, "items")
-		passage := assertAdversarialClosedSchemaObject(t, "context pack passage", passageItem, []string{
-			"chunkId", "passage", "citation",
-		}, []string{"documentContext"})
-
-		citation := adversarialSchemaMap(t, passage, "citation")
-		// sourceHash is optional because a compact pack drops it as
-		// re-derivable by hashing the cited file. The URI stays mandatory: it
-		// is what binds each passage to the generation the pack claims.
-		citationFields := assertAdversarialClosedSchemaObject(t, "context pack citation", citation, []string{
-			"path", "heading", "startLine", "endLine", "passageHash", "tier", "uri",
-		}, []string{"sourceHash", "contextHash", "durability"})
-		assertAdversarialSchemaPattern(t, "citation path",
-			adversarialSchemaMap(t, citationFields, "path"),
-			[]string{
-				"docs/truth/engine.md",
-				".re-discipline/project-profile.md",
-				"active/fixture-campaign/CAMPAIGN.md",
-			},
-			[]string{
-				"../outside.md", "docs/../secret.md", "/docs/truth/engine.md",
-				"C:/private/secret.md", `docs\truth\engine.md`, "docs//truth.md",
-				"docs/truth/./engine.md",
-			})
-		for _, hash := range []string{"sourceHash", "passageHash"} {
-			assertAdversarialSchemaPattern(t, "citation "+hash,
-				adversarialSchemaMap(t, citationFields, hash),
-				[]string{strings.Repeat("a", 64)},
-				[]string{"sha256:" + strings.Repeat("a", 64), strings.Repeat("g", 64), "abc"})
+		scope := adversarialSchemaMap(t, defs, "scope")
+		scopeFields := assertAdversarialClosedSchemaObject(t, "context pack scope", scope, []string{
+			"kind", "stateHeadRevision", "stateHeadDigest",
+		}, []string{
+			"campaignId", "campaignSlug", "campaignRevision", "workItemId",
+			"workItemRevision", "runId", "runRevision", "candidateSlug",
+			"recruitingRunId", "eventId",
+		})
+		if alternatives, ok := scope["oneOf"].([]any); !ok || len(alternatives) != 3 {
+			t.Fatal("context pack scope must discriminate project, active-run, and recruiting-run")
 		}
-		assertAdversarialSchemaPattern(t, "citation URI",
-			adversarialSchemaMap(t, citationFields, "uri"),
-			[]string{"re-discipline://generation-" + strings.Repeat("a", 20) +
-				"/chunks/chunk-" + strings.Repeat("b", 20)},
-			[]string{
-				"https://example.invalid/chunk",
-				"re-discipline://generation-xyz/chunks/chunk-abc",
-				"re-discipline://generation-" + strings.Repeat("a", 20) + "/documents/x",
-			})
-		for _, line := range []string{"startLine", "endLine"} {
-			field := adversarialSchemaMap(t, citationFields, line)
-			if field["type"] != "integer" || field["minimum"] != float64(1) {
-				t.Errorf("citation %s must be a positive integer", line)
-			}
+		if adversarialSchemaMap(t, root, "scope")["$ref"] != "#/$defs/scope" ||
+			adversarialSchemaMap(t, root, "generation")["$ref"] != "#/$defs/generation" {
+			t.Fatal("context pack scope and generation must use the closed definitions")
+		}
+		assertAdversarialSchemaPattern(t, "context pack campaign id",
+			adversarialSchemaMap(t, scopeFields, "campaignId"),
+			[]string{"C-TEST", "C-STATE-8"}, []string{"test", "C-lower", "../C-TEST"})
+		assertAdversarialSchemaPattern(t, "context pack run id",
+			adversarialSchemaMap(t, scopeFields, "runId"),
+			[]string{"R-20260802-0001"}, []string{"R-1", "run-20260802-0001"})
+
+		constraints := adversarialSchemaMap(t, root, "acceptedConstraints")
+		constraint := adversarialSchemaMap(t, defs, "constraint")
+		assertAdversarialClosedSchemaObject(t, "context pack accepted constraint", constraint, []string{
+			"id", "kind", "text", "sourceHandle",
+		}, nil)
+		if adversarialSchemaMap(t, constraints, "items")["$ref"] != "#/$defs/constraint" {
+			t.Fatal("accepted constraints do not use their closed schema")
+		}
+		cards := adversarialSchemaMap(t, root, "cards")
+		if adversarialSchemaMap(t, cards, "items")["$ref"] != "context-card.schema.json" {
+			t.Fatal("context packs must reuse the bounded context-card contract")
+		}
+		handles := adversarialSchemaMap(t, root, "requiredHandles")
+		if handles["uniqueItems"] != true {
+			t.Fatal("context-pack required handles must be unique")
 		}
 
 		omitted := adversarialSchemaMap(t, root, "omitted")
 		omittedFields := assertAdversarialClosedSchemaObject(t, "context pack omissions", omitted, []string{
-			"candidatePassages", "budget", "documentCap", "resultLimit", "staleSource",
+			"candidateCards", "budget", "cardLimit", "staleSource",
 		}, nil)
 		for name, raw := range omittedFields {
 			field := raw.(map[string]any)
@@ -3351,13 +3348,14 @@ func TestAdversarialTelemetryIsBoundedAggregateOnlyAndOffMeansNoWrites(t *testin
 	t.Run("off neither creates nor updates an aggregate", func(t *testing.T) {
 		root := makeAdversarialProject(t)
 		writeTestFile(t, filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc"), `{
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sources": {
     "truth": true,
-    "history": true,
+    "historyFindings": true,
     "backlog": true,
-    "activeCampaigns": true,
-    "sharedMemory": true
+    "activeFindings": true,
+    "sharedMemory": true,
+    "reportFallback": true
   },
   "models": {"execution": "local"},
   "telemetry": {"mode": "off"},
@@ -3365,8 +3363,12 @@ func TestAdversarialTelemetryIsBoundedAggregateOnlyAndOffMeansNoWrites(t *testin
     "searchTokens": 1024,
     "managerContextTokens": 2048,
     "drafterContextTokens": 1024,
-    "maxPassages": 12,
+    "maxCards": 16,
     "maxBytes": 32768
+  },
+  "archive": {
+    "reportFallbackUntilMeasured": true,
+    "normalizationTriggerHits": 3
   }
 }`)
 		service := newAdversarialService(t, root, nil)
@@ -3461,10 +3463,10 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		}
 	})
 
-	t.Run("required passages cannot exceed the selected hard cap", func(t *testing.T) {
+	t.Run("required cards cannot exceed the configured hard cap", func(t *testing.T) {
 		root := makeAdversarialProject(t)
-		required := make([]string, 0, 13)
-		for index := 0; index < 13; index++ {
+		required := make([]string, 0, 17)
+		for index := 0; index < 17; index++ {
 			path := fmt.Sprintf("docs/truth/required-%02d.md", index)
 			required = append(required, path)
 			writeTestFile(t, filepath.Join(root, filepath.FromSlash(path)),
@@ -3475,8 +3477,8 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 			context.Background(), "required cap", "manager",
 			[]string{"truth"}, 2048, required,
 		)
-		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "passage cap") {
-			t.Fatalf("required paths bypassed maxPassages or failed unclearly: %v", err)
+		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "card cap") {
+			t.Fatalf("required paths bypassed maxCards or failed unclearly: %v", err)
 		}
 	})
 
@@ -3515,25 +3517,26 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		for iteration := 0; iteration < 16; iteration++ {
 			pack, err := service.ContextPackOptions(
 				context.Background(), ContextPackRequest{
-					Task: "engine frame checksum", Role: "drafter",
+					Target: ContextPackTarget{Kind: "project"},
+					Task:   "engine frame checksum", Role: "drafter",
 					Tiers: []string{"truth"}, TokenBudget: 1024,
 					RequiredPaths: []string{"docs/truth/engine.md"},
-					// Generation scoping is asserted through the citation URI,
-					// which only a verbose pack carries.
-					Verbosity: VerbosityVerbose,
 				})
 			if err != nil {
 				continue
 			}
 			successes++
 			generationID := pack.Generation.ID
-			for _, passage := range pack.Passages {
+			for _, card := range pack.Cards {
+				if !strings.HasPrefix(card.Handle, "re-discipline://") {
+					continue
+				}
 				if !strings.HasPrefix(
-					passage.Citation.URI,
+					card.Handle,
 					"re-discipline://"+generationID+"/",
 				) {
 					t.Errorf("context pack mixed generation %s with citation %s",
-						generationID, passage.Citation.URI)
+						generationID, card.Handle)
 				}
 			}
 		}
@@ -3554,9 +3557,10 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		if err != nil {
 			t.Fatalf("service did not recover after source mutation stopped: %v", err)
 		}
-		for _, passage := range stable.Passages {
-			if !strings.Contains(passage.Citation.URI, stable.Generation.ID) {
-				t.Fatalf("stable pack has a mixed-generation citation: %#v", passage.Citation)
+		for _, card := range stable.Cards {
+			if strings.HasPrefix(card.Handle, "re-discipline://") &&
+				!strings.Contains(card.Handle, stable.Generation.ID) {
+				t.Fatalf("stable pack has a mixed-generation handle: %#v", card)
 			}
 		}
 	})
@@ -3625,11 +3629,15 @@ func assertAdversarialContextPackOutcomes(
 		if expectedEffective > expectedCeiling {
 			expectedEffective = expectedCeiling
 		}
-		qualityApplicable := expectedRequested >= eval.TokenBudget
+		expectedMinimum := eval.TokenBudget
+		if expectedMinimum < MinimumContextPackEvidenceBudget {
+			expectedMinimum = MinimumContextPackEvidenceBudget
+		}
+		qualityApplicable := expectedRequested >= expectedMinimum
 		if outcome.RequestedTokenBudget != expectedRequested ||
 			outcome.EffectiveTokenBudget != expectedEffective ||
 			outcome.RoleTokenCeiling != expectedCeiling ||
-			outcome.MinimumTokenBudget != eval.TokenBudget ||
+			outcome.MinimumTokenBudget != expectedMinimum ||
 			outcome.QualityGateApplicable != qualityApplicable {
 			t.Fatalf("context-pack outcome has wrong budget gate: %#v", outcome)
 		}
@@ -3642,14 +3650,14 @@ func assertAdversarialContextPackOutcomes(
 			t.Fatalf("context-pack outcome omitted pinned identity: %#v", outcome)
 		}
 		if !outcome.RoleCeilingSafe || !outcome.AllowedTiersSafe ||
-			!outcome.PassageCapSafe || !outcome.ByteCapSafe ||
+			!outcome.CardCapSafe || !outcome.ByteCapSafe ||
 			!outcome.TokenAccountingSafe || !outcome.BudgetSafe ||
 			!outcome.GenerationPinned || !outcome.ProfilePinned ||
 			!outcome.VerificationPassed || !outcome.ReplayIdentical ||
 			!outcome.SafetyPassed || !outcome.QualityPassed || !outcome.Passed {
 			t.Fatalf("context-pack outcome failed a required gate: %#v", outcome)
 		}
-		if outcome.PassageCount > outcome.MaxPassages ||
+		if outcome.CardCount > outcome.MaxCards ||
 			outcome.SerializedBytes > outcome.MaxBytes ||
 			outcome.EstimatedTokens > outcome.EffectiveTokenBudget {
 			t.Fatalf("context-pack outcome exceeded packing ceilings: %#v", outcome)
@@ -4107,19 +4115,20 @@ func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.
 		{
 			name: "tier outside allowlist",
 			mutate: func(pack *ContextPack) {
-				pack.Passages[0].Citation.Tier = "history"
+				pack.Cards[0].SourceClass = "history"
+				pack.Cards[0].Metadata["tier"] = "history"
 			},
 		},
 		{
-			name: "traversing citation",
+			name: "traversing provenance path",
 			mutate: func(pack *ContextPack) {
-				pack.Passages[0].Citation.Path = "../outside.md"
+				pack.Cards[0].Metadata["path"] = "../outside.md"
 			},
 		},
 		{
-			name: "passage hash mismatch",
+			name: "malformed provenance hash",
 			mutate: func(pack *ContextPack) {
-				pack.Passages[0].Citation.PassageHash = strings.Repeat("0", 64)
+				pack.Cards[0].Metadata["passageHash"] = "sha256:bad"
 			},
 		},
 		{
@@ -4160,9 +4169,9 @@ func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.
 			},
 		},
 		{
-			name: "invalid citation follow-up handle",
+			name: "invalid generation follow-up handle",
 			mutate: func(pack *ContextPack) {
-				pack.Passages[0].Citation.URI = "re-discipline://forged"
+				pack.Cards[0].Handle = "re-discipline://forged"
 			},
 		},
 	}
@@ -4170,7 +4179,12 @@ func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.
 		t.Run(testCase.name, func(t *testing.T) {
 			forged := valid
 			forged.Models = append([]string(nil), valid.Models...)
-			forged.Passages = append(forged.Passages[:0:0], valid.Passages...)
+			forged.Cards = append([]ContextCard(nil), valid.Cards...)
+			for index := range forged.Cards {
+				if forged.Cards[index].Metadata != nil {
+					forged.Cards[index].Metadata = cloneStringMap(forged.Cards[index].Metadata)
+				}
+			}
 			testCase.mutate(&forged)
 			forged = rehash(t, forged)
 			if _, err := VerifyContextPackValue(forged); err == nil {
@@ -4180,7 +4194,7 @@ func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.
 	}
 	t.Run("independent manager digest rejects valid re-finalized substitution", func(t *testing.T) {
 		substitute := valid
-		substitute.Query = "different but semantically valid task"
+		substitute.Task = "different but semantically valid task"
 		substitute = rehash(t, substitute)
 		if _, err := VerifyContextPackValue(substitute); err != nil {
 			t.Fatalf("substitute should remain a semantically valid standalone pack: %v", err)

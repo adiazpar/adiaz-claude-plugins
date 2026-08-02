@@ -23,7 +23,7 @@ func TestIndexRebuildsForSourceSettingsAndNotForBudgets(t *testing.T) {
 	ctx := context.Background()
 
 	settings := DefaultKnowledgeSettings()
-	settings.Sources.DrafterReports = false
+	settings.Sources.ReportFallback = false
 	manager := IndexManager{
 		Boundary: boundary, CacheRoot: cacheRoot,
 		Settings: settings, Manifest: manifest,
@@ -42,7 +42,7 @@ func TestIndexRebuildsForSourceSettingsAndNotForBudgets(t *testing.T) {
 	}
 
 	enabled := settings
-	enabled.Sources.DrafterReports = true
+	enabled.Sources.ReportFallback = true
 	manager.Settings = enabled
 	toggled, _, rebuilt, err := manager.Ensure(ctx)
 	if err != nil {

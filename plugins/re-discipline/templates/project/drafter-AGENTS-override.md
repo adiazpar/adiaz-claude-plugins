@@ -1,21 +1,15 @@
-# AGENTS.override.md - Campaign Drafter
+# Assigned Run Override
 
-This subtree is a drafter workspace, not a manager session.
-Its directory name is the opaque campaign workspace ID; do not parse or rename
-it.
+This directory is one registered re-discipline run.
 
-Read these files before acting:
+Read, in order:
 
-1. `../../../../.codex/external-drafter-contract.md`
-2. `../../CAMPAIGN.md`
-3. `brief.md`
-4. Confirm that `brief.md` names the manager-retained expected context-pack
-   digest.
-5. Open the immutable context-pack path named by `brief.md` only far enough to
-   compare its declared digest. On a missing or mismatched digest, do not use
-   any passage; stop and write the blocked partial `report.md` required by the
-   external drafter contract.
+1. `.re-discipline/project-profile.md` from the project root;
+2. the project's external drafter contract;
+3. this run's `run.json` and `brief.md`;
+4. `context-pack.json` only after its digest matches the retained digest in
+   the brief.
 
-The brief defines the objective and allowed write scope. Write the required
-report to `report.md`. Do not promote truth, edit project governance, close the
-campaign, commit, push, or spawn another agent.
+Work only the brief. Write `report.md`, create `payload/` only when needed,
+and edit only exact granted project paths. Canonical state changes go through
+the shared engine, never direct file edits. The manager reviews every result.

@@ -1,6 +1,37 @@
 {
-  "schemaVersion": 2,
-  "knowledgeDirectory": "knowledge",
+  "schemaVersion": 3,
+  "campaignSchemaVersion": 2,
+  "state": {
+    "activeRoot": "active",
+    "archiveRoot": "docs/history/campaigns",
+    "lockFile": ".re-discipline/state/write.lock",
+    "recovery": "replay-and-verify",
+    "generatedViewMaxItems": 24
+  },
+  "authority": {
+    "managerRoles": ["manager", "user"],
+    "curatorWrites": ["curator-run", "intake"],
+    "directStateWrites": false,
+    "truthProjection": "closure-only"
+  },
+  "context": {
+    "managerCardTokens": 2048,
+    "drafterCardTokens": 1024,
+    "maxCards": 12,
+    "maxExpansionBytes": 32768,
+    "leaseMode": "none"
+  },
+  "payload": {
+    "createLazily": true,
+    "maxInlineBytes": 1048576,
+    "requireRegistration": true
+  },
+  "closure": {
+    "requireRunCoverage": true,
+    "requireFindingDisposition": true,
+    "requireFileRetention": true,
+    "requireArchiveVerification": true
+  },
   "memory": {
     "mode": "shared-only",
     "writePolicy": "proposal-only"
@@ -10,5 +41,9 @@
     "profile": "plugin:balanced-v1",
     "settingsFile": "knowledge/policy.jsonc",
     "projectProfile": "knowledge/retrieval-profile.json"
+  },
+  "migration": {
+    "mode": "explicit-only",
+    "legacyReaders": "migrator-only"
   }
 }

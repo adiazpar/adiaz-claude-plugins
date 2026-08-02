@@ -1,7 +1,7 @@
-# Directory skeleton created by init-project (one dir per line, repo-relative).
-# Create empty directories locally. Add .gitkeep only when repository policy
-# requires it, and never inside the provider or recruiting state roots.
+# Project roots created by init-project, one repo-relative path per line.
+# Campaign record trees are created transactionally by campaign.open.
 .re-discipline
+.re-discipline/state
 .re-discipline/knowledge
 .re-discipline/knowledge/evals
 .re-discipline/memory
@@ -17,15 +17,11 @@
 .re-discipline/agents/recruiting
 .claude
 .codex
-# `delegate` renders drafter-AGENTS-override.md inside campaign workspaces.
-# `hire-agent` renders recruiting-AGENTS-override.md inside candidate runs.
 docs
 docs/truth
 docs/history
-docs/history/chronicles
+docs/history/campaigns
 docs/backlog
 active
 src
 tests
-# tools/ is NOT force-created -- a project gets it only if it has its own code tooling.
-# The external-provider framework always lives under .re-discipline/agents/.

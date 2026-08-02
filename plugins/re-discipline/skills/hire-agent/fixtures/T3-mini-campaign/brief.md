@@ -1,42 +1,36 @@
-# Interview task T3 — mini-campaign (the production loop, on a proven result)
+# Interview task T3 - production-shaped investigation
 
-This is the deciding test: it runs the real drafter→ratify loop on a question that has a KNOWN,
-proven answer (withheld from you). You are a drafter subagent; your report will be triaged by a
-manager against the evidence Wall. Do the RE legwork and report honestly.
+This test evaluates a drafter on a question with a known answer held by the
+manager. Report honestly and let the manager make every epistemic decision.
 
-## Isolation (critical — do not break)
+## Isolation
 
-Base your work ONLY on the evidence below + the live tools you are granted. You are **scoped away
-from the answer**: do NOT read `docs/truth/**`, `docs/history/chronicles/**`, or any campaign
-`CAMPAIGN.md` — those contain or hint at the solution and reading them invalidates the test. If
-you find yourself about to look up the answer, stop; derive it.
+Use only the evidence and live tools granted in this run. Do not read
+`docs/truth/**`, `docs/history/campaigns/**`, or campaign finding records;
+those contain or hint at the answer and invalidate the comparison.
 
 ## Granted live surface
 
-You are granted the **ghidra** MCP (read-only static analysis) and may read the listed binary
-artifacts. Single live consumer: you own Ghidra for this task.
+You may use the read-only Ghidra surface and the binary artifacts named in the
+run brief. This test owns the single logical Ghidra consumer.
 
-## The question (seed: the archive-mount verify gate)
+## Question
 
-Background: DOOM 2016 ships resource archives (`*.resources` / `*.patch`) each with a small
-`.verify` sidecar. When a modified archive is mounted with a stale/wrong sidecar, the game
-**black-screens before render** (no error UI). 
+DOOM 2016 resource archives use a small `.verify` sidecar. A modified archive
+mounted with a stale sidecar black-screens before render.
 
-Derive, from the engine code:
-1. **What the `.verify` sidecar contains and how it is structured** (header? per-block hashes?
-   block size? hash/MAC algorithm?).
-2. **How the engine enforces it at mount** — which function reads it, what happens on mismatch,
-   and why the symptom is a pre-render black screen rather than a recoverable error.
-3. **The key derivation** — how the MAC key is built (from what inputs), and crucially **whether
-   it depends on any machine/Steam secret** (i.e. is offline regeneration of a valid `.verify`
-   achievable, or is it gated by a secret you cannot reproduce?).
+Derive from engine code:
 
-Starting points (verify everything yourself; these are leads, not answers): the resource-container
-open path around `idResourceContainer::Open`; the sidecar reader; the KDF the reader calls.
+1. the sidecar structure, block size, and hash or MAC algorithm;
+2. the mount-time enforcement path and mismatch behavior;
+3. the key derivation inputs and whether offline regeneration requires a
+   machine or Steam secret.
+
+Starting points are the resource-container open path, sidecar reader, and the
+KDF it calls. Treat them as leads, not answers.
 
 ## Deliverable
 
-Write your report in the AGENTS.md report format. For each of the three points, give your finding
-with Confidence + DIRECT/INFERRED + the exact RVA/decompile that shows it. **If you cannot
-determine a point from the available evidence, say so and name what you'd need — do NOT guess.**
-Your draft will be judged on whether it lets the manager ratify the correct, proven answer.
+Write the required run report. For each point give confidence, evidence grade,
+and exact decompile or address citation. If the evidence cannot decide a point,
+say so and name the missing observation. Do not guess.

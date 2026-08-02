@@ -116,13 +116,26 @@ func (service *Service) PromoteProfile(
 	if err != nil {
 		return ProfilePromotionResult{}, err
 	}
+	findingSuites, err := service.loadProjectFindingEvalSuites()
+	if err != nil {
+		return ProfilePromotionResult{}, err
+	}
+	findingDevelopmentCases, findingHoldoutCases, findingSuiteDigests :=
+		splitFindingEvalSuites(findingSuites)
 	evalDigest, _ := CanonicalDigest(cases)
+	if len(findingSuites) > 0 {
+		evalDigest, _ = CanonicalDigest(struct {
+			PassageCases  []EvalCase         `json:"passageCases"`
+			FindingSuites []FindingEvalSuite `json:"findingSuites"`
+		}{cases, findingSuites})
+	}
 	generation, _, selected, _, err := service.ensure(ctx)
 	if err != nil {
 		return ProfilePromotionResult{}, err
 	}
 	modelFingerprint := mustDigest(service.ModelManifest.Models)
 	if report.EvalDigest != evalDigest ||
+		stableJSON(SortedUnique(report.FindingSuiteDigests)) != stableJSON(findingSuiteDigests) ||
 		report.CorpusFingerprint != generation.CorpusFingerprint ||
 		report.ModelFingerprint != modelFingerprint ||
 		report.RuntimeContract != RuntimeContract(selected.Runtime) {
@@ -170,6 +183,35 @@ func (service *Service) PromoteProfile(
 		return ProfilePromotionResult{}, fmt.Errorf(
 			"replay active holdout baseline: %w", err)
 	}
+	var findingDevelopment, findingHoldout, baselineFindingHoldout *FindingEvaluationMetrics
+	if len(findingDevelopmentCases) > 0 {
+		findingReport, findingErr := EvaluateFindingRetriever(
+			ctx, retriever, findingDevelopmentCases)
+		if findingErr != nil {
+			return ProfilePromotionResult{}, fmt.Errorf(
+				"replay finding development evidence: %w", findingErr)
+		}
+		metrics := findingReport.MetricsBySplit["development"]
+		findingDevelopment = &metrics
+	}
+	if len(findingHoldoutCases) > 0 {
+		findingReport, findingErr := EvaluateFindingRetriever(
+			ctx, retriever, findingHoldoutCases)
+		if findingErr != nil {
+			return ProfilePromotionResult{}, fmt.Errorf(
+				"replay finding holdout evidence: %w", findingErr)
+		}
+		metrics := findingReport.MetricsBySplit["holdout"]
+		findingHoldout = &metrics
+		baselineReport, baselineErr := EvaluateFindingRetriever(
+			ctx, baselineRetriever, findingHoldoutCases)
+		if baselineErr != nil {
+			return ProfilePromotionResult{}, fmt.Errorf(
+				"replay active finding holdout baseline: %w", baselineErr)
+		}
+		baselineMetrics := baselineReport.MetricsBySplit["holdout"]
+		baselineFindingHoldout = &baselineMetrics
+	}
 	violations :=
 		developmentMetrics.AuthorityViolations +
 			developmentMetrics.CitationViolations +
@@ -177,8 +219,24 @@ func (service *Service) PromoteProfile(
 			holdoutMetrics.AuthorityViolations +
 			holdoutMetrics.CitationViolations +
 			holdoutMetrics.HardNegativeHits
+	if findingDevelopment != nil {
+		violations += findingDevelopment.HardNegativeHits
+	}
+	if findingHoldout != nil {
+		violations += findingHoldout.HardNegativeHits
+	}
 	hardGates := hardMetricsPassed(developmentMetrics) &&
 		hardMetricsPassed(holdoutMetrics)
+	if findingDevelopment != nil && findingHoldout != nil {
+		hardGates = hardGates &&
+			findingCalibrationMetricsPassed(*findingDevelopment) &&
+			findingCalibrationMetricsPassed(*findingHoldout)
+	}
+	nonInferior := calibrationNonInferior(holdoutMetrics, baselineHoldoutMetrics)
+	if findingHoldout != nil {
+		nonInferior = nonInferior && baselineFindingHoldout != nil &&
+			findingCalibrationNonInferior(*findingHoldout, *baselineFindingHoldout)
+	}
 	recomputedBenchmark, err := calibrationBenchmarkDigest(
 		replayedProfile.EffectiveIdentity,
 		evalDigest,
@@ -186,6 +244,10 @@ func (service *Service) PromoteProfile(
 		developmentMetrics,
 		holdoutMetrics,
 		baselineHoldoutMetrics,
+		findingDevelopment,
+		findingHoldout,
+		baselineFindingHoldout,
+		findingSuiteDigests,
 	)
 	if err != nil {
 		return ProfilePromotionResult{}, err
@@ -197,10 +259,11 @@ func (service *Service) PromoteProfile(
 		HoldoutHit:         relevantPathHits(holdoutOutcomes),
 		DevelopmentMetrics: developmentMetrics,
 		HoldoutMetrics:     holdoutMetrics,
+		FindingDevelopment: findingDevelopment,
+		FindingHoldout:     findingHoldout,
 		Violations:         violations, HardGatesPassed: hardGates,
-		NonInferiorToBaseline: calibrationNonInferior(
-			holdoutMetrics, baselineHoldoutMetrics),
-		Pareto: true, BenchmarkDigest: recomputedBenchmark,
+		NonInferiorToBaseline: nonInferior,
+		Pareto:                true, BenchmarkDigest: recomputedBenchmark,
 	}
 	if stableJSON(report.Recommended.Weights) != stableJSON(recomputed.Weights) ||
 		report.Recommended.Identity != recomputed.Identity ||
@@ -214,7 +277,9 @@ func (service *Service) PromoteProfile(
 		stableJSON(metricsWithoutLatency(report.Recommended.DevelopmentMetrics)) !=
 			stableJSON(metricsWithoutLatency(recomputed.DevelopmentMetrics)) ||
 		stableJSON(metricsWithoutLatency(report.Recommended.HoldoutMetrics)) !=
-			stableJSON(metricsWithoutLatency(recomputed.HoldoutMetrics)) {
+			stableJSON(metricsWithoutLatency(recomputed.HoldoutMetrics)) ||
+		stableJSON(report.Recommended.FindingDevelopment) != stableJSON(recomputed.FindingDevelopment) ||
+		stableJSON(report.Recommended.FindingHoldout) != stableJSON(recomputed.FindingHoldout) {
 		return ProfilePromotionResult{}, errors.New(
 			"calibration report recommendation does not match replayed evidence")
 	}

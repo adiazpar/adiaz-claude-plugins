@@ -1,12 +1,14 @@
 {
   "$schema": "plugin://re-discipline/schemas/knowledge-settings.schema.json",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sources": {
     "truth": true,
-    "history": true,
+    "historyFindings": true,
     "backlog": true,
-    "activeCampaigns": true,
-    "sharedMemory": true
+    "activeFindings": true,
+    "sharedMemory": true,
+    "reportFallback": true,
+    "additional": []
   },
   "models": {
     "execution": "local"
@@ -18,7 +20,12 @@
     "searchTokens": 1024,
     "managerContextTokens": 2048,
     "drafterContextTokens": 1024,
-    "maxPassages": 12,
+    "maxCards": 12,
     "maxBytes": 32768
+  },
+  "archive": {
+    "reportFallbackUntilMeasured": true,
+    "normalizationTriggerHits": 3,
+    "fallbackMode": "default-fallback"
   }
 }

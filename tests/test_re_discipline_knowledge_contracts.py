@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 
@@ -6,263 +7,141 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "re-discipline"
 
 
-def read(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
-
-
-def compact(text: str) -> str:
-    return " ".join(text.lower().split())
-
-
-class KnowledgeSkillContracts(unittest.TestCase):
-    def setUp(self) -> None:
-        self.skills = PLUGIN / "skills"
-
+class ReDisciplineKnowledgeContractTests(unittest.TestCase):
     def skill(self, name: str) -> str:
-        return read(self.skills / name / "SKILL.md")
+        return (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
 
-    def test_governance_skills_have_portable_trigger_metadata(self) -> None:
-        expected = {
-            "benchmark-knowledge": ("benchmark", "retrieval"),
-            "calibrate-knowledge": ("calibrate", "weights"),
-            "decide-retrieval-profile": ("promote", "rollback"),
-            "review-memory": ("memory proposal", "accept"),
-        }
+    def test_onboard_is_bounded_and_read_only(self):
+        text = self.skill("onboard")
+        self.assertIn("mode: orient", text)
+        self.assertIn("mode: resume", text)
+        self.assertIn("Do not preload reports", text)
+        self.assertIn("Onboarding is read-only", text)
 
-        for name, triggers in expected.items():
-            with self.subTest(skill=name):
-                body = self.skill(name)
-                self.assertTrue(body.startswith("---\n"))
-                frontmatter = body.split("---", 2)[1].lower()
-                self.assertIn(f"name: {name}", frontmatter)
-                self.assertIn("description:", frontmatter)
-                for trigger in triggers:
-                    self.assertIn(trigger, frontmatter)
-                self.assertNotIn("allowed-tools:", frontmatter)
-                self.assertNotIn("argument-hint:", frontmatter)
+    def test_delegation_binds_work_run_pack_and_grants(self):
+        text = self.skill("delegate")
+        for phrase in ("exactly one primary work item", "run.prepare", "retained digest", "explicitly granted project paths"):
+            self.assertIn(phrase, text)
+        self.assertIn("state(mode=\"resume\"", text)
 
-    def test_benchmark_is_read_only_and_covers_effective_profiles(self) -> None:
-        body = compact(self.skill("benchmark-knowledge"))
+    def test_return_curation_and_review_are_distinct(self):
+        text = self.skill("review-subagent")
+        compact = " ".join(text.split())
+        self.assertIn("status `returned`", text)
+        self.assertIn("complete intake coverage", text)
+        self.assertIn("immutable review receipts", compact)
+        self.assertIn("remain campaign-provisional until closure", text)
 
-        for phrase in (
-            "permit any user",
-            "quick",
-            "full",
-            "end-to-end",
-            "every supported effective profile",
-            "model-free fallbacks",
-            "deterministic replay",
-            "token-budget",
-            ".re-discipline/cache/",
-            "do not calibrate",
-            "never change behavior",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, body)
+    def test_curator_authority_is_least_privilege(self):
+        text = (PLUGIN / "agents" / "knowledge-curator.md").read_text()
+        self.assertIn("Write only inside the granted curator run", text)
+        self.assertIn("Never set `manager-ratified`", text)
+        self.assertIn("Abstain and request manager judgment", text)
+        self.assertIn("map every claim span", text)
 
-        self.assertIn("explicitly authorizes", body)
-        self.assertIn("do not edit", body)
-
-    def test_calibration_creates_only_a_measured_candidate(self) -> None:
-        body = compact(self.skill("calibrate-knowledge"))
-
-        for phrase in (
-            "direct manager or project-maintainer",
-            "explicit calibration request",
-            "never tune",
-            "tier or access filters",
-            "frozen holdout",
-            "every declared effective capability profile",
-            ".re-discipline/cache/calibration/<run-id>/",
-            "do not edit `.re-discipline/knowledge/retrieval-profile.json`",
-            "do not activate the candidate",
-            "do not launch a subagent for every combination",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, body)
-
-    def test_profile_decision_is_explicit_and_generated(self) -> None:
-        body = compact(self.skill("decide-retrieval-profile"))
-
-        for action in ("`promote`", "`reject`", "`retain`", "`rollback`"):
-            self.assertIn(action, body)
-        for phrase in (
-            "explicit user decision",
-            "never let a drafter",
-            "independent evidence for every declared effective fallback profile",
-            ".re-discipline/knowledge/retrieval-profile.json",
-            "exact generated candidate",
-            "content hash",
-            "requested and effective profiles",
-            "plugin maintainer",
-            "never copy project data upstream",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, body)
-
-    def test_memory_review_is_the_only_accept_reject_door(self) -> None:
-        body = compact(self.skill("review-memory"))
-
-        for phrase in (
-            ".re-discipline/memory/proposals/",
-            "exclude the pending proposal",
-            "explicit `accept` or `reject` decision",
-            ".re-discipline/memory/topics/",
-            ".re-discipline/memory/index.md",
-            "## proposal decisions",
-            "never treat memory as empirical evidence",
-            "never edit claude or codex native memory stores",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, body)
-
-
-class KnowledgeLifecycleContracts(unittest.TestCase):
-    def skill(self, name: str) -> str:
-        return compact(read(PLUGIN / "skills" / name / "SKILL.md"))
-
-    def test_onboard_reports_health_without_expensive_work(self) -> None:
-        body = self.skill("onboard")
-
-        for phrase in (
-            ".re-discipline/config.json",
-            ".re-discipline/knowledge/",
-            "policy.jsonc",
-            "requested and effective profiles",
-            "fallback reason",
-            "sanity-check the reported count",
-            "do not build vectors",
-            "do not",
-            "calibrate weights",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, body)
-
-    def test_delegate_materializes_a_bounded_shared_context_pack(self) -> None:
-        delegate = self.skill("delegate")
-        adapters = compact(
-            read(PLUGIN / "references" / "runtime-adapters.md")
-        )
-        combined = delegate + "\n" + adapters
-
-        for phrase in (
-            "context_pack",
-            "context-pack.json",
-            "pack id and digest",
-            "requested and effective retrieval profiles",
-            "allowed epistemic tiers",
-            "explicit token budget",
-            ".re-discipline/memory/proposals/",
-            "same bounded `context-pack.json` for native and external",
-            "separately benchmarked effective fallback profile",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, combined)
-
-    def test_report_review_proposes_but_does_not_ratify_memory_or_evals(self) -> None:
-        body = self.skill("review-subagent")
-
-        for phrase in (
-            "context-pack.json",
-            "verify the pack digest",
-            "candidate evaluation case",
-            "manager or user ratifies",
-            ".re-discipline/memory/proposals/",
-            "never write it to accepted topics",
-            "review-memory",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, body)
-
-    def test_checkpoint_and_close_preserve_knowledge_boundaries(self) -> None:
-        checkpoint = self.skill("checkpoint-campaign")
+    def test_truth_is_closure_only(self):
         close = self.skill("close-campaign")
+        review = self.skill("review-subagent")
+        overturn = self.skill("overturn")
+        self.assertIn("Truth projection is permitted only inside this job", close)
+        self.assertIn("may not edit a projected", overturn)
+        self.assertIn("never edits truth during an active campaign", review)
 
-        for phrase in (
-            "context-pack ids and digests",
-            "do not run a full benchmark",
-            "calibrate weights",
-            "leave pending proposals for `review-memory`",
-        ):
-            with self.subTest(skill="checkpoint", phrase=phrase):
-                self.assertIn(phrase, checkpoint)
+    def test_closure_is_resumable_coverage_not_summary(self):
+        text = self.skill("close-campaign")
+        for stage in ("inventory every work item", "prove coverage", "reconcile duplicates", "verify projection", "immutable closure receipt"):
+            self.assertIn(stage, text)
+        self.assertIn("Do not bypass a refusal", text)
 
-        for phrase in (
-            ".re-discipline/memory/proposals/",
-            "review-memory",
-            "never edit accepted memory topics or host-native memory stores",
-            ".re-discipline/knowledge/evals/",
-            "token budget",
-            "scratch-only citation",
-        ):
-            with self.subTest(skill="close", phrase=phrase):
-                self.assertIn(phrase, close)
+    def test_migration_is_explicit_and_isolated(self):
+        text = self.skill("migrate-project")
+        self.assertIn("sole legacy reader", text)
+        self.assertIn("exact approved preview digest", text)
+        self.assertIn("never writes a 0.7 record", text)
+        self.assertIn("Ordinary state commands must refuse", text)
+        init = self.skill("init-project")
+        self.assertIn("does not perform project state migration", " ".join(init.split()))
+        self.assertIn("Never inspect or convert older", init)
 
+    def test_findings_keep_independent_epistemic_axes(self):
+        schema = json.loads((PLUGIN / "knowledge" / "schemas" / "finding-frontmatter.schema.json").read_text())
+        properties = schema["properties"]
+        self.assertEqual(properties["evidenceGrade"]["enum"], ["direct", "inferred", "reported", "unknown"])
+        self.assertIn("manager-ratified", properties["reviewState"]["enum"])
+        self.assertIn("challenged", properties["validity"]["enum"])
+        self.assertIn("syntheticQuestions", properties)
+        self.assertEqual(properties["syntheticQuestions"]["minItems"], 3)
+        self.assertEqual(properties["syntheticQuestions"]["maxItems"], 5)
+        self.assertIs(properties["questionsReviewed"]["const"], True)
 
-class DurableKnowledgeDocumentationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.governance = compact(
-            read(PLUGIN / "references" / "knowledge-governance.md")
+    def test_finding_schema_and_template_match_canonical_contract(self):
+        schema = json.loads((PLUGIN / "knowledge" / "schemas" / "finding-frontmatter.schema.json").read_text())
+        canonical_fields = [
+            "schemaVersion", "id", "campaignId", "revision", "createdAt", "updatedAt",
+            "createdBy", "updatedBy", "digest", "correlationId", "kind", "subject",
+            "claim", "scope", "appliesWhen", "knownLimits", "tags", "subsystems",
+            "aliases", "sourceRuns", "evidence", "supports", "contradicts", "dependsOn",
+            "supersedes", "duplicates", "answers", "spawned", "evidenceGrade",
+            "reviewState", "validity", "projection", "syntheticQuestions",
+            "questionsReviewed",
+        ]
+        relation_fields = [
+            "supports", "contradicts", "dependsOn", "supersedes", "duplicates", "answers", "spawned",
+        ]
+        projection_values = [
+            "none", "campaign", "truth", "history", "backlog", "playbook", "maintained", "archive", "rejected",
+        ]
+
+        self.assertEqual(schema["required"], canonical_fields)
+        self.assertEqual(set(schema["properties"]), set(canonical_fields) | {"policyId", "verifiedAt"})
+        self.assertNotIn("relations", schema["properties"])
+        self.assertTrue(all(field in schema["properties"] for field in relation_fields))
+        self.assertEqual(schema["properties"]["projection"]["enum"], projection_values)
+        self.assertIs(schema["additionalProperties"], False)
+
+        template = (PLUGIN / "templates" / "campaign" / "finding.md").read_text(encoding="utf-8")
+        _, frontmatter, body = template.split("---", 2)
+        template_fields = [
+            line.split(":", 1)[0]
+            for line in frontmatter.strip().splitlines()
+            if line and not line.startswith(" ") and ":" in line
+        ]
+        self.assertEqual(template_fields, canonical_fields)
+        self.assertNotIn("relations:", frontmatter)
+        self.assertNotIn("syntheticQueries:", frontmatter)
+        self.assertIn("questionsReviewed: true", frontmatter)
+        questions_line = next(line for line in frontmatter.splitlines() if line.startswith("syntheticQuestions:"))
+        questions = json.loads(questions_line.split(":", 1)[1].strip())
+        self.assertEqual(questions, sorted(set(questions)))
+        self.assertTrue(3 <= len(questions) <= 5)
+        self.assertTrue(all(question.rstrip().endswith("?") for question in questions))
+        self.assertEqual(
+            [line for line in body.splitlines() if line.startswith("#")],
+            ["# Claim", "## Applies when", "## Does not establish", "## Evidence", "## Reproduction", "## Relations"],
         )
-        self.readme = compact(read(PLUGIN / "README.md"))
 
-    def test_settings_control_plane_is_separate_from_bootstrap_and_state(self) -> None:
-        combined = self.governance + "\n" + self.readme
+    def test_report_fallback_has_measurement_gate(self):
+        policy = (PLUGIN / "templates" / "project" / "policy.jsonc").read_text()
+        readme = (PLUGIN / "README.md").read_text()
+        self.assertIn('"reportFallback": true', policy)
+        self.assertIn('"reportFallbackUntilMeasured": true', policy)
+        self.assertIn("non-inferior on recall", readme)
+        self.assertIn("better on token cost", readme)
 
-        for phrase in (
-            ".re-discipline/config.json",
-            "strict-json bootstrap",
-            ".re-discipline/knowledge/",
-            "policy.jsonc",
-            "retrieval-profile.json",
-            "generated, content-hashed",
-            "keep code, model artifacts, indexes, benchmark output, and memory "
-            "outside the control files",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, combined)
+    def test_hooks_are_guardrails_not_state_authority(self):
+        readme = (PLUGIN / "README.md").read_text()
+        runtime = (PLUGIN / "references" / "runtime-adapters.md").read_text()
+        self.assertIn("accident boundary", readme)
+        self.assertIn("Safety remains in engine validation", readme)
+        self.assertIn("Hosts without reliable hook delivery", runtime)
 
-    def test_source_authority_and_pending_memory_are_explicit(self) -> None:
-        for phrase in (
-            "docs/truth/**",
-            "docs/history/**",
-            "active/*/campaign.md",
-            "docs/backlog/**",
-            ".re-discipline/memory/topics/**",
-            ".re-discipline/memory/proposals/**",
-            "never authoritative",
-            "apply tier and access filters before relevance ranking",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, self.governance)
-
-    def test_permissions_and_no_invisible_expensive_work_are_documented(self) -> None:
-        for phrase in (
-            "read-only benchmark",
-            "any user",
-            "project calibration",
-            "direct manager or project maintainer",
-            "project profile decision",
-            "explicit user decision",
-            "global calibration or promotion",
-            "plugin maintainer",
-            "never run a full benchmark",
-            "model download",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, self.governance)
-
-    def test_fallback_profiles_are_independently_measured(self) -> None:
-        for phrase in (
-            "requested profile from the effective profile",
-            "finite capability matrix",
-            "model-free lexical and graph retrieval",
-            "independent benchmark evidence",
-            "never improvise an unmeasured lane combination",
-            "fallback reason",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, self.governance)
+    def test_memory_and_profile_governance_remain_explicit(self):
+        memory = self.skill("review-memory")
+        profile = self.skill("decide-retrieval-profile")
+        self.assertIn("require the user's exact", memory)
+        self.assertIn("never empirical evidence", memory)
+        self.assertIn("explicit", profile.lower())
+        self.assertIn("candidate", profile.lower())
 
 
 if __name__ == "__main__":

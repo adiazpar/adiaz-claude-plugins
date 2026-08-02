@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/transaction.schema.json",
+  "title": "Canonical State Transaction Descriptor",
+  "type": "object",
+  "required": ["schemaVersion", "campaignSlug", "campaignId", "actor", "authority", "action", "correlationId", "idempotencyKey", "expectedHeadRevision", "expectedHeadDigest", "writes"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "campaignSlug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,49}$"},
+    "campaignId": {"type": "string", "pattern": "^C-[A-Z0-9][A-Z0-9-]{0,62}$"},
+    "actor": {"type": "string", "minLength": 1},
+    "authority": {"enum": ["manager", "investigator", "reviewer", "curator", "system"]},
+    "action": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+    "rationale": {"type": "string"},
+    "reviewHandle": {"type": "string"},
+    "correlationId": {"type": "string", "minLength": 1},
+    "idempotencyKey": {"type": "string", "minLength": 1, "maxLength": 128},
+    "expectedHeadRevision": {"type": "integer", "minimum": 0},
+    "expectedHeadDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "writes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "expectedRevision", "recordId", "revision", "recordDigest", "contentDigest"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 0},
+          "expectedDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "recordId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "recordDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "contentDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "contentDigest"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "expectedDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "contentDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

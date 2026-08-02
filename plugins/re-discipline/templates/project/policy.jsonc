@@ -1,57 +1,41 @@
 {
   "$schema": "plugin://re-discipline/schemas/knowledge-settings.schema.json",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
 
-  // These are the only project knowledge classes indexed by default.
-  // Pending memory proposals and arbitrary repository files are excluded.
+  // Canonical records and maintained project sources are indexed. Derived
+  // caches can always be rebuilt from these files.
   "sources": {
     "truth": true,
-    "history": true,
+    "historyFindings": true,
     "backlog": true,
-
-    // Index active/*/CAMPAIGN.md and active/*/REVIEWS.md in the `active` tier.
-    // The two are one logical campaign masterfile split only because state is
-    // rewritten each checkpoint while the review ledger only appends.
-    "activeCampaigns": true,
-
+    "activeFindings": true,
     "sharedMemory": true,
 
-    // Index drafter reports under active/*/subagents/*/report.md. A report a
-    // manager has stamped as reviewed lands in the `campaign` tier; an
-    // unstamped one lands in `draft`, which is in no default tier set and must
-    // be asked for by name.
-    "drafterReports": true,
-
-    // Optional project-relative Markdown source classes belong here. Keep the
-    // list empty unless the project explicitly classifies a maintained asset;
-    // external roots and sensitive paths cannot be granted from this file.
+    // Until the ratified normalized-beats-raw release gate passes, returned
+    // report chunks remain a lower-ranked fallback with provenance labels.
+    "reportFallback": true,
     "additional": []
   },
 
-  // Embeddings and reranking stay on this machine. A tracked project setting
-  // cannot grant remote transmission or access to external source roots.
   "models": {
     "execution": "local"
   },
 
-  // Store aggregate local health and token measurements, never query or
-  // passage text. Use "off" to disable even local aggregate measurements.
   "telemetry": {
     "mode": "metrics-only"
   },
 
-  // Hard ceilings for returned context. Callers may request smaller budgets.
-  //
-  // The response envelope is charged against the same budget as the passages.
-  // It measures about 332 tokens, so a 1024 budget left roughly 692 for
-  // content while the median result costs about 393 - one result exhausted
-  // the budget and search behaved as top-1. At 3072 the content budget is
-  // about 2740 and a median query returns roughly six results.
   "budgets": {
     "searchTokens": 3072,
     "managerContextTokens": 6144,
     "drafterContextTokens": 3072,
-    "maxPassages": 12,
+    "maxCards": 16,
     "maxBytes": 32768
+  },
+
+  "archive": {
+    "reportFallbackUntilMeasured": true,
+    "normalizationTriggerHits": 3,
+    "fallbackMode": "default-fallback"
   }
 }

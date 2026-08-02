@@ -1,74 +1,48 @@
 ---
 name: overturn
 description: >-
-  Overturn a prior synthesis only when new DIRECT evidence disconfirms it.
-  Corrects or removes the truth in place, rechecks dependents, and requires the
-  old claim and disconfirming evidence to be preserved in the campaign
-  chronicle.
+  Challenge, narrow, invalidate, or supersede a re-discipline finding when new
+  evidence conflicts with it. Preserves the prior claim, analyzes dependents,
+  and queues any truth correction for closure.
 ---
 
-# Overturn A Synthesis
+# Challenge Or Overturn A Finding
 
-An overturn is rare and explicit. It requires DIRECT evidence that an existing
-synthesis is false. A more plausible alternative or narrower interpretation is
-not enough.
+Never silently rewrite a claim. Contrary evidence first creates a challenge.
 
-## Step 1: Prove Disconfirmation
+## Establish The Challenge
 
-Quote the current claim and list the disconfirming observations. Read exact
-values from the primary artifacts. If the old claim could still be true under
-the new evidence, stop and use `promote-truth` to narrow scope or confidence
-instead.
+Identify the exact finding revision and contrary evidence handles. Submit
+`manager_apply` with action `finding.challenge`, the exact state-head revision
+and digest, the challenged record digest, actor, rationale, idempotency key,
+and source run or review IDs. The engine must expose affected dependents and
+overlay the challenge in retrieval immediately.
 
-Atomic facts should first be checked for source revision, build drift,
-transcription error, or changed validity conditions. Most legitimate
-overturns target syntheses.
+## Resolve By Manager Review
 
-## Step 2: Establish The Replacement
+Inspect the original evidence, new evidence, scope, dependents, projections,
+and surviving alternatives. Through an immutable review, choose one:
 
-State the corrected claim only when DIRECT evidence supports it and a
-maintained source, permanent test and fixture, or runnable recipe can recheck
-it later. A chronicle supplies provenance, not sole empirical support. It is
-valid to remove a false synthesis without replacing it; record the resulting
-gap as an open campaign question.
+- dismiss the challenge;
+- narrow scope or applicability;
+- mark the finding historical or invalid;
+- supersede it with a new atomic finding;
+- schedule correction or removal of a current-truth projection at closure.
 
-## Step 3: Correct Current Truth
+Create verification work for every dependent whose conclusion may change.
+Preserve the original finding, challenge, decision, and recheck results.
 
-- Rewrite the existing file in place when the replacement has the same home.
-- Remove the file when no current claim survives; do not leave a normative
-  zombie or create a separate refuted-truth tree.
-- Update verification date, scope, confidence, and verification basis.
-- Search `Depends-on` links and recheck every dependent claim.
-- Remove or retarget the entry in `docs/truth/INDEX.md`.
-- Record the supersession so retrieval can see it, on its own line:
-  - when the claim moves to a different file, write
-    `**Superseded-by:** <path>` in the old file and
-    `**Supersedes:** <old path>` in the replacement;
-  - when the claim is corrected in place, write
-    `**Supersedes:** <this path>@<old verification date>`.
+An active campaign may update campaign knowledge but may not edit a projected
+truth file. The closure transaction applies approved truth corrections
+atomically with archive and provenance updates.
 
-  Retrieval carries a document's claim and status onto every one of its
-  chunks. Without this line a passage from the middle of a corrected document
-  reaches a reader with no indication that a correction happened. Keep the
-  marker on its own line: an in-prose mention such as "supersedes the earlier
-  reading" scopes a claim rather than retiring a document, and must not be
-  read as a status.
+## Verify
 
-## Step 4: Preserve The Old Claim Retrospectively
+Call `trace` on the old and new finding handles. Require visible challenge or
+supersession relations, correct dependent status, immutable review receipt,
+and no unapproved truth filesystem change.
 
-Quote the old claim verbatim in the active campaign's Dead ends section with
-the DIRECT disconfirming evidence and any residual inference. The closing
-chronicle must preserve that explanation so the dead claim is not rediscovered.
-Keep the old claim and disconfirmation in history as provenance; do not cite
-history as the replacement truth's empirical support.
+## References
 
-Verify that current truth contains only the replacement, while history retains
-the old claim as retrospective context.
-
-Do not commit unless the user explicitly asks.
-
-## Reference
-
-- Downgrade or augmentation: `promote-truth`.
-- Chronicle template: `<plugin-root>/templates/chronicle.md`.
-- Active manager adapter: `.claude/CLAUDE.md` or `.codex/AGENTS.md`.
+- Governance: `<plugin-root>/references/knowledge-governance.md`.
+- Closure projection: `close-campaign`.

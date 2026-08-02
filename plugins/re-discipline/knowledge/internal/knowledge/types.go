@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	RuntimeVersion = "0.7.0"
-	ParserVersion  = "markdown-structure-v1"
+	RuntimeVersion = "0.8.0"
+	ParserVersion  = "markdown-finding-v2-identifier-v1"
 	// Bumped for the per-chunk document prelude, then again for the opening
 	// chunk of an unreviewed drafter report. index.go forces a full rebuild
 	// when this value changes.
@@ -24,12 +24,13 @@ const (
 	// marker, which is the exact failure the change exists to close. A stale
 	// index that is merely less useful can be tolerated; one that is less safe
 	// cannot.
-	ChunkerVersion = "section-block-v4"
-	// BootstrapSchemaVersion is the .re-discipline/config.json contract; v2
-	// introduced the machine-managed knowledge/ layout. Knowledge policy
-	// (knowledge/policy.jsonc) keeps its own independent schema version.
-	BootstrapSchemaVersion = 2
-	SettingsSchemaVersion  = 1
+	ChunkerVersion = "section-block-v5-1400-byte-safe"
+	// BootstrapSchemaVersion is the .re-discipline/config.json contract. The
+	// 0.8 hard cutover adds campaign state, authority, bounded-context,
+	// payload, closure, and explicit-migration policy to the former knowledge
+	// bootstrap. Knowledge policy keeps its own independent schema version.
+	BootstrapSchemaVersion = 3
+	SettingsSchemaVersion  = 2
 )
 
 var AllowedTiers = map[string]bool{
@@ -43,6 +44,10 @@ var AllowedTiers = map[string]bool{
 	// `draft` is in no default tier set: unreviewed drafter output must be
 	// asked for by name, and the request is visible in a pack's allowedTiers.
 	"campaign": true, "draft": true,
+	// Finding-plane retrieval classes used by the 0.8 public query surface.
+	// Older path tiers remain internal only where the explicit migrator or
+	// passage-level benchmark needs to inspect legacy material.
+	"provisional": true, "archive": true, "intake": true, "playbook": true,
 }
 
 // EphemeralTiers hold content that is deleted when its campaign closes. A
@@ -50,6 +55,7 @@ var AllowedTiers = map[string]bool{
 // which is categorically different from a citation into docs/.
 var EphemeralTiers = map[string]bool{
 	"active": true, "campaign": true, "draft": true,
+	"provisional": true, "intake": true,
 }
 
 // CitationDurability reports whether a tier's citations outlive their campaign.
@@ -61,10 +67,57 @@ func CitationDurability(tier string) string {
 }
 
 type BootstrapConfig struct {
-	SchemaVersion      int             `json:"schemaVersion"`
-	KnowledgeDirectory string          `json:"knowledgeDirectory"`
-	Memory             MemoryConfig    `json:"memory"`
-	Knowledge          KnowledgeConfig `json:"knowledge"`
+	SchemaVersion         int             `json:"schemaVersion"`
+	CampaignSchemaVersion int             `json:"campaignSchemaVersion"`
+	State                 StateConfig     `json:"state"`
+	Authority             AuthorityConfig `json:"authority"`
+	Context               ContextConfig   `json:"context"`
+	Payload               PayloadConfig   `json:"payload"`
+	Closure               ClosureConfig   `json:"closure"`
+	Memory                MemoryConfig    `json:"memory"`
+	Knowledge             KnowledgeConfig `json:"knowledge"`
+	Migration             MigrationConfig `json:"migration"`
+}
+
+type StateConfig struct {
+	ActiveRoot            string `json:"activeRoot"`
+	ArchiveRoot           string `json:"archiveRoot"`
+	LockFile              string `json:"lockFile"`
+	Recovery              string `json:"recovery"`
+	GeneratedViewMaxItems int    `json:"generatedViewMaxItems"`
+}
+
+type AuthorityConfig struct {
+	ManagerRoles      []string `json:"managerRoles"`
+	CuratorWrites     []string `json:"curatorWrites"`
+	DirectStateWrites bool     `json:"directStateWrites"`
+	TruthProjection   string   `json:"truthProjection"`
+}
+
+type ContextConfig struct {
+	ManagerCardTokens int    `json:"managerCardTokens"`
+	DrafterCardTokens int    `json:"drafterCardTokens"`
+	MaxCards          int    `json:"maxCards"`
+	MaxExpansionBytes int    `json:"maxExpansionBytes"`
+	LeaseMode         string `json:"leaseMode"`
+}
+
+type PayloadConfig struct {
+	CreateLazily        bool `json:"createLazily"`
+	MaxInlineBytes      int  `json:"maxInlineBytes"`
+	RequireRegistration bool `json:"requireRegistration"`
+}
+
+type ClosureConfig struct {
+	RequireRunCoverage         bool `json:"requireRunCoverage"`
+	RequireFindingDisposition  bool `json:"requireFindingDisposition"`
+	RequireFileRetention       bool `json:"requireFileRetention"`
+	RequireArchiveVerification bool `json:"requireArchiveVerification"`
+}
+
+type MigrationConfig struct {
+	Mode          string `json:"mode"`
+	LegacyReaders string `json:"legacyReaders"`
 }
 
 type MemoryConfig struct {
@@ -80,30 +133,31 @@ type KnowledgeConfig struct {
 }
 
 type KnowledgeSettings struct {
-	SchemaVersion int            `json:"schemaVersion"`
-	Sources       SourceSettings `json:"sources"`
-	Models        ModelSettings  `json:"models"`
-	Telemetry     Telemetry      `json:"telemetry"`
-	Budgets       BudgetSettings `json:"budgets"`
+	Schema        string          `json:"$schema,omitempty"`
+	SchemaVersion int             `json:"schemaVersion"`
+	Sources       SourceSettings  `json:"sources"`
+	Models        ModelSettings   `json:"models"`
+	Telemetry     Telemetry       `json:"telemetry"`
+	Budgets       BudgetSettings  `json:"budgets"`
+	Archive       ArchiveSettings `json:"archive"`
 }
 
 type SourceSettings struct {
 	Truth           bool `json:"truth"`
-	History         bool `json:"history"`
+	HistoryFindings bool `json:"historyFindings"`
 	Backlog         bool `json:"backlog"`
-	ActiveCampaigns bool `json:"activeCampaigns"`
+	ActiveFindings  bool `json:"activeFindings"`
 	SharedMemory    bool `json:"sharedMemory"`
-	// DrafterReports indexes active/*/subagents/*/report.md. Reviewed reports
-	// land in the `campaign` tier; unreviewed ones in `draft`, which is in no
-	// default tier set and must be asked for by name.
-	DrafterReports bool               `json:"drafterReports"`
+	// ReportFallback keeps immutable run reports in the lower-ranked raw
+	// provenance lane until the normalized-beats-raw release gate is ratified.
+	ReportFallback bool               `json:"reportFallback"`
 	Additional     []AdditionalSource `json:"additional,omitempty"`
 }
 
 type AdditionalSource struct {
 	Path    string `json:"path"`
 	Pattern string `json:"pattern"`
-	Tier    string `json:"tier"`
+	Tier    string `json:"sourceClass"`
 }
 
 type ModelSettings struct {
@@ -118,8 +172,15 @@ type BudgetSettings struct {
 	SearchTokens         int `json:"searchTokens"`
 	ManagerContextTokens int `json:"managerContextTokens"`
 	DrafterContextTokens int `json:"drafterContextTokens"`
-	MaxPassages          int `json:"maxPassages"`
+	MaxPassages          int `json:"maxCards"`
 	MaxBytes             int `json:"maxBytes"`
+}
+
+type ArchiveSettings struct {
+	ReportFallbackUntilMeasured bool   `json:"reportFallbackUntilMeasured"`
+	NormalizationTriggerHits    int    `json:"normalizationTriggerHits"`
+	FallbackMode                string `json:"fallbackMode,omitempty"`
+	NormalizedBeatsRawReceipt   string `json:"normalizedBeatsRawReceipt,omitempty"`
 }
 
 type Configuration struct {
@@ -311,14 +372,23 @@ type SelectedProfile struct {
 }
 
 type SourceDocument struct {
-	ID          string `json:"id"`
-	Path        string `json:"path"`
-	Tier        string `json:"tier"`
-	Title       string `json:"title"`
-	Content     string `json:"-"`
-	ContentHash string `json:"-"`
-	Size        int64  `json:"size"`
-	MtimeNS     int64  `json:"mtimeNs"`
+	ID    string `json:"id"`
+	Path  string `json:"path"`
+	Tier  string `json:"tier"`
+	Title string `json:"title"`
+	// SourceKind distinguishes normalized findings, ordinary managed Markdown,
+	// and raw provenance while keeping the derived index rebuildable.
+	SourceKind    string `json:"sourceKind,omitempty"`
+	FindingID     string `json:"findingId,omitempty"`
+	CampaignID    string `json:"campaignId,omitempty"`
+	FindingClaim  string `json:"findingClaim,omitempty"`
+	EvidenceGrade string `json:"evidenceGrade,omitempty"`
+	ReviewState   string `json:"reviewState,omitempty"`
+	Validity      string `json:"validity,omitempty"`
+	Content       string `json:"-"`
+	ContentHash   string `json:"-"`
+	Size          int64  `json:"size"`
+	MtimeNS       int64  `json:"mtimeNs"`
 }
 
 type SourceState struct {
@@ -330,13 +400,19 @@ type SourceState struct {
 }
 
 type Chunk struct {
-	ID          string `json:"id"`
-	DocumentID  string `json:"documentId"`
-	Path        string `json:"path"`
-	Tier        string `json:"tier"`
-	Heading     string `json:"heading"`
-	StartLine   int    `json:"startLine"`
-	EndLine     int    `json:"endLine"`
+	ID         string `json:"id"`
+	DocumentID string `json:"documentId"`
+	Path       string `json:"path"`
+	Tier       string `json:"tier"`
+	Heading    string `json:"heading"`
+	StartLine  int    `json:"startLine"`
+	EndLine    int    `json:"endLine"`
+	// ByteRange is set only when a single source line had to be split. The
+	// offsets are an absolute half-open range over normalized UTF-8 source
+	// bytes, preserving an exact citation while enforcing the chunk ceiling.
+	ByteRange   bool   `json:"byteRange,omitempty"`
+	StartByte   int    `json:"startByte,omitempty"`
+	EndByte     int    `json:"endByte,omitempty"`
 	Content     string `json:"content"`
 	ContentHash string `json:"contentHash"`
 	// Context is the document's epistemic header, recomputed per chunk. It is
@@ -451,6 +527,9 @@ type Citation struct {
 	Heading   string `json:"heading"`
 	StartLine int    `json:"startLine"`
 	EndLine   int    `json:"endLine"`
+	ByteRange bool   `json:"byteRange,omitempty"`
+	StartByte int    `json:"startByte,omitempty"`
+	EndByte   int    `json:"endByte,omitempty"`
 	// ContentHash never reaches the wire; it is the in-process passage digest
 	// the evaluator and the packing loop compare against.
 	ContentHash string `json:"-"`
@@ -562,40 +641,71 @@ type SearchResponse struct {
 	Metadata        RetrievalMetadata `json:"metadata"`
 }
 
-type ContextPassage struct {
-	ChunkID string `json:"chunkId"`
-	Passage string `json:"passage"`
-	// omitempty is load-bearing: MaterializeContextPackExpected re-marshals a
-	// stored pack and compares it against its own recorded digest, so a field
-	// that always serializes would invalidate every previously written pack.
-	DocumentContext string   `json:"documentContext,omitempty"`
-	Citation        Citation `json:"citation"`
+// ContextPackTarget identifies the authority boundary a pack is compiled
+// for. Project packs are an internal orientation/measurement primitive and
+// can never be materialized. Public run packs bind either one canonical
+// active campaign run or one isolated recruiting run.
+type ContextPackTarget struct {
+	Kind            string `json:"kind"`
+	CampaignID      string `json:"campaignId,omitempty"`
+	WorkItemID      string `json:"workItemId,omitempty"`
+	RunID           string `json:"runId,omitempty"`
+	CandidateSlug   string `json:"candidateSlug,omitempty"`
+	RecruitingRunID string `json:"recruitingRunId,omitempty"`
 }
 
+// ContextPackScope freezes every mutable state identity used to compile a
+// delegated pack. A caller cannot reuse a preview after the campaign head,
+// work item, or existing run changed without producing a different digest.
+type ContextPackScope struct {
+	Kind              string `json:"kind"`
+	CampaignID        string `json:"campaignId,omitempty"`
+	CampaignSlug      string `json:"campaignSlug,omitempty"`
+	CampaignRevision  int64  `json:"campaignRevision,omitempty"`
+	WorkItemID        string `json:"workItemId,omitempty"`
+	WorkItemRevision  int64  `json:"workItemRevision,omitempty"`
+	RunID             string `json:"runId,omitempty"`
+	RunRevision       int64  `json:"runRevision,omitempty"`
+	CandidateSlug     string `json:"candidateSlug,omitempty"`
+	RecruitingRunID   string `json:"recruitingRunId,omitempty"`
+	StateHeadRevision int64  `json:"stateHeadRevision"`
+	StateHeadDigest   string `json:"stateHeadDigest"`
+	EventID           string `json:"eventId,omitempty"`
+}
+
+// ContextConstraint is accepted input, not retrieved prose. Each constraint
+// remains independently attributable to an exact canonical record handle.
+type ContextConstraint struct {
+	ID           string `json:"id"`
+	Kind         string `json:"kind"`
+	Text         string `json:"text"`
+	SourceHandle string `json:"sourceHandle"`
+}
+
+// ContextPack is the immutable 0.8 dispatch artifact. It deliberately carries
+// bounded cards and exact expansion handles instead of arbitrary passages.
+// This keeps state/epistemic labels visible and prevents an investigator from
+// silently inheriting the campaign's full corpus.
 type ContextPack struct {
-	SchemaVersion    int                       `json:"schemaVersion"`
-	PackID           string                    `json:"packId"`
-	Digest           string                    `json:"digest"`
-	Query            string                    `json:"query"`
-	Generation       ContextGenerationIdentity `json:"generation"`
-	Role             string                    `json:"role"`
-	AllowedTiers     []string                  `json:"allowedTiers"`
-	RequestedProfile string                    `json:"requestedProfile"`
-	EffectiveProfile string                    `json:"effectiveProfile"`
-	ActiveLanes      []string                  `json:"activeLanes"`
-	Models           []string                  `json:"models"`
-	FallbackReason   *string                   `json:"fallbackReason"`
-	TokenBudget      int                       `json:"tokenBudget"`
-	EstimatedTokens  int                       `json:"estimatedTokens"`
-	// Verbosity records which citation projection this pack carries, so a
-	// reader knows whether an absent sourceHash was compacted away or is
-	// missing. omitempty is load-bearing for the same reason as
-	// ContextPassage.DocumentContext: a pack written before this field existed
-	// is re-marshalled and compared against its own recorded digest, and an
-	// always-present field would invalidate every one of them.
-	Verbosity string           `json:"verbosity,omitempty"`
-	Passages  []ContextPassage `json:"passages"`
-	Omitted   map[string]int   `json:"omitted"`
+	SchemaVersion       int                       `json:"schemaVersion"`
+	PackID              string                    `json:"packId"`
+	Digest              string                    `json:"digest"`
+	Task                string                    `json:"task"`
+	Scope               ContextPackScope          `json:"scope"`
+	Generation          ContextGenerationIdentity `json:"generation"`
+	Role                string                    `json:"role"`
+	AllowedTiers        []string                  `json:"allowedTiers"`
+	RequestedProfile    string                    `json:"requestedProfile"`
+	EffectiveProfile    string                    `json:"effectiveProfile"`
+	ActiveLanes         []string                  `json:"activeLanes"`
+	Models              []string                  `json:"models"`
+	FallbackReason      *string                   `json:"fallbackReason"`
+	TokenBudget         int                       `json:"tokenBudget"`
+	EstimatedTokens     int                       `json:"estimatedTokens"`
+	AcceptedConstraints []ContextConstraint       `json:"acceptedConstraints"`
+	Cards               []ContextCard             `json:"cards"`
+	RequiredHandles     []string                  `json:"requiredHandles"`
+	Omitted             map[string]int            `json:"omitted"`
 }
 
 type ContextGenerationIdentity struct {

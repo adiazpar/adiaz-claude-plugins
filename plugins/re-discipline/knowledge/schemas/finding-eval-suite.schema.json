@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/finding-eval-suite.schema.json",
+  "title": "Ratified finding-card evaluation suite",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "status", "ratifiedAt", "ratifiedBy", "corpusSnapshot", "cases", "digest"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$"},
+    "status": {"const": "ratified"},
+    "ratifiedAt": {"type": "string", "format": "date-time"},
+    "ratifiedBy": {"type": "string", "minLength": 1},
+    "corpusSnapshot": {"type": "string", "pattern": "^(fixture:[a-z0-9-]+|sha256:[a-f0-9]{64})$"},
+    "cases": {
+      "type": "array",
+      "minItems": 48,
+      "maxItems": 10000,
+      "items": {"$ref": "#/$defs/case"}
+    },
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "findingId": {"type": "string", "pattern": "^F-[0-9]{4,}$"},
+    "findingHandle": {"type": "string", "pattern": "^finding:F-[0-9]{4,}$"},
+    "evidenceHandle": {"type": "string", "pattern": "^evidence:F-[0-9]{4,}:[a-f0-9]{20}$"},
+    "path": {"type": "string", "minLength": 1, "pattern": "^(?:[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.\\.[^/\\\\:\\x00]+)(?:/(?:[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.[^./\\\\:\\x00][^/\\\\:\\x00]*|\\.\\.[^/\\\\:\\x00]+))*$"},
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "topic", "split", "query", "queryClass", "allowedSourceClasses", "allowedReviewStates", "allowedValidities", "tokenBudget", "expectedFindingIds", "expectedFindingHandles", "expectedSourceClasses", "expectedReviewStates", "expectedValidities", "answerable"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$"},
+        "role": {"enum": ["manager", "drafter"]},
+        "topic": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$"},
+        "split": {"enum": ["development", "holdout"]},
+        "query": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "queryClass": {"enum": ["auto", "exact", "conceptual", "orientation", "current", "provenance", "dependency", "contradiction"]},
+        "allowedSourceClasses": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["truth", "campaign", "provisional", "history", "archive"]}},
+        "allowedReviewStates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["extracted", "curator-checked", "manager-ratified", "manager-rejected"]}},
+        "allowedValidities": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["provisional", "current", "challenged", "historical", "superseded", "invalid"]}},
+        "tokenBudget": {"type": "integer", "minimum": 128, "maximum": 4096},
+        "expectedFindingIds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/findingId"}},
+        "expectedFindingHandles": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/findingHandle"}},
+        "expectedEvidenceHandles": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/evidenceHandle"}},
+        "expectedRawPaths": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+        "expectedSourceClasses": {"type": "object", "propertyNames": {"$ref": "#/$defs/findingId"}, "additionalProperties": {"enum": ["truth", "campaign", "provisional", "history"]}},
+        "expectedReviewStates": {"type": "object", "propertyNames": {"$ref": "#/$defs/findingId"}, "additionalProperties": {"enum": ["extracted", "curator-checked", "manager-ratified", "manager-rejected"]}},
+        "expectedValidities": {"type": "object", "propertyNames": {"$ref": "#/$defs/findingId"}, "additionalProperties": {"enum": ["provisional", "current", "challenged", "historical", "superseded", "invalid"]}},
+        "hardNegativeFindingIds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/findingId"}},
+        "answerable": {"type": "boolean"}
+      }
+    }
+  }
+}

@@ -18,8 +18,24 @@ func ensureSourcePath(t *testing.T) string {
 	return filepath.Join(filepath.Dir(self), "ensure.go")
 }
 
-func TestEnsureMigratesRepairsAndReportsWithinBudget(t *testing.T) {
+// legacyFixtureProject models only the read-only 0.7 detection boundary. The
+// 0.8 runtime intentionally contains no legacy-layout writer.
+func legacyFixtureProject(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, ".re-discipline", "project-profile.md"),
+		"# P\n\n<!-- re-discipline:shared-laws v0.7.0 -->\nlaws\n<!-- re-discipline:shared-laws:end -->\n")
+	mustWriteFile(t, filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc"),
+		"// legacy policy\n{\"schemaVersion\":1}\n")
+	return root
+}
+
+func TestEnsureDetectsLegacyWithoutMutation(t *testing.T) {
 	root := legacyFixtureProject(t)
+	settingsBefore, err := os.ReadFile(filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	payload, err := EnsureProject(context.Background(), root, pluginRootForTests(t), 7000)
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
@@ -28,8 +44,8 @@ func TestEnsureMigratesRepairsAndReportsWithinBudget(t *testing.T) {
 	if !ok {
 		t.Fatalf("ensure block missing: %#v", payload)
 	}
-	if ensureBlock["migrated"] != true {
-		t.Fatal("legacy project must be migrated")
+	if ensureBlock["migrated"] != false || ensureBlock["projectStateVersion"] != "0.7" {
+		t.Fatalf("legacy ensure must report without migrating: %#v", ensureBlock)
 	}
 	if _, ok := payload["user"]; !ok {
 		t.Fatal("ensure must return the user block")
@@ -37,16 +53,33 @@ func TestEnsureMigratesRepairsAndReportsWithinBudget(t *testing.T) {
 	if _, ok := payload["system"]; !ok {
 		t.Fatal("ensure must return the system block")
 	}
-	if _, statErr := os.Stat(filepath.Join(root, ".re-discipline", "settings")); !os.IsNotExist(statErr) {
-		t.Fatal("settings/ must be gone after ensure")
+	settingsAfter, readErr := os.ReadFile(filepath.Join(root, ".re-discipline", "settings", "knowledge.jsonc"))
+	if readErr != nil || !bytes.Equal(settingsBefore, settingsAfter) {
+		t.Fatal("legacy ensure changed the project")
 	}
 
 	payload2, err := EnsureProject(context.Background(), root, pluginRootForTests(t), 7000)
 	if err != nil {
 		t.Fatalf("second ensure: %v", err)
 	}
-	if payload2["ensure"].(map[string]any)["migrated"] != false {
-		t.Fatal("ensure must be idempotent")
+	if payload2["ensure"].(map[string]any)["projectStateVersion"] != "0.7" {
+		t.Fatal("legacy ensure must remain a read-only attention result")
+	}
+}
+
+func TestDetectProjectStateVersionSeparatesBootstrapAndCampaignSchemas(t *testing.T) {
+	root := legacyFixtureProject(t)
+	version, err := DetectProjectStateVersion(root)
+	if err != nil || version != "0.7" {
+		t.Fatalf("legacy detection: %q %v", version, err)
+	}
+	if err := AtomicWriteJSON(filepath.Join(root, ".re-discipline", "state", "head.json"),
+		initialStateHead(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	version, err = DetectProjectStateVersion(root)
+	if err != nil || version != "0.8" {
+		t.Fatalf("0.8 detection: %q %v", version, err)
 	}
 }
 

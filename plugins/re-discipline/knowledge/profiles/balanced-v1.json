@@ -33,15 +33,15 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:9f446f7d8000b976e10c36b3b3765264a893c0f3e7ce47c52aa52456217ec47d",
+        "digest": "sha256:404fccb005fc25e3fbd3d67cfc5e7f0e7b75542282626d46ee833b47be6d8ded",
         "status": "passed",
-        "evaluatedAt": "2026-07-28T17:49:28Z",
-        "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
-        "corpusFingerprint": "sha256:52a14cf9bde6dbd44eea76a28ed316eeabffc706eb6cd4c7d58395c2f0a19d1f",
+        "evaluatedAt": "2026-08-02T21:45:08Z",
+        "evalFingerprint": "sha256:6a13139fce27c74c733b28ac84fe516d59f94ce8b143d953080d16b6ae1b543f",
+        "corpusFingerprint": "sha256:605d344bbfc8934d78890c33204059139a96f9ac1ff9ce011cbf6eca898cb074",
         "modelFingerprint": "sha256:3f17d9c1525d5412b21302ac021dbbde2ceae029c49226cfa7bcbf2a7111f700",
-        "runtimeFingerprint": "sha256:802a2941797a58fa4624c49fb725fd29fa3a0166b757863acac16698612dfc27",
-        "chunkerVersion": "section-block-v4",
-        "parserVersion": "markdown-structure-v1"
+        "runtimeFingerprint": "sha256:09a0a5e3723bc26e772a22720e40896d1218077210f8b62ca1299a10c6d9c8c1",
+        "chunkerVersion": "section-block-v5-1400-byte-safe",
+        "parserVersion": "markdown-finding-v2-identifier-v1"
       }
     },
     {
@@ -72,15 +72,15 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:88fed8aa44ae0f38bf6a69ebfb227f90e77ac67c8c3869e7c1b7512ef5f93e97",
+        "digest": "sha256:7c65db91b5306864d2638c9012bb84c6908d481f73aeab90f310365d2c124a71",
         "status": "passed",
-        "evaluatedAt": "2026-07-28T17:49:28Z",
-        "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
-        "corpusFingerprint": "sha256:52a14cf9bde6dbd44eea76a28ed316eeabffc706eb6cd4c7d58395c2f0a19d1f",
+        "evaluatedAt": "2026-08-02T21:45:08Z",
+        "evalFingerprint": "sha256:6a13139fce27c74c733b28ac84fe516d59f94ce8b143d953080d16b6ae1b543f",
+        "corpusFingerprint": "sha256:605d344bbfc8934d78890c33204059139a96f9ac1ff9ce011cbf6eca898cb074",
         "modelFingerprint": "sha256:f8654dc6bc0274fcc627476617fdd445626ca9e17c7d1717669e6deccaecb7be",
-        "runtimeFingerprint": "sha256:802a2941797a58fa4624c49fb725fd29fa3a0166b757863acac16698612dfc27",
-        "chunkerVersion": "section-block-v4",
-        "parserVersion": "markdown-structure-v1"
+        "runtimeFingerprint": "sha256:09a0a5e3723bc26e772a22720e40896d1218077210f8b62ca1299a10c6d9c8c1",
+        "chunkerVersion": "section-block-v5-1400-byte-safe",
+        "parserVersion": "markdown-finding-v2-identifier-v1"
       }
     },
     {
@@ -110,15 +110,15 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:0c291f19d07b0bd39e1521a3bb2c5d74c241d1714c34c0a553b5eb3de51302c2",
+        "digest": "sha256:903ffe9a98a924faea774d29f08ece6c96fbd702cd88299b64e4da46f6f8c03b",
         "status": "passed",
-        "evaluatedAt": "2026-07-28T17:49:28Z",
-        "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
-        "corpusFingerprint": "sha256:52a14cf9bde6dbd44eea76a28ed316eeabffc706eb6cd4c7d58395c2f0a19d1f",
+        "evaluatedAt": "2026-08-02T21:45:08Z",
+        "evalFingerprint": "sha256:6a13139fce27c74c733b28ac84fe516d59f94ce8b143d953080d16b6ae1b543f",
+        "corpusFingerprint": "sha256:605d344bbfc8934d78890c33204059139a96f9ac1ff9ce011cbf6eca898cb074",
         "modelFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "runtimeFingerprint": "sha256:802a2941797a58fa4624c49fb725fd29fa3a0166b757863acac16698612dfc27",
-        "chunkerVersion": "section-block-v4",
-        "parserVersion": "markdown-structure-v1"
+        "runtimeFingerprint": "sha256:09a0a5e3723bc26e772a22720e40896d1218077210f8b62ca1299a10c6d9c8c1",
+        "chunkerVersion": "section-block-v5-1400-byte-safe",
+        "parserVersion": "markdown-finding-v2-identifier-v1"
       }
     }
   ]

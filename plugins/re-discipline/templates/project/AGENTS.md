@@ -1,26 +1,18 @@
-<!-- re-discipline:router v0.7.0 -->
+<!-- re-discipline:router v0.8.0 -->
 # AGENTS.md - {{PROJECT_NAME}} entrypoint
 
-This root file is a compatibility entrypoint for agents that discover
-`AGENTS.md` at the repository root.
+Direct Codex manager sessions read `.codex/AGENTS.md`.
 
-Direct Codex manager sessions must read and follow `.codex/AGENTS.md`.
+Workers assigned a registered run under `active/<slug>/runs/<run-id>/` or
+`.re-discipline/agents/recruiting/<candidate>/runs/<run-id>/` read the
+project's external drafter contract and their exact brief.
 
-Dispatched drafting agents given a `brief.md` under either
-`active/<slug>/subagents/<workspace-id>/` or
-`.re-discipline/agents/recruiting/<candidate>/runs/<workspace-id>/` must read
-and follow `.codex/external-drafter-contract.md`.
+All roles read `.re-discipline/project-profile.md` for canonical shared laws,
+identity, and domain facts. Host-specific notes stay in the active adapter.
+Canonical campaign mutations go through the shared state engine. Drafters
+receive an immutable context pack and may write only their report, lazy
+payload, and exact project grants.
 
-Both roles must read `.re-discipline/project-profile.md` for the canonical
-shared laws, project identity, and domain facts. Project-owned host notes live
-outside the managed block in the applicable manager adapter.
-
-All roles use the same project knowledge policy in
-`.re-discipline/config.json`. Drafters receive an immutable context pack
-materialized inside their workspace and may not accept memory proposals or
-change retrieval profiles.
-
-Do not merge these roles. The manager scopes, delegates, ratifies, promotes
-truth, and closes campaigns. Drafters investigate only their brief and report
-evidence for manager review.
+Do not merge roles. Managers scope, review, ratify, retain, and close. Drafters
+investigate. Curators normalize and account for coverage without ratifying.
 <!-- re-discipline:router:end -->

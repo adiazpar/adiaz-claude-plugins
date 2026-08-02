@@ -40,6 +40,7 @@ type Service struct {
 	pinnedGeneration     *Generation
 	telemetryMu          sync.Mutex
 	telemetryBuffer      []telemetryObservation
+	archiveTracker       *ArchiveFallbackTracker
 }
 
 // PinGeneration freezes this service on one immutable generation. A
@@ -115,6 +116,13 @@ func NewService(options ServiceOptions) (*Service, error) {
 		ProfileCatalog: profile, ModelManifest: manifest,
 		DisableDense: options.DisableDense, DisableRerank: options.DisableRerank,
 		EffectiveProfileName: options.EffectiveProfileName, Warnings: warnings,
+	}
+	service.archiveTracker, err = OpenArchiveFallbackTracker(
+		settings.Archive.NormalizationTriggerHits,
+		filepath.Join(cacheRoot, "normalization-queue.json"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("open archive normalization queue: %w", err)
 	}
 	service.Index = IndexManager{
 		Boundary: boundary, CacheRoot: cacheRoot, Settings: settings, Manifest: manifest,
@@ -396,13 +404,29 @@ func (service *Service) benchmarkStatus(
 		if cases, err := LoadEvalCases(filepath.Join(
 			service.AssetRoot, "evals", "conformance", "cases.json",
 		)); err == nil {
-			expectedEval, _ = CanonicalDigest(cases)
 			coverage = MeasureHardNegativeCoverage(cases)
+			if findingSuite, err := LoadFindingEvalSuite(filepath.Join(
+				service.AssetRoot, "evals", "conformance", "finding-cases.json",
+			)); err == nil {
+				expectedEval, _ = CanonicalDigest(struct {
+					PassageCases []EvalCase       `json:"passageCases"`
+					FindingSuite FindingEvalSuite `json:"findingSuite"`
+				}{cases, findingSuite})
+			}
 		}
 	case "project-calibration-v1":
 		if cases, err := service.loadProjectEvalCases(); err == nil {
-			expectedEval, _ = CanonicalDigest(cases)
 			coverage = MeasureHardNegativeCoverage(cases)
+			if findingSuites, err := service.loadProjectFindingEvalSuites(); err == nil {
+				if len(findingSuites) == 0 {
+					expectedEval, _ = CanonicalDigest(cases)
+				} else {
+					expectedEval, _ = CanonicalDigest(struct {
+						PassageCases  []EvalCase         `json:"passageCases"`
+						FindingSuites []FindingEvalSuite `json:"findingSuites"`
+					}{cases, findingSuites})
+				}
+			}
 		}
 		if evidence.CorpusFingerprint == "" ||
 			evidence.CorpusFingerprint != generation.CorpusFingerprint {
@@ -539,340 +563,6 @@ func (service *Service) search(
 	return (Retriever{
 		Boundary: service.Boundary, Generation: reconciled, Profile: selected,
 	}).Search(ctx, options)
-}
-
-func (service *Service) Orient(ctx context.Context, role string, tokenBudget int) (ContextPack, error) {
-	return service.OrientVerbosity(ctx, role, tokenBudget, "")
-}
-
-func (service *Service) OrientVerbosity(
-	ctx context.Context,
-	role string,
-	tokenBudget int,
-	verbosity string,
-) (ContextPack, error) {
-	if role == "" {
-		role = "manager"
-	}
-	tiers := []string{"profile", "navigation", "truth", "active", "memory"}
-	return service.ContextPackOptions(ctx, ContextPackRequest{
-		Task:  "project profile current campaign orientation",
-		Role:  role,
-		Tiers: tiers, TokenBudget: tokenBudget, Verbosity: verbosity,
-	})
-}
-
-// ContextPackRequest is the full set of context-pack inputs. The narrower
-// ContextPack and ContextPackRequired entry points remain for callers that do
-// not choose a projection.
-type ContextPackRequest struct {
-	Task          string
-	Role          string
-	Tiers         []string
-	TokenBudget   int
-	RequiredPaths []string
-	// Verbosity is compact when unset. It selects the per-passage citation
-	// projection only; the pack envelope is the artifact's provenance and is
-	// identical in both forms.
-	Verbosity string
-}
-
-func (service *Service) ContextPack(
-	ctx context.Context,
-	task string,
-	role string,
-	tiers []string,
-	tokenBudget int,
-) (ContextPack, error) {
-	return service.ContextPackRequired(ctx, task, role, tiers, tokenBudget, nil)
-}
-
-func (service *Service) ContextPackRequired(
-	ctx context.Context,
-	task string,
-	role string,
-	tiers []string,
-	tokenBudget int,
-	requiredPaths []string,
-) (ContextPack, error) {
-	return service.ContextPackOptions(ctx, ContextPackRequest{
-		Task: task, Role: role, Tiers: tiers, TokenBudget: tokenBudget,
-		RequiredPaths: requiredPaths,
-	})
-}
-
-func (service *Service) ContextPackOptions(
-	ctx context.Context,
-	request ContextPackRequest,
-) (pack ContextPack, err error) {
-	task, role := request.Task, request.Role
-	tiers, tokenBudget := request.Tiers, request.TokenBudget
-	requiredPaths := request.RequiredPaths
-	verbosity, verbosityErr := NormalizeVerbosity(request.Verbosity)
-	if verbosityErr != nil {
-		return ContextPack{}, verbosityErr
-	}
-	started := time.Now()
-	defer func() {
-		omissions := 0
-		for _, count := range pack.Omitted {
-			omissions += count
-		}
-		service.recordTelemetry(telemetryObservation{
-			Operation: "context-pack", EffectiveProfile: pack.EffectiveProfile,
-			Failed: err != nil, Latency: time.Since(started),
-			EstimatedTokens: pack.EstimatedTokens, Results: len(pack.Passages),
-			Omissions: omissions,
-		})
-	}()
-	pack, err = service.contextPackRequired(
-		ctx, task, role, tiers, tokenBudget, requiredPaths, verbosity,
-	)
-	if errors.Is(err, errSourceChangedAfterIndex) && service.pinnedGeneration == nil {
-		if _, _, _, reconcileErr := service.Index.Reconcile(ctx); reconcileErr != nil {
-			return ContextPack{}, fmt.Errorf(
-				"context-pack source reconciliation failed: %w", reconcileErr)
-		}
-		return service.contextPackRequired(
-			ctx, task, role, tiers, tokenBudget, requiredPaths, verbosity,
-		)
-	}
-	return pack, err
-}
-
-func (service *Service) contextPackRequired(
-	ctx context.Context,
-	task string,
-	role string,
-	tiers []string,
-	tokenBudget int,
-	requiredPaths []string,
-	verbosity string,
-) (ContextPack, error) {
-	if role != "manager" && role != "drafter" {
-		return ContextPack{}, errors.New("context pack role must be manager or drafter")
-	}
-	if len([]byte(task)) < 1 || len([]byte(task)) > 2000 {
-		return ContextPack{}, errors.New("context pack task must contain 1 to 2000 UTF-8 bytes")
-	}
-	if len(tiers) == 0 {
-		// `campaign` carries reviewed drafter findings, so a manager sees what
-		// its own campaign has already established. `draft` is deliberately
-		// absent from both sets: unreviewed drafter output must be requested
-		// by name, and that request is then visible in the pack's allowedTiers
-		// for review-subagent to check.
-		if role == "drafter" {
-			tiers = []string{"profile", "navigation", "truth", "active", "memory"}
-		} else {
-			tiers = []string{
-				"profile", "navigation", "truth", "history", "backlog",
-				"active", "campaign", "memory",
-			}
-		}
-	}
-	settings := service.effectiveSettings()
-	if tokenBudget != 0 && tokenBudget < 512 {
-		return ContextPack{}, errors.New("context pack token budget must be at least 512")
-	}
-	roleBudget := settings.Budgets.ManagerContextTokens
-	if role == "drafter" {
-		roleBudget = settings.Budgets.DrafterContextTokens
-	}
-	if tokenBudget == 0 {
-		tokenBudget = roleBudget
-	} else if tokenBudget > roleBudget {
-		tokenBudget = roleBudget
-	}
-	generation, _, selected, _, err := service.ensure(ctx)
-	if err != nil {
-		return ContextPack{}, err
-	}
-	search, err := service.search(ctx, SearchOptions{
-		Query: task, QueryClass: "auto", AllowedTiers: tiers,
-		Limit: selected.Effective.Packing.MaxPassages, TokenBudget: tokenBudget,
-		Verbosity: verbosity, retainURI: true,
-	}, false)
-	if err != nil {
-		return ContextPack{}, err
-	}
-	if search.Metadata.Generation != generation.ID {
-		generation, err = service.Index.LoadCurrent()
-		if err != nil {
-			return ContextPack{}, err
-		}
-		selected, err = service.selectProfile(generation.Runtime)
-		if err != nil {
-			return ContextPack{}, err
-		}
-	}
-	requiredResults := []SearchResult{}
-	requiredSeen := map[string]bool{}
-	uniqueRequiredPaths := SortedUnique(requiredPaths)
-	if len(uniqueRequiredPaths) > selected.Effective.Packing.MaxPassages {
-		return ContextPack{}, fmt.Errorf(
-			"%d required paths exceed the context-pack passage cap of %d",
-			len(uniqueRequiredPaths), selected.Effective.Packing.MaxPassages,
-		)
-	}
-	cleanRequiredPaths := make([]string, 0, len(uniqueRequiredPaths))
-	for _, requiredPath := range uniqueRequiredPaths {
-		normalized := strings.ReplaceAll(strings.TrimSpace(requiredPath), "\\", "/")
-		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(normalized)))
-		if normalized == "" || normalized != clean || clean == "." || clean == ".." ||
-			strings.HasPrefix(clean, "../") || filepath.IsAbs(filepath.FromSlash(clean)) ||
-			IsForbiddenSource(clean) {
-			return ContextPack{}, fmt.Errorf("required path %q is unsafe", requiredPath)
-		}
-		cleanRequiredPaths = append(cleanRequiredPaths, clean)
-	}
-	requiredRetriever := Retriever{
-		Boundary: service.Boundary, Generation: generation, Profile: selected,
-	}
-	requiredChunks, requiredErr := requiredRetriever.BestDocumentChunks(
-		ctx, task, "auto", tiers, cleanRequiredPaths)
-	if requiredErr != nil {
-		return ContextPack{}, requiredErr
-	}
-	for _, clean := range cleanRequiredPaths {
-		row, present := requiredChunks[clean]
-		if !present {
-			return ContextPack{}, fmt.Errorf(
-				"required path %q is not part of the active managed knowledge "+
-					"corpus within the allowed epistemic tiers", clean)
-		}
-		if !contains(tiers, row.Chunk.Tier) {
-			return ContextPack{}, fmt.Errorf(
-				"required path %q is outside the allowed epistemic tiers", clean)
-		}
-		// A required passage is held to exactly the same source-integrity bar as
-		// a retrieved one: the cited lines are re-read from the working tree and
-		// must still hash to what the index recorded. A required path is never
-		// silently dropped for staleness the way a candidate is, so the failure
-		// is raised and the caller reconciles.
-		if !requiredRetriever.verifyChunk(row.Chunk, row.DocumentHash) {
-			return ContextPack{}, fmt.Errorf(
-				"read required path %q: %w", clean, errSourceChangedAfterIndex)
-		}
-		requiredSeen[clean] = true
-		requiredResults = append(requiredResults, projectSearchResult(SearchResult{
-			ChunkID: row.Chunk.ID,
-			Score:   1<<62 - 1, LaneRanks: map[string]int{"required": 1},
-			Passage:         row.Chunk.Content,
-			DocumentContext: row.Chunk.Context,
-			Citation: Citation{
-				Path: row.Chunk.Path, Heading: row.Chunk.Heading,
-				StartLine: row.Chunk.StartLine, EndLine: row.Chunk.EndLine,
-				ContentHash: row.Chunk.ContentHash, SourceHash: row.DocumentHash,
-				PassageHash: row.Chunk.ContentHash, Tier: row.Chunk.Tier,
-				URI:         "re-discipline://" + generation.ID + "/chunks/" + row.Chunk.ID,
-				ContextHash: row.Chunk.ContextHash,
-				Durability:  CitationDurability(row.Chunk.Tier),
-			},
-		}, verbosity, true))
-	}
-	if len(requiredResults) > 0 {
-		filtered := make([]SearchResult, 0, len(search.Results))
-		for _, result := range search.Results {
-			if !requiredSeen[result.Citation.Path] {
-				filtered = append(filtered, result)
-			}
-		}
-		remaining := selected.Effective.Packing.MaxPassages - len(requiredResults)
-		if len(filtered) > remaining {
-			search.Omitted += len(filtered) - remaining
-			search.OmittedByReason["resultLimit"] += len(filtered) - remaining
-			filtered = filtered[:remaining]
-		}
-		search.Results = append(requiredResults, filtered...)
-	}
-	requiredCount := len(requiredResults)
-	models := make([]string, 0, len(selected.Models))
-	for _, model := range selected.Models {
-		models = append(models, model.ID+"@"+model.Revision)
-	}
-	passages := make([]ContextPassage, 0, len(search.Results))
-	for _, result := range search.Results {
-		passages = append(passages, ContextPassage{
-			ChunkID: result.ChunkID, Passage: result.Passage,
-			DocumentContext: result.DocumentContext, Citation: result.Citation,
-		})
-	}
-	pack := ContextPack{
-		SchemaVersion: 1, Query: task,
-		Generation: CompactContextGeneration(generation),
-		Role:       role, AllowedTiers: search.AllowedTiers,
-		RequestedProfile: selected.RequestedIdentity,
-		EffectiveProfile: selected.EffectiveIdentity,
-		ActiveLanes:      append([]string(nil), selected.ActiveLanes...),
-		Models:           models,
-		FallbackReason:   selected.FallbackReason,
-		TokenBudget:      tokenBudget, EstimatedTokens: search.EstimatedTokens,
-		Verbosity: verbosity,
-		Passages:  passages,
-		Omitted: map[string]int{
-			"candidatePassages": search.Omitted,
-			"budget":            search.OmittedByReason["budget"],
-			"documentCap":       search.OmittedByReason["documentCap"],
-			"resultLimit":       search.OmittedByReason["resultLimit"],
-			"staleSource":       search.OmittedByReason["staleSource"],
-		},
-	}
-	for {
-		finalized, err := finalizeContextPack(pack)
-		if err != nil {
-			return ContextPack{}, err
-		}
-		pack = finalized
-		body, marshalErr := json.Marshal(pack)
-		if marshalErr != nil {
-			return ContextPack{}, marshalErr
-		}
-		if pack.EstimatedTokens <= tokenBudget &&
-			len(body) <= selected.Effective.Packing.MaxBytes {
-			return pack, nil
-		}
-		if len(pack.Passages) == 0 {
-			return ContextPack{}, errors.New("token budget is too small for mandatory context-pack metadata")
-		}
-		if len(pack.Passages) <= requiredCount {
-			return ContextPack{}, errors.New(
-				"required source paths do not fit the context-pack token or byte budget")
-		}
-		pack.Passages = pack.Passages[:len(pack.Passages)-1]
-		pack.Omitted["candidatePassages"]++
-		pack.PackID, pack.Digest, pack.EstimatedTokens = "", "", 0
-	}
-}
-
-func finalizeContextPack(pack ContextPack) (ContextPack, error) {
-	for iteration := 0; iteration < 4; iteration++ {
-		pack.PackID, pack.Digest = "", ""
-		digest, err := CanonicalDigest(pack)
-		if err != nil {
-			return ContextPack{}, err
-		}
-		pack.Digest = digest
-		pack.PackID = "context-" + strings.TrimPrefix(digest, "sha256:")[:20]
-		body, err := json.Marshal(pack)
-		if err != nil {
-			return ContextPack{}, err
-		}
-		estimated := EstimateTokens(string(body))
-		if estimated == pack.EstimatedTokens {
-			// estimatedTokens participates in the digest, so finalize once more.
-			digestInput := pack
-			digestInput.PackID, digestInput.Digest = "", ""
-			finalDigest, err := CanonicalDigest(digestInput)
-			if err != nil {
-				return ContextPack{}, err
-			}
-			pack.Digest = finalDigest
-			pack.PackID = "context-" + strings.TrimPrefix(finalDigest, "sha256:")[:20]
-			return pack, nil
-		}
-		pack.EstimatedTokens = estimated
-	}
-	return ContextPack{}, errors.New("context-pack token accounting failed to converge")
 }
 
 type ReadOptions struct {
@@ -1161,15 +851,23 @@ func (service *Service) MaterializeContextPackExpected(
 	); err != nil {
 		return fmt.Errorf("refuse invalid context pack: %w", err)
 	}
-	absolute, err := service.Boundary.Resolve(path, false)
+	expectedPath, err := contextPackMaterializationPath(pack.Scope)
 	if err != nil {
 		return err
 	}
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	if clean != expectedPath {
+		return fmt.Errorf(
+			"context pack scope requires materialization at %s", expectedPath)
+	}
+	absolute, err := service.Boundary.Resolve(path, false)
+	if err != nil {
+		return err
+	}
 	parts := strings.Split(clean, "/")
 	valid := false
-	if len(parts) == 5 && parts[0] == "active" && parts[2] == "subagents" &&
-		managedSlugRE.MatchString(parts[1]) && workspaceIDRE.MatchString(parts[3]) &&
+	if len(parts) == 5 && parts[0] == "active" && parts[2] == "runs" &&
+		managedSlugRE.MatchString(parts[1]) && runIDRE.MatchString(parts[3]) &&
 		parts[4] == "context-pack.json" {
 		valid = true
 	}

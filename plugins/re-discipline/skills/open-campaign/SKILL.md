@@ -1,90 +1,54 @@
 ---
 name: open-campaign
 description: >-
-  Open a re-discipline campaign when asked to start an investigation, scaffold
-  a campaign workspace, or begin focused research. Creates an active campaign directory,
-  CAMPAIGN.md, and standard evidence subdirectories with an explicit closure
-  bar. Uses lowercase kebab-case slugs.
+  Open a re-discipline campaign when asked to begin a substantial
+  investigation or implementation effort. Creates validated campaign and root
+  work-item records through the shared state engine.
 ---
 
 # Open A Campaign
 
-A campaign is the unit of substantial investigation. Its contents remain
-provisional until DIRECT evidence is promoted through the Wall.
+A campaign is structured provisional work. Opening it is one engine
+transaction, not a directory-scaffolding exercise.
 
-## Step 1: Validate The Request
+## Prepare
 
-Require a unique lowercase kebab-case slug of 3-50 characters. Open a campaign
-for work likely to span a session, use live or expensive tools, or require
-delegation. Do not scaffold one for a one-line correction or ordinary code
-change with no knowledge claim.
+Require:
 
-## Step 2: Create The Workspace
+- a unique lowercase kebab-case slug;
+- a precise objective and explicit exclusions;
+- observable success and closure criteria;
+- at least one root work item with acceptance criteria;
+- the manager identity and an idempotency key.
 
-Create:
+Ask one compact question only when an unresolved choice would materially
+change the campaign contract.
 
-```text
-active/<slug>/
-  scripts/
-  analysis/
-  artifacts/
-  evidence/
-  subagents/
-```
+## Open Transactionally
 
-Resolve the plugin root from this skill's path. Render
-`<plugin-root>/templates/campaign-masterfile.md` to
-`active/<slug>/CAMPAIGN.md`.
+Submit `manager_apply` with action `campaign.open`, the exact current
+`expectedHeadRevision` and `expectedHeadDigest`, and an idempotency key.
+The transaction creates `campaign.json`, root records under `work-items/`, the
+event journal, and generated `STATE.md`. It must either publish all of these or
+publish none of them.
 
-Leave the review ledger uncreated. `review-subagent` renders
-`<plugin-root>/templates/campaign-reviews.md` to `active/<slug>/REVIEWS.md` on
-the first review, so a campaign that never delegates never carries an empty
-one.
+Do not precreate empty folders, generic evidence categories, or run payload
+trees. Link source backlog or goal handles as record relations rather than
+copying their prose into campaign state.
 
-## Step 3: Establish The Closure Bar
+Update project navigation only through the engine result or its generated
+projection. Preserve unrelated navigation content.
 
-Derive discoverable values from the user's request and current docs. Ask one
-compact follow-up only for unresolved choices. Fill:
+## Verify And Return
 
-- status line;
-- objective and observable definition of solved;
-- open questions that gate closure;
-- leads and links to truth, history, or backlog sources;
-- today's opened date.
-
-Leave dead ends and disposition rows as empty scaffolds. If the campaign came
-from `docs/backlog/<slug>.md`, preserve that provenance.
-
-## Step 4: Place The Campaign In Its Arc
-
-Ask whether this campaign serves an outcome larger than itself. Several
-campaigns often pursue one goal in sequence, and nothing else records that.
-
-- If a `docs/goals/<slug>.md` already covers the outcome, add this campaign to
-  its campaign table.
-- If this campaign starts a new arc, offer to render
-  `<plugin-root>/templates/goal.md` to `docs/goals/<slug>.md`.
-- If it genuinely stands alone, skip this and say so.
-
-A goal lives in `docs/` because it outlives its campaigns: everything under
-`active/` is removed when its first campaign closes, so an arc recorded there
-would lose its own history. A goal makes no claims and is never evidence.
-
-## Step 5: Update The Front Door
-
-Add a relative link and one-line objective under Active campaigns in
-`docs/INDEX.md`. Preserve unrelated content and ordering conventions.
-
-## Step 6: Verify And Report
-
-Confirm the masterfile and all subdirectories exist, the closure bar is
-testable, and the index link resolves. Report the path, the goal it serves if
-any, and the first unresolved question.
+Call `state(mode="resume", campaignId=...)` and verify that the objective,
+closure bar, root work, revision, and last event agree with the transaction
+result. Report the campaign ID, first ready work item, and next valid action.
 
 Do not commit unless the user explicitly asks.
 
-## Reference
+## References
 
-- Campaign template: `<plugin-root>/templates/campaign-masterfile.md`.
+- Record templates: `<plugin-root>/templates/campaign/`.
 - Delegation: `delegate`.
 - Closure: `close-campaign`.

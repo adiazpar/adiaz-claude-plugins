@@ -1,10 +1,9 @@
 # Truth Index - What Is Known Now
 
-Current verified claims live here. For the retrospective campaigns that
-produced them, see [`../history/INDEX.md`](../history/INDEX.md).
+Current verified claims are closure projections of manager-ratified, direct,
+reproducible findings. Each truth file links its source finding, review,
+closure receipt, archive, and re-verification conditions.
 
-`atomic` claims are reproducible bedrock. `synthesis` claims are scoped,
-augmentable interpretations. Add either only through `promote-truth` and the
-DIRECT-evidence Wall.
+Active campaign findings remain provisional and cannot be written here.
 
-_(no truths yet - newly initialized)_
+_(no truths yet)_

@@ -1,14 +1,12 @@
 # History Index - What Has Been Explored
 
-This is a retrospective index of closed campaigns and their leads. It is never
-current authority; use [`../truth/INDEX.md`](../truth/INDEX.md) for current
-facts.
+History is complete provenance, never current authority. Query current claims
+through [`../truth/INDEX.md`](../truth/INDEX.md).
 
-## Chronicles
+## Campaign Archives
 
-_(none yet - newly initialized)_
-
-## Cross-Cutting Leads
+Closed campaign records live under `campaigns/<date>-<slug>/` with manifests,
+work, runs, findings, reviews, events, coverage, and closure receipts.
 
 _(none yet)_
 

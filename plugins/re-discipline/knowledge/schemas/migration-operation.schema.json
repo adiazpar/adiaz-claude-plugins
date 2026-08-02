@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/migration-operation.schema.json",
+  "title": "Resumable Migration Operation",
+  "type": "object",
+  "required": ["schemaVersion", "id", "planId", "kind", "sourceHandles", "sourceDigest", "destinationHandles", "state", "idempotencyKey", "createdAt", "updatedAt"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "id": {"type": "string", "minLength": 1},
+    "planId": {"type": "string", "minLength": 1},
+    "kind": {"enum": ["inventory", "shadow-index", "normalize", "record-conversion", "physical-move", "profile-conversion", "verify"]},
+    "sourceHandles": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "sourceDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "destinationHandles": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "resultDigests": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}},
+    "state": {"enum": ["pending", "running", "completed", "blocked", "failed"]},
+    "idempotencyKey": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "error": {"type": "string"}
+  },
+  "additionalProperties": false
+}

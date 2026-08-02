@@ -30,9 +30,9 @@
           "required": ["implementation", "version", "goVersion", "compiledBuildId", "sqliteDriver", "sqliteVersion", "sqliteBuild", "numericalBackend", "tieBreaker"],
           "properties": {
             "implementation": {"const": "re-discipline-knowledge-go"},
-            "version": {"const": "0.7.0"},
+            "version": {"const": "0.8.0"},
             "goVersion": {"type": "string", "minLength": 1},
-            "compiledBuildId": {"const": "source-contract-0.7.0"},
+            "compiledBuildId": {"const": "source-contract-0.8.0"},
             "sqliteDriver": {"const": "modernc.org/sqlite@v1.54.0"},
             "sqliteVersion": {"type": "string", "minLength": 1},
             "sqliteBuild": {"type": "string", "minLength": 1},

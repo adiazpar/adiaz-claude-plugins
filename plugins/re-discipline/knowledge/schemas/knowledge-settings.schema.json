@@ -1,70 +1,64 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plugin://re-discipline/schemas/knowledge-settings.schema.json",
-  "title": "Re-Discipline knowledge settings",
+  "title": "Re-Discipline Knowledge Settings",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["schemaVersion", "sources", "models", "telemetry", "budgets"],
+  "required": ["schemaVersion", "sources", "models", "telemetry", "budgets", "archive"],
   "properties": {
     "$schema": {"type": "string"},
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "sources": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["truth", "history", "backlog", "activeCampaigns", "sharedMemory"],
+      "required": ["truth", "historyFindings", "backlog", "activeFindings", "sharedMemory", "reportFallback"],
       "properties": {
         "truth": {"type": "boolean"},
-        "history": {"type": "boolean"},
+        "historyFindings": {"type": "boolean"},
         "backlog": {"type": "boolean"},
-        "activeCampaigns": {"type": "boolean"},
+        "activeFindings": {"type": "boolean"},
         "sharedMemory": {"type": "boolean"},
-        "drafterReports": {
-          "description": "Index active/*/subagents/*/report.md. A report stamped as reviewed enters the campaign tier; an unstamped one enters draft, which is in no default tier set and must be requested by name.",
-          "type": "boolean"
-        },
+        "reportFallback": {"type": "boolean"},
         "additional": {
           "type": "array",
           "maxItems": 32,
           "items": {
             "type": "object",
-            "additionalProperties": false,
-            "required": ["path", "pattern", "tier"],
+            "required": ["path", "pattern", "sourceClass"],
             "properties": {
               "path": {"type": "string", "minLength": 1},
               "pattern": {"type": "string", "minLength": 1},
-              "tier": {"const": "asset"}
-            }
+              "sourceClass": {"enum": ["asset", "profile", "playbook"]}
+            },
+            "additionalProperties": false
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
-    "models": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["execution"],
-      "properties": {
-        "execution": {"const": "local"}
-      }
-    },
-    "telemetry": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["mode"],
-      "properties": {
-        "mode": {"enum": ["off", "metrics-only"]}
-      }
-    },
+    "models": {"type": "object", "required": ["execution"], "properties": {"execution": {"const": "local"}}, "additionalProperties": false},
+    "telemetry": {"type": "object", "required": ["mode"], "properties": {"mode": {"enum": ["off", "metrics-only"]}}, "additionalProperties": false},
     "budgets": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["searchTokens", "managerContextTokens", "drafterContextTokens", "maxPassages", "maxBytes"],
+      "required": ["searchTokens", "managerContextTokens", "drafterContextTokens", "maxCards", "maxBytes"],
       "properties": {
         "searchTokens": {"type": "integer", "minimum": 128, "maximum": 4096},
         "managerContextTokens": {"type": "integer", "minimum": 512, "maximum": 8192},
         "drafterContextTokens": {"type": "integer", "minimum": 512, "maximum": 4096},
-        "maxPassages": {"type": "integer", "minimum": 1, "maximum": 50},
+        "maxCards": {"type": "integer", "minimum": 1, "maximum": 50},
         "maxBytes": {"type": "integer", "minimum": 4096, "maximum": 262144}
-      }
+      },
+      "additionalProperties": false
+    },
+    "archive": {
+      "type": "object",
+      "required": ["reportFallbackUntilMeasured", "normalizationTriggerHits"],
+      "properties": {
+        "reportFallbackUntilMeasured": {"type": "boolean"},
+        "normalizationTriggerHits": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "fallbackMode": {"enum": ["default-fallback", "opt-in"]},
+        "normalizedBeatsRawReceipt": {"type": "string", "pattern": "^\\.re-discipline/knowledge/receipts/[^/]+\\.json$"}
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "additionalProperties": false
 }

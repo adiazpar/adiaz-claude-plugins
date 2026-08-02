@@ -29,6 +29,7 @@ type ProjectProfileBenchmark struct {
 	MetricsBySplit         map[string]QualityMetrics       `json:"metricsBySplit"`
 	MetricsByBudget        map[string]QualityMetrics       `json:"metricsByBudget"`
 	QualityMetricsByBudget map[string]QualityMetrics       `json:"qualityMetricsByBudget"`
+	FindingEvaluations     []FindingAblationReport         `json:"findingEvaluations"`
 }
 
 type UnsupportedProjectProfile struct {
@@ -37,13 +38,14 @@ type UnsupportedProjectProfile struct {
 }
 
 type ProjectBenchmarkReport struct {
-	SchemaVersion    int               `json:"schemaVersion"`
-	RunID            string            `json:"runId"`
-	Mode             string            `json:"mode"`
-	Suite            string            `json:"suite"`
-	RequestedProfile string            `json:"requestedProfile"`
-	Generation       GenerationSummary `json:"generation"`
-	EvalFingerprint  string            `json:"evalFingerprint"`
+	SchemaVersion       int               `json:"schemaVersion"`
+	RunID               string            `json:"runId"`
+	Mode                string            `json:"mode"`
+	Suite               string            `json:"suite"`
+	RequestedProfile    string            `json:"requestedProfile"`
+	Generation          GenerationSummary `json:"generation"`
+	EvalFingerprint     string            `json:"evalFingerprint"`
+	FindingSuiteDigests []string          `json:"findingSuiteDigests"`
 	// HardNegativeCoverage says how much of this evaluation set actually
 	// exercises the hard-negative guard. The guard fails a case on a single hit,
 	// which makes a clean run read as suite-wide protection; it is only ever
@@ -99,6 +101,10 @@ func (service *Service) RunProjectBenchmark(
 	if err != nil {
 		return ProjectBenchmarkReport{}, err
 	}
+	findingSuites, err := service.loadProjectFindingEvalSuites()
+	if err != nil {
+		return ProjectBenchmarkReport{}, err
+	}
 	// The run pins and leases the generation it starts on. Another session may
 	// publish and prune throughout the run without failing it, and the report
 	// records the generation the measurements were actually taken against.
@@ -110,10 +116,21 @@ func (service *Service) RunProjectBenchmark(
 	service.PinGeneration(generation)
 	defer service.flushTelemetry()
 	evalFingerprint, _ := CanonicalDigest(cases)
+	findingSuiteDigests := make([]string, 0, len(findingSuites))
+	for _, suite := range findingSuites {
+		findingSuiteDigests = append(findingSuiteDigests, suite.Digest)
+	}
+	if len(findingSuites) > 0 {
+		evalFingerprint, _ = CanonicalDigest(struct {
+			PassageCases  []EvalCase         `json:"passageCases"`
+			FindingSuites []FindingEvalSuite `json:"findingSuites"`
+		}{cases, findingSuites})
+	}
 	report := ProjectBenchmarkReport{
 		SchemaVersion: 1, RunID: nowRunID("benchmark"), Mode: mode,
 		Suite: "project-benchmark-v1", RequestedProfile: active.RequestedIdentity,
 		Generation: PublicGeneration(generation), EvalFingerprint: evalFingerprint,
+		FindingSuiteDigests:  findingSuiteDigests,
 		HardNegativeCoverage: MeasureHardNegativeCoverage(cases),
 		Profiles:             []ProjectProfileBenchmark{},
 		UnsupportedProfiles:  []UnsupportedProjectProfile{},
@@ -146,7 +163,7 @@ func (service *Service) RunProjectBenchmark(
 		}
 		benchmark, benchmarkErr := benchmarkProjectProfile(
 			ctx, service, generation, selected, row, cases,
-			evalFingerprint, mode == "full",
+			findingSuites, evalFingerprint, mode == "full",
 		)
 		if benchmarkErr != nil {
 			return ProjectBenchmarkReport{}, benchmarkErr
@@ -188,6 +205,7 @@ func benchmarkProjectProfile(
 	selected SelectedProfile,
 	row EffectiveProfile,
 	cases []EvalCase,
+	findingSuites []FindingEvalSuite,
 	evalFingerprint string,
 	includeBudgetMatrix bool,
 ) (ProjectProfileBenchmark, error) {
@@ -201,6 +219,15 @@ func benchmarkProjectProfile(
 	hardGates := hardMetricsPassed(metrics)
 	for _, outcome := range outcomes {
 		hardGates = hardGates && evaluationOutcomePassed(outcome)
+	}
+	findingEvaluations := make([]FindingAblationReport, 0, len(findingSuites))
+	for _, suite := range findingSuites {
+		findingReport, err := EvaluateFindingSuite(ctx, retriever, suite)
+		if err != nil {
+			return ProjectProfileBenchmark{}, err
+		}
+		findingEvaluations = append(findingEvaluations, findingReport)
+		hardGates = hardGates && findingEvaluationPassed(findingReport)
 	}
 	profileService, err := NewService(ServiceOptions{
 		ProjectRoot:          service.Boundary.Root,
@@ -315,6 +342,7 @@ func benchmarkProjectProfile(
 		ContextPackCases       []ContextPackOutcome            `json:"contextPackCases"`
 		ContextPacksByBudget   map[string][]ContextPackOutcome `json:"contextPacksByBudget"`
 		ContextPackRoles       []string                        `json:"contextPackRoles"`
+		FindingEvaluations     []FindingAblationReport         `json:"findingEvaluations"`
 	}{
 		"project-benchmark-v1", runtimeEffectiveProfile(row),
 		selected.EffectiveIdentity, evalFingerprint, generation.CorpusFingerprint,
@@ -327,6 +355,7 @@ func benchmarkProjectProfile(
 		digestBudgets, digestQualityBudgets, digestBudgetCases,
 		contextPackOutcomesForDigest(contextPackCases),
 		contextPackBudgetsForDigest(contextPacksByBudget), contextPackRoles,
+		findingEvaluations,
 	})
 	if err != nil {
 		return ProjectProfileBenchmark{}, err
@@ -345,6 +374,7 @@ func benchmarkProjectProfile(
 		Metrics:              metrics, MetricsBySplit: bySplit,
 		MetricsByBudget:        byBudget,
 		QualityMetricsByBudget: qualityByBudget,
+		FindingEvaluations:     findingEvaluations,
 	}, nil
 }
 

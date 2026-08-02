@@ -1,6 +1,18 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestEmptyCompiledBuildIDIsRejected(t *testing.T) {
+	original := CompiledBuildID
+	CompiledBuildID = ""
+	t.Cleanup(func() { CompiledBuildID = original })
+	if err := run(nil); err == nil || !strings.Contains(err.Error(), "build identity") {
+		t.Fatalf("empty dispatcher identity returned %v", err)
+	}
+}
 
 func TestWindowsArchitectureSelection(t *testing.T) {
 	t.Run("native amd64", func(t *testing.T) {

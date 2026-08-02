@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -59,34 +60,23 @@ func TestSearchOversizedTopPassageDoesNotStarveSmallerCandidates(t *testing.T) {
 			"# Compact "+marker+"\n\n"+marker+" appears in a short passage.\n")
 	}
 
-	calls := []any{
-		initializeMessage(1, false),
-		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
-	}
-	for index, marker := range markers {
-		calls = append(calls, toolCallMessage(index+2, "search", map[string]any{
-			"query": marker, "queryClass": "exact",
-			"allowedTiers": []string{"truth"}, "limit": 10, "tokenBudget": 1024,
-		}))
-	}
-
-	messages := runMCPMessages(
-		t,
-		&MCPServer{AssetRoot: adversarialAssetRoot(t), InitialRoot: root},
-		calls...,
-	)
+	service := newAdversarialService(t, root, nil)
 
 	for index, marker := range markers {
-		search := assertSuccessfulToolResult(
-			t, rpcResponseByID(t, messages, index+2))
-		results := asArray(t, search["results"])
-		if len(results) == 0 {
+		search, err := service.Search(context.Background(), SearchOptions{
+			Query: marker, QueryClass: "exact", AllowedTiers: []string{"truth"},
+			Limit: 10, TokenBudget: 1024,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(search.Results) == 0 {
 			t.Fatalf(
 				"marker %s (document %d bytes): search returned no passages "+
 					"although a compact candidate fits; estimatedTokens=%v "+
 					"tokenBudget=%v omittedByReason=%#v",
-				marker, sizes[index], search["estimatedTokens"],
-				search["tokenBudget"], search["omittedByReason"])
+				marker, sizes[index], search.EstimatedTokens,
+				search.TokenBudget, search.OmittedByReason)
 		}
 	}
 }

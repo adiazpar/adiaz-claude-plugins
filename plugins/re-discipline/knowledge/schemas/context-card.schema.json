@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/context-card.schema.json",
+  "title": "Bounded Context Card",
+  "type": "object",
+  "required": ["schemaVersion", "id", "cardType", "sourceClass", "handle", "expansionTokens"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "id": {"type": "string", "minLength": 1},
+    "cardType": {"enum": ["campaign", "work-item", "run", "finding", "decision", "blocker", "provenance", "raw-report", "health"]},
+    "claim": {"type": "string"},
+    "title": {"type": "string"},
+    "subject": {"type": "string"},
+    "scope": {"type": "object"},
+    "evidenceGrade": {"enum": ["direct", "inferred", "reported", "unknown"]},
+    "reviewState": {"enum": ["extracted", "curator-checked", "manager-ratified", "manager-rejected"]},
+    "validity": {"enum": ["provisional", "current", "challenged", "historical", "superseded", "invalid"]},
+    "sourceClass": {"enum": ["truth", "campaign", "provisional", "history", "archive", "backlog", "profile", "memory", "intake", "state", "navigation", "playbook", "asset"]},
+    "relationAlerts": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {"enum": ["conflict", "challenged", "supersession", "stale"]},
+          {"type": "string", "pattern": "^(?:supports|contradicts|depends-on|supersedes|duplicates|answers|incoming-supports|incoming-contradicts|incoming-depends-on|incoming-duplicates|incoming-answers|superseded-by):F-[0-9]{4,}$"},
+          {"type": "string", "pattern": "^spawned:W-[0-9]{4,}$"}
+        ]
+      },
+      "uniqueItems": true
+    },
+    "handle": {"type": "string", "minLength": 1},
+    "evidenceHandle": {"type": "string"},
+    "whyMatched": {"type": "array", "items": {"type": "string"}},
+    "expansionTokens": {"type": "integer", "minimum": 0},
+    "metadata": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

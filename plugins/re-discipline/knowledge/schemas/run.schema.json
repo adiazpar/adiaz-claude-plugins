@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/run.schema.json",
+  "title": "Re-Discipline Run",
+  "type": "object",
+  "required": ["schemaVersion", "id", "createdAt", "updatedAt", "revision", "createdBy", "updatedBy", "digest", "correlationId", "campaignId", "primaryWorkItemId", "actorId", "role", "status"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "id": {"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4,}$"},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "revision": {"type": "integer", "minimum": 1},
+    "createdBy": {"type": "string", "minLength": 1},
+    "updatedBy": {"type": "string", "minLength": 1},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "correlationId": {"type": "string", "minLength": 1},
+    "campaignId": {"type": "string", "pattern": "^C-[A-Z0-9][A-Z0-9-]{0,62}$"},
+    "primaryWorkItemId": {"type": "string", "pattern": "^W-[0-9]{4,}$"},
+    "actorId": {"type": "string", "minLength": 1},
+    "role": {"enum": ["manager", "investigator", "reviewer", "curator"]},
+    "status": {"enum": ["prepared", "running", "returned", "completed", "blocked", "aborted", "invalidated"]},
+    "brief": {"$ref": "#/$defs/fileHandle"},
+    "contextPack": {"$ref": "#/$defs/fileHandle"},
+    "startedAt": {"type": "string", "format": "date-time"},
+    "returnedAt": {"type": "string", "format": "date-time"},
+    "reviewedAt": {"type": "string", "format": "date-time"},
+    "terminalAt": {"type": "string", "format": "date-time"},
+    "files": {"type": "array", "items": {"$ref": "#/$defs/runFile"}},
+    "changedProjectPaths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "report": {"$ref": "#/$defs/fileHandle"},
+    "findingIds": {"type": "array", "items": {"type": "string", "pattern": "^F-[0-9]{4,}$"}, "uniqueItems": true},
+    "spawnedWorkItemIds": {"type": "array", "items": {"type": "string", "pattern": "^W-[0-9]{4,}$"}, "uniqueItems": true},
+    "resultSummary": {"type": "string"},
+    "invalidatedBy": {"type": "string"},
+    "retryOf": {"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4,}$"}
+  },
+  "allOf": [
+    {"if": {"properties": {"role": {"not": {"const": "manager"}}}}, "then": {"required": ["brief", "contextPack"]}},
+    {"if": {"properties": {"status": {"enum": ["running", "returned", "completed", "blocked"]}}}, "then": {"required": ["startedAt"]}},
+    {"if": {"properties": {"status": {"enum": ["returned", "completed", "blocked"]}}}, "then": {"required": ["returnedAt", "report"]}},
+    {"if": {"properties": {"status": {"enum": ["completed", "blocked", "aborted", "invalidated"]}}}, "then": {"required": ["terminalAt"]}},
+    {"if": {"properties": {"status": {"const": "aborted"}}}, "then": {"required": ["resultSummary"]}},
+    {"if": {"properties": {"status": {"const": "invalidated"}}}, "then": {"required": ["invalidatedBy"]}}
+  ],
+  "$defs": {
+    "fileHandle": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}},
+      "additionalProperties": false
+    },
+    "runFile": {
+      "type": "object",
+      "required": ["path", "mediaKind", "semanticRole", "retention", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^payload/(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+        "mediaKind": {"enum": ["source-code", "structured-data", "text", "image", "binary", "archive", "external-reference"]},
+        "semanticRole": {"enum": ["input", "raw-observation", "reproducer", "intermediate", "candidate-deliverable", "reference-copy"]},
+        "retention": {"enum": ["retain-inline", "candidate-maintained", "retain-by-reference", "distill-then-review", "discard-candidate"]},
+        "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "supports": {"type": "array", "items": {"type": "string", "pattern": "^F-[0-9]{4,}$"}, "uniqueItems": true},
+        "destination": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

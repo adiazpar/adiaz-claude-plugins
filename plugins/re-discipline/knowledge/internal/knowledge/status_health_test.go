@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func writeProjectEvalCase(t *testing.T, root string, cases []EvalCase) {
@@ -165,40 +164,51 @@ func TestHardNegativeCoverageIsReportedNotGated(t *testing.T) {
 	}
 }
 
-// CAMPAIGN.md is the cold-resume surface, and it is the only campaign file that
-// rots by standing still: everything else is written by the work itself.
-func TestStatusFlagsCampaignMasterfilesLeftBehind(t *testing.T) {
+func TestStatusReportsOnlyCanonicalCampaignRecords(t *testing.T) {
 	root := makeAdversarialProject(t)
 	service := newAdversarialService(t, root, nil)
 
+	// The fixture's legacy campaign prose is deliberately invisible to the
+	// 0.8 runtime; only the explicit migrator may interpret it.
 	states := service.campaignStatus()
-	if len(states) != 1 || states[0].Slug != "fixture-campaign" {
-		t.Fatalf("campaign census = %+v", states)
+	if len(states) != 0 {
+		t.Fatalf("legacy campaign leaked into canonical census: %+v", states)
 	}
-	if states[0].Stale {
-		t.Fatalf("a freshly written campaign was reported stale: %+v", states[0])
+	value, body, err := sealCampaignRecord(CampaignRecord{
+		RecordMeta: RecordMeta{
+			SchemaVersion: CampaignSchemaVersion, ID: "C-STATUS", Revision: 1,
+			CreatedAt: "2026-08-02T20:00:00Z", UpdatedAt: "2026-08-02T20:00:00Z",
+			CreatedBy: "manager", UpdatedBy: "manager", CorrelationID: "status-test",
+		},
+		Title: "Status campaign", Slug: "status-campaign", Objective: "Exercise status",
+		Scope: []string{"status"}, SuccessCriteria: []string{"visible"},
+		ClosureCriteria: []string{"complete"}, Status: "open", Owner: "manager",
+		PermittedManagers: []string{"manager"}, OpenedAt: "2026-08-02T20:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !states[0].MasterfilePresent {
-		t.Fatal("the fixture masterfile was not seen")
+	campaignPath := filepath.Join(root, "active", "status-campaign", "campaign.json")
+	if err := os.MkdirAll(filepath.Dir(campaignPath), 0o700); err != nil {
+		t.Fatal(err)
 	}
-
-	// Age the masterfile past the threshold while its own artifacts stay
-	// current. Nothing about the directory looks wrong; that is the point.
-	masterfile := filepath.Join(root, "active", "fixture-campaign", "CAMPAIGN.md")
-	stale := time.Now().Add(-(CampaignMasterfileStaleAfter + 72*time.Hour))
-	if err := os.Chtimes(masterfile, stale, stale); err != nil {
+	if err := os.WriteFile(campaignPath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	campaign := value.(CampaignRecord)
+	states = service.campaignStatus()
+	if len(states) != 1 || states[0].CampaignID != campaign.ID || states[0].StateViewPresent {
+		t.Fatalf("canonical campaign census is wrong: %+v", states)
+	}
+	if len(states[0].Attention) == 0 {
+		t.Fatal("missing generated state view was not surfaced")
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(campaignPath), "STATE.md"), []byte("# Generated state\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	states = service.campaignStatus()
-	if !states[0].Stale {
-		t.Fatalf("a masterfile three days behind its campaign was not flagged: %+v",
-			states[0])
-	}
-	if states[0].StaleDays < 3 {
-		t.Fatalf("staleDays = %d, want at least 3", states[0].StaleDays)
-	}
-	if states[0].NewestArtifact == "" {
-		t.Fatal("a stale masterfile did not name the work it fell behind")
+	if !states[0].StateViewPresent {
+		t.Fatal("generated state view was not detected")
 	}
 
 	statusPayload, err := service.Status(context.Background())
@@ -207,16 +217,7 @@ func TestStatusFlagsCampaignMasterfilesLeftBehind(t *testing.T) {
 	}
 	status := statusPayload["system"].(map[string]any)
 	reported, ok := status["campaigns"].([]CampaignState)
-	if !ok || len(reported) != 1 || !reported[0].Stale {
+	if !ok || len(reported) != 1 || reported[0].CampaignID != campaign.ID {
 		t.Fatalf("status campaigns block = %#v", status["campaigns"])
-	}
-
-	// A masterfile rewritten now is current again, however old the campaign is.
-	now := time.Now()
-	if err := os.Chtimes(masterfile, now, now); err != nil {
-		t.Fatal(err)
-	}
-	if service.campaignStatus()[0].Stale {
-		t.Fatal("a rewritten masterfile stayed stale")
 	}
 }
