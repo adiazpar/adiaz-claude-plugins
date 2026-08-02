@@ -32,7 +32,7 @@ func pluginRootForTests(t *testing.T) string {
 func TestRecoveryTargetsKnowledgeLayoutOnly(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, ".re-discipline", "project-profile.md"),
-		"# P\n\n<!-- re-discipline:shared-laws v0.7.0 -->\nlaws\n<!-- re-discipline:shared-laws:end -->\n")
+		"# P\n\n<!-- re-discipline:shared-laws v0.8.0 -->\nlaws\n<!-- re-discipline:shared-laws:end -->\n")
 	if _, err := RecoverProject(root, pluginRootForTests(t)); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
@@ -56,6 +56,6 @@ func TestRecoveryRefusesLegacyMarker(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, ".re-discipline", "project-profile.md"),
 		"<!-- re-discipline:shared-laws v0.6.0 -->\n<!-- re-discipline:shared-laws:end -->\n")
 	if _, err := RecoverProject(root, pluginRootForTests(t)); err == nil {
-		t.Fatal("v0.6.0 marker must be refused by v0.7 recovery")
+		t.Fatal("v0.6.0 marker must be refused by v0.8 recovery")
 	}
 }

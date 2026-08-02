@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/normalization-queue.schema.json",
+  "title": "Archive fallback normalization queue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "threshold", "counts", "requestKeys", "suggestions", "digest"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "threshold": {"type": "integer", "minimum": 1},
+    "counts": {
+      "type": "object",
+      "propertyNames": {"pattern": "^sha256:[a-f0-9]{64}$"},
+      "additionalProperties": {"type": "integer", "minimum": 1}
+    },
+    "requestKeys": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}},
+    "suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reportDigest", "serveCount", "status", "firstSuggestedAt", "lastObservedAt"],
+        "properties": {
+          "reportDigest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+          "serveCount": {"type": "integer", "minimum": 1},
+          "status": {"const": "queued"},
+          "firstSuggestedAt": {"type": "string", "format": "date-time"},
+          "lastObservedAt": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+  }
+}

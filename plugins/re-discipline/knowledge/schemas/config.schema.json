@@ -1,32 +1,91 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plugin://re-discipline/schemas/config.schema.json",
-  "title": "Re-Discipline bootstrap configuration",
+  "title": "Re-Discipline 0.8 Project Configuration",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["schemaVersion", "knowledgeDirectory", "memory", "knowledge"],
+  "required": ["schemaVersion", "campaignSchemaVersion", "state", "authority", "context", "payload", "closure", "memory", "knowledge", "migration"],
   "properties": {
-    "schemaVersion": {"const": 2},
-    "knowledgeDirectory": {"const": "knowledge"},
+    "schemaVersion": {"const": 3},
+    "campaignSchemaVersion": {"const": 2},
+    "state": {
+      "type": "object",
+      "required": ["activeRoot", "archiveRoot", "lockFile", "recovery", "generatedViewMaxItems"],
+      "properties": {
+        "activeRoot": {"const": "active"},
+        "archiveRoot": {"const": "docs/history/campaigns"},
+        "lockFile": {"const": ".re-discipline/state/write.lock"},
+        "recovery": {"const": "replay-and-verify"},
+        "generatedViewMaxItems": {"type": "integer", "minimum": 4, "maximum": 100}
+      },
+      "additionalProperties": false
+    },
+    "authority": {
+      "type": "object",
+      "required": ["managerRoles", "curatorWrites", "directStateWrites", "truthProjection"],
+      "properties": {
+        "managerRoles": {"type": "array", "items": {"enum": ["manager", "user"]}, "uniqueItems": true},
+        "curatorWrites": {"type": "array", "items": {"enum": ["curator-run", "intake"]}, "uniqueItems": true},
+        "directStateWrites": {"const": false},
+        "truthProjection": {"const": "closure-only"}
+      },
+      "additionalProperties": false
+    },
+    "context": {
+      "type": "object",
+      "required": ["managerCardTokens", "drafterCardTokens", "maxCards", "maxExpansionBytes", "leaseMode"],
+      "properties": {
+        "managerCardTokens": {"type": "integer", "minimum": 512, "maximum": 8192},
+        "drafterCardTokens": {"type": "integer", "minimum": 512, "maximum": 4096},
+        "maxCards": {"type": "integer", "minimum": 1, "maximum": 50},
+        "maxExpansionBytes": {"type": "integer", "minimum": 4096, "maximum": 262144},
+        "leaseMode": {"enum": ["none", "memory-only"]}
+      },
+      "additionalProperties": false
+    },
+    "payload": {
+      "type": "object",
+      "required": ["createLazily", "maxInlineBytes", "requireRegistration"],
+      "properties": {
+        "createLazily": {"const": true},
+        "maxInlineBytes": {"type": "integer", "minimum": 4096},
+        "requireRegistration": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "closure": {
+      "type": "object",
+      "required": ["requireRunCoverage", "requireFindingDisposition", "requireFileRetention", "requireArchiveVerification"],
+      "properties": {
+        "requireRunCoverage": {"const": true},
+        "requireFindingDisposition": {"const": true},
+        "requireFileRetention": {"const": true},
+        "requireArchiveVerification": {"const": true}
+      },
+      "additionalProperties": false
+    },
     "memory": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["mode", "writePolicy"],
-      "properties": {
-        "mode": {"enum": ["shared-only", "hybrid", "native"]},
-        "writePolicy": {"enum": ["proposal-only"]}
-      }
+      "properties": {"mode": {"enum": ["shared-only", "hybrid", "native"]}, "writePolicy": {"const": "proposal-only"}},
+      "additionalProperties": false
     },
     "knowledge": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["enabled", "profile", "settingsFile", "projectProfile"],
       "properties": {
         "enabled": {"type": "boolean"},
         "profile": {"const": "plugin:balanced-v1"},
         "settingsFile": {"const": "knowledge/policy.jsonc"},
         "projectProfile": {"const": "knowledge/retrieval-profile.json"}
-      }
+      },
+      "additionalProperties": false
+    },
+    "migration": {
+      "type": "object",
+      "required": ["mode", "legacyReaders"],
+      "properties": {"mode": {"const": "explicit-only"}, "legacyReaders": {"const": "migrator-only"}},
+      "additionalProperties": false
     }
-  }
+  },
+  "additionalProperties": false
 }

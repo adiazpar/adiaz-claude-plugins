@@ -1,53 +1,35 @@
-# Two-Audience Reporting Law
+# Reporting
 
-Every re-discipline surface has two audiences and one source of truth. The
-agent reads and reasons over full technical state. The user sees plain
-language. These rules govern every user-facing report in every skill.
+Lead with the user-visible outcome: current focus, blockers, decisions needed,
+completed validation, and next valid transition. Keep cache generations,
+model fingerprints, lane weights, internal health codes, and transaction
+details out of ordinary status unless they block the requested work.
 
-## Dashboard Plus Exceptions
+## Run Reports
 
-Healthy subsystems get one plain word. Detail appears only when a human
-decision is needed, phrased as situation then proposed action. Never
-narrate internals to prove work happened; the system block and campaign
-records are the audit trail.
+A run report is terminal provenance, not an epistemic decision. It contains:
 
-## Vocabulary Line
+- concise result and terminal recommendation;
+- atomic candidate claims with evidence grade, scope, and limits;
+- exact evidence handles, digests, ranges, and what each establishes;
+- reproduction and validation results;
+- changed project paths and registered payload;
+- uncertainties, dead ends, and spawned work proposals.
 
-User-facing (the discipline's own language): campaign, truth, chronicle,
-DIRECT and INFERRED evidence, memory proposal, drafter, delegation.
+Never label a run reviewed, ratified, or current by editing report text. The
+engine freezes its digest at return; curation and immutable manager reviews
+create later records.
 
-Agent-internal only - never printed to the user: corpus generation,
-generation IDs, retrieval lanes, RRF or reciprocal-rank weights, requested
-and effective profiles, fallback reasons, fingerprints, evidence pins,
-freshness and staleness flags, chunker and parser versions, reranking,
-context-pack digests. Read them, use them, cite them in campaign files and
-system records; do not say them to the user.
+## Status Views
 
-## Silent Self-Healing
+Orientation should fit one screen and name campaign handles, focus, blocked or
+due-deferred work, pending returns and review, knowledge availability, and the
+next action. Resume may include changes since a generation or event handle.
+Expand full evidence only for the next decision.
 
-Cheap, safe, local, reversible repairs happen automatically and are not
-mentioned: refreshing a stale index, restoring a missing tracked file.
-They are recorded in system-facing state (the ensure payload, server
-logs), never narrated. Expensive or judgment-laden actions always ask
-first: benchmarks, calibration, memory acceptance, retrieval-profile
-promotion, anything that changes measured behavior.
+## Language Boundary
 
-Measurement health follows the same principle lazily: benchmark staleness
-and evidence-pin drift matter only when measurements are used, so the
-measurement skills (benchmark-knowledge, calibrate-knowledge,
-decide-retrieval-profile) check and repair them at their own gate time.
-Onboarding and session start never mention them.
-
-## Marking User-Facing Output
-
-A skill's printable template is a fenced block whose info string is
-`user-facing`. The repository lint scans exactly those blocks for the
-banned vocabulary. Prose instructions about what to *do* with machinery
-state are fine anywhere; printable text lives only in marked fences.
-
-## Host Adapter Hygiene
-
-`.claude/CLAUDE.md` and `.codex/AGENTS.md` state current configuration
-only: present tense, no dates, no migration narration, no "older X is
-obsolete" prose. History belongs in docs/history/. Retired guidance is
-deleted, not memorialized.
+Translate machinery into plain impact. Say "the campaign has two blocked work
+items" instead of printing an internal state envelope. When a transition
+fails, name the refused action, exact missing condition, and safe recovery; do
+not imply partial success.

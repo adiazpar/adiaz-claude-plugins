@@ -1,13 +1,14 @@
 # Re-Discipline Knowledge Runtime
 
-This directory contains the local, manager-neutral knowledge server shipped
-with re-discipline 0.7.0. Claude Code, Codex, direct managers, and delegated
-drafters use the same executable, project configuration, source tiers,
-indexes, retrieval profiles, and context-pack format.
+This directory contains the local, manager-neutral state and knowledge engine
+shipped with re-discipline 0.8.0. Claude Code, Codex, direct managers, and
+delegated workers use the same executable, canonical record schemas, finding
+index, retrieval profiles, and context-pack format.
 
 The runtime is navigation infrastructure. It never makes an index, embedding,
 reranker score, benchmark, or memory proposal authoritative. Authority remains
-with the tracked source file and its re-discipline tier.
+with canonical records, immutable review receipts, exact evidence, and
+closure-gated projections.
 
 ## Runtime shape
 
@@ -76,33 +77,32 @@ knowledge/bin/re-discipline-knowledge serve --asset-root knowledge
 
 with the path form required by that host. The server uses newline-delimited
 JSON-RPC over stdio and supports MCP initialization, roots, ping, tool
-discovery, cancellation notifications, and structured tool results. It
-exposes:
+discovery, cancellation notifications, and structured tool results. Its
+public surface is exactly eight role-oriented operations:
 
 | Tool | Effect |
 |---|---|
-| `status` | Cheap configuration, profile, runtime, cache-presence, freshness, and integrity report. It does not build an index. |
-| `orient` | Bounded orientation from allowed project tiers. |
-| `search` | Tier-filtered exact, lexical, graph, dense, and reranked retrieval. |
-| `read` | Generation- and content-hash-validated reads of managed sources. |
-| `context_pack` | Read-only construction of an immutable, citable context pack whose digest the manager retains independently. A `requiredPaths` entry is pinned as the one indexed chunk of that document the pack's task ranks highest, so a source larger than the budget still reaches the caller; `read` returns the rest. |
-| `context_pack_materialize` | Rebuild and atomically write the pack only to an approved campaign or recruiting drafter workspace when it matches that independently retained digest. |
-| `recall_propose` | Proposal-only write under `.re-discipline/memory/proposals/`; never accepts memory. |
+| `state` | Return bounded `orient`, `resume`, `work`, `delta`, or `closure` views from canonical records. |
+| `query` | Return normalized finding cards after source-class, review-state, validity, and budget filters. |
+| `read` | Expand one exact record, finding, evidence, report, path, chunk, or URI handle. |
+| `trace` | Follow evidence, dependency, contradiction, supersession, run, and projection edges. |
+| `context_pack_materialize` | Preview an active-run or recruiting-run pack; after digest verification, directly publish recruiting packs only. Active-run publication belongs to `manager_apply` `run.prepare`. |
+| `manager_apply` | Apply typed campaign, work-item, run, review, finding, and decision transitions. |
+| `curation_submit` | Submit a curator intake batch and complete report-span coverage. |
+| `closure_apply` | Start, advance, verify, reopen, or finalize a resumable closure job. |
 
-An explicit `projectRoot` must be a validated re-discipline 0.6 project. When
+An explicit `projectRoot` must be a validated re-discipline 0.8 project. When
 the host supplies roots, requests are restricted to those roots. One server
 process can cache services for multiple validated roots without merging their
 indexes or policies.
 
-The `readOnlyHint` on retrieval tools means they never change canonical
-sources, settings, accepted memory, or retrieval profiles. A first retrieval
-may reconcile the disposable derived index and aggregate-metrics files under
-the approved cache root; deleting those files never deletes project
-knowledge. Managed recovery happens before MCP tool handling only when the
-launch configuration or MCP roots grant a project. An explicit `status` call
-with an ungranted project root is non-mutating. The two
-materialization/proposal tools are the only MCP tools that write tracked or
-workspace-visible project artifacts.
+The four read operations never change canonical sources, settings, accepted
+memory, or retrieval profiles. A first query may reconcile only disposable
+derived index and aggregate-metrics files under the approved cache root;
+deleting those files never deletes project knowledge. Managed recovery happens
+before MCP handling only when the launch configuration or MCP roots grant a
+project. The four mutation operations validate authority, expected revisions,
+idempotency, and path grants in the shared engine before publication.
 
 ## Command-line interface
 
@@ -118,16 +118,13 @@ From this `knowledge/` directory, the same launcher is
 | Command | Purpose |
 |---|---|
 | `serve` | Start the MCP stdio server. |
-| `recover` | Recreate missing managed bootstrap/settings files and reconcile only managed project-local native-memory policy fields. |
-| `preflight` | Run managed recovery, then report configuration, cache, profile, model, runtime, and benchmark health without indexing. |
-| `status` | Pure read-only health and freshness report. It never recovers files or indexes sources. |
-| `index` | Explicitly inventory sources and reconcile the current generation. |
-| `replay` | Run the same query twice and report deterministic equivalence. |
-| `context-pack` | Compile a context pack; materialization at an approved `--output` requires the digest retained from a prior read-only run. |
-| `verify-pack` | Check the independently retained digest, optional retained pack ID, internal digest, schema, identities, budgets, citations, and semantic invariants before dispatch. |
-| `benchmark` | Run packaged conformance without `--project-root`, or ratified project evals with it, in `quick` or `full` mode. |
-| `calibrate` | Measure development candidates and frozen holdout finalists; create proposal state only. |
-| `promote-profile` | Recompute and authenticate a calibration candidate, requiring `--approve` after an explicit user decision before atomically replacing the project profile. |
+| `state`, `query`, `read`, `trace` | Invoke the same typed read operation as MCP from strict JSON supplied with `--input <path-or->`. |
+| `context-pack-materialize`, `manager-apply`, `curation-submit`, `closure-apply` | Invoke the same typed mutation operation as MCP from strict JSON. |
+| `recover`, `ensure` | Restore current managed bootstrap files, or report that a legacy project requires explicit migration. |
+| `migrate-project` | Preview, apply, resume, inspect, verify, gate, and ratify the sole 0.7-to-0.8 conversion path. |
+| `status`, `preflight`, `index`, `replay` | Maintainer diagnostics for configuration, derived-index health, and deterministic passage retrieval. These are not MCP aliases. |
+| `verify-pack` | Verify an independently retained pack digest and optional pack ID before dispatch. |
+| `benchmark`, `pin-evals`, `calibrate`, `promote-profile` | Measure retrieval, manage eval pins, create calibration proposals, and apply an explicitly approved profile decision. |
 
 Use `--asset-root` to identify this `knowledge/` directory and
 `--project-root` for the initialized project. `--disable-dense` and
@@ -135,18 +132,23 @@ Use `--asset-root` to identify this `knowledge/` directory and
 Project-facing token and source policy remains in
 `.re-discipline/knowledge/policy.jsonc`.
 
-`recover`, context-pack materialization, recall proposal, index reconciliation,
-calibration, and benchmark report output are explicit writes. Retrieval tools
-may populate only disposable derived cache as described above. The MCP tool
-annotations distinguish canonical-read tools from the two narrowly scoped
-project-artifact mutation tools.
+Canonical state changes flow only through typed peer operations or the
+explicit migrator. Recovery, index reconciliation, calibration, and benchmark
+report output have separately documented scopes. Read operations may populate
+only disposable derived cache as described above.
 
-Context-pack dispatch is deliberately two-step. First compile without
-`--output` and retain the returned `digest` outside the drafter workspace.
-Then rerun the same request with the approved output path and
-`--expected-digest sha256:<64-lowercase-hex>`. Materialization fails if the
+Every public context-pack request names either an `active-run` target
+(`campaignId`, `workItemId`, and `runId`) or a `recruiting-run` target
+(`candidateSlug` and `recruitingRunId`). First call
+`context-pack-materialize` with action `preview` and retain the returned
+`digest` outside the run workspace. An active-run pack is published only by
+the atomic `manager_apply` `run.prepare` transition; direct materialization is
+rejected. A recruiting-run preview may be published by calling
+`context-pack-materialize` with action `materialize` and the retained digest.
+The runtime derives the canonical output from the target, so callers never
+supply a path. Publication fails if the state head, bound run identities,
 corpus, generation, profile, task, role, tiers, budget, required paths, or
-compiled pack changed between those operations. Before launch, run
+compiled pack changed between operations. Before launch, run
 `verify-pack --input <context-pack.json> --expected-digest <retained-digest>`.
 Reading a digest from the pack being verified is not independent verification.
 
@@ -164,18 +166,19 @@ Each immutable generation records:
   fingerprints;
 - the exact runtime version, Go version, compiled build ID, executable
   checksum, SQLite build, numerical backend, and tie-breaking contract;
-- source path, line range, content hash, trust tier, graph edges, vectors, and
-search indexes.
+- source path, line range, content hash, source class, graph edges, vectors,
+  and search indexes.
 
-Warm `status` is read-only. First retrieval or explicit `index` reconciles a
+CLI `status` is read-only. First retrieval or explicit `index` reconciles a
 stale generation. One writer publishes a complete SQLite generation and then
 atomically switches `current.json`; concurrent readers use the last verified
 generation. Search uses bounded database candidate queries rather than
-loading the corpus into manager context. A context pack returns only the
-selected passages, provenance, requested/effective profile, active lanes,
-selected model identities, compact generation/runtime identity, omission
-counts, and hard-budget metadata needed by a manager or drafter. Full model
-and runtime catalogs remain available through `status`. The compact runtime
+loading the corpus into manager context. A context pack returns only accepted
+scoped constraints, bounded context cards, exact expansion handles,
+requested/effective profile, active lanes, selected model identities, compact
+generation/runtime identity, omission counts, and hard-budget metadata needed
+by a manager or worker. Full model
+and runtime catalogs remain available through CLI `status`. The compact runtime
 fingerprint commits the generation's full runtime identity; the verbose
 compiled build ID and executable checksum are not repeated in every context
 pack, which keeps small token budgets independent of packaging-label length.
@@ -185,13 +188,13 @@ disposable. Deleting the cache never deletes project knowledge.
 
 ## Failure behavior
 
-- Missing or malformed bootstrap/knowledge configuration leaves pure `status`
-  available with `configuration.valid: false`; every other knowledge
-  operation fails closed. Existing malformed files are preserved byte-for-byte.
+- Missing or malformed bootstrap/knowledge configuration is visible in
+  `state(mode="orient")` and CLI `status`; unsafe configuration fails closed.
+  Existing malformed files are preserved byte-for-byte.
 - A valid configuration with an invalid, unsafe, or unratified project
   retrieval-profile overlay uses the packaged profile and reports the
   warning. It never treats that overlay as accepted.
-- `knowledge.enabled: false` makes status available but prevents indexing and
+- `knowledge.enabled: false` leaves state and CLI status available but prevents indexing and
   retrieval.
 - Missing local models select only a separately benchmarked capability row.
   The runtime never downloads a model.
@@ -202,8 +205,10 @@ disposable. Deleting the cache never deletes project knowledge.
   denied, symlink-escaped, or out-of-root sources are omitted or rejected.
 - Secret-like files, pending memory, and unmanaged paths do not enter ordinary
   retrieval.
-- Context-pack materialization rejects paths outside the two managed drafter
-  workspace shapes and refuses to overwrite a different immutable pack.
+- Context-pack materialization derives a canonical destination from the scoped
+  target, rejects caller-supplied paths, and refuses to overwrite a different
+  immutable pack. Active-run publication is part of `run.prepare`, not a
+  standalone write.
 - No command reads or writes Claude or Codex native memory stores. Project
   recovery changes only the initialized project's `.claude/settings.json` and
   `.codex/config.toml` managed memory fields.

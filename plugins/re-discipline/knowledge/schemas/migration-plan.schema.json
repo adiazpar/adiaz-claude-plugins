@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/migration-plan.schema.json",
+  "title": "0.7 To 0.8 Migration Plan",
+  "type": "object",
+  "required": ["schemaVersion", "id", "sourceVersion", "targetVersion", "projectRootDigest", "inventoryDigest", "operations", "liveCampaigns", "blockers", "createdAt", "createdBy", "previewDigest"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "id": {"type": "string", "minLength": 1},
+    "sourceVersion": {"const": "0.7"},
+    "targetVersion": {"const": "0.8"},
+    "projectRootDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "inventoryDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "operations": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "liveCampaigns": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "blockers": {"type": "array", "items": {"type": "string"}},
+    "uncertainties": {"type": "array", "items": {"type": "string"}},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "createdBy": {"type": "string", "minLength": 1},
+    "previewDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

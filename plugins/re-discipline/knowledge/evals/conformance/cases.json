@@ -12,7 +12,7 @@
     "minimumEvidencePaths": ["docs/truth/engine.md"],
     "hardNegativePaths": ["docs/history/retired.md"],
     "expectedCitations": ["docs/truth/engine.md"],
-    "forbiddenTiers": ["history", "backlog", "active", "memory"],
+    "forbiddenTiers": ["history", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 512,
     "answerable": true
   },
@@ -29,7 +29,7 @@
     "minimumEvidencePaths": ["docs/truth/engine.md"],
     "hardNegativePaths": ["docs/history/retired.md"],
     "expectedCitations": ["docs/truth/engine.md"],
-    "forbiddenTiers": ["history", "backlog", "active", "memory"],
+    "forbiddenTiers": ["history", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 512,
     "answerable": true
   },
@@ -63,7 +63,7 @@
     "minimumEvidencePaths": [".re-discipline/memory/topics/navigation.md"],
     "hardNegativePaths": [".re-discipline/memory/proposals/excluded.md"],
     "expectedCitations": [".re-discipline/memory/topics/navigation.md"],
-    "forbiddenTiers": ["truth", "history", "backlog", "active"],
+    "forbiddenTiers": ["truth", "history", "backlog", "campaign", "provisional", "archive"],
     "tokenBudget": 512,
     "answerable": true
   },
@@ -80,7 +80,7 @@
     "minimumEvidencePaths": ["docs/truth/consumer.md", "docs/truth/portability.md"],
     "hardNegativePaths": ["docs/backlog/experiment.md"],
     "expectedCitations": ["docs/truth/consumer.md", "docs/truth/portability.md"],
-    "forbiddenTiers": ["history", "backlog", "active", "memory"],
+    "forbiddenTiers": ["history", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 1024,
     "answerable": true
   },
@@ -97,24 +97,24 @@
     "minimumEvidencePaths": [".re-discipline/project-profile.md"],
     "hardNegativePaths": ["docs/history/retired.md"],
     "expectedCitations": [".re-discipline/project-profile.md"],
-    "forbiddenTiers": ["history", "backlog", "active", "memory"],
+    "forbiddenTiers": ["history", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 2048,
     "answerable": true
   },
   {
-    "id": "active-campaign-marker",
+    "id": "campaign-finding-marker",
     "role": "drafter",
-    "topic": "active-campaign",
+    "topic": "campaign-finding",
     "split": "development",
     "query": "active-only-kappa",
     "queryClass": "exact",
-    "allowedTiers": ["active"],
+    "allowedTiers": ["campaign"],
     "corpusSnapshot": "fixture:packaged-conformance-v1",
-    "expectedPaths": ["active/fixture-campaign/CAMPAIGN.md"],
-    "minimumEvidencePaths": ["active/fixture-campaign/CAMPAIGN.md"],
+    "expectedPaths": ["active/fixture-campaign/findings/F-0001.md"],
+    "minimumEvidencePaths": ["active/fixture-campaign/findings/F-0001.md"],
     "hardNegativePaths": ["docs/truth/engine.md"],
-    "expectedCitations": ["active/fixture-campaign/CAMPAIGN.md"],
-    "forbiddenTiers": ["truth", "history", "backlog", "memory"],
+    "expectedCitations": ["active/fixture-campaign/findings/F-0001.md"],
+    "forbiddenTiers": ["truth", "history", "backlog", "provisional", "archive", "memory"],
     "tokenBudget": 1024,
     "answerable": true
   },
@@ -131,7 +131,7 @@
     "minimumEvidencePaths": ["docs/history/retired.md"],
     "hardNegativePaths": ["docs/truth/engine.md"],
     "expectedCitations": ["docs/history/retired.md"],
-    "forbiddenTiers": ["truth", "backlog", "active", "memory"],
+    "forbiddenTiers": ["truth", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 4096,
     "answerable": true
   },
@@ -148,7 +148,7 @@
     "minimumEvidencePaths": ["docs/truth/portability.md"],
     "hardNegativePaths": ["docs/history/retired.md"],
     "expectedCitations": ["docs/truth/portability.md"],
-    "forbiddenTiers": ["history", "backlog", "active", "memory"],
+    "forbiddenTiers": ["history", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 2048,
     "answerable": true
   },
@@ -165,7 +165,7 @@
     "minimumEvidencePaths": ["docs/truth/portability.md"],
     "hardNegativePaths": ["docs/backlog/experiment.md"],
     "expectedCitations": ["docs/truth/portability.md"],
-    "forbiddenTiers": ["history", "backlog", "active", "memory"],
+    "forbiddenTiers": ["history", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 512,
     "answerable": true
   },
@@ -182,7 +182,7 @@
     "minimumEvidencePaths": ["docs/backlog/experiment.md"],
     "hardNegativePaths": ["docs/truth/engine.md"],
     "expectedCitations": ["docs/backlog/experiment.md"],
-    "forbiddenTiers": ["truth", "history", "active", "memory"],
+    "forbiddenTiers": ["truth", "history", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 4096,
     "answerable": true
   },
@@ -199,7 +199,7 @@
     "minimumEvidencePaths": ["docs/INDEX.md"],
     "hardNegativePaths": ["docs/backlog/INDEX.md"],
     "expectedCitations": ["docs/INDEX.md"],
-    "forbiddenTiers": ["truth", "history", "backlog", "active", "memory"],
+    "forbiddenTiers": ["truth", "history", "backlog", "campaign", "provisional", "archive", "memory"],
     "tokenBudget": 1024,
     "answerable": true
   }

@@ -22,11 +22,12 @@ import (
 )
 
 const (
-	packageSchemaVersion = 1
-	runtimeName          = "re-discipline-knowledge"
-	runtimeVersion       = "0.7.0"
-	runtimeBuildIDPath   = "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
-	windowsArtifactMode  = 0o644
+	packageSchemaVersion       = 1
+	runtimeName                = "re-discipline-knowledge"
+	runtimeVersion             = "0.8.0"
+	runtimeBuildIDPath         = "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
+	windowsLauncherBuildIDPath = "main.CompiledBuildID"
+	windowsArtifactMode        = 0o644
 )
 
 type targetSpec struct {
@@ -455,7 +456,9 @@ func buildPackageTree(moduleRoot, outputRoot, pinnedGo, buildID string) (package
 
 	windowsRelative := "re-discipline-knowledge.exe"
 	windowsPath := filepath.Join(outputRoot, windowsRelative)
-	if err := materializeWindowsLauncher(moduleRoot, windowsPath, pinnedGo); err != nil {
+	if err := materializeWindowsLauncher(
+		moduleRoot, windowsPath, pinnedGo, buildID,
+	); err != nil {
 		return packageManifest{}, err
 	}
 	windowsArtifact, err := describeFile(
@@ -524,12 +527,30 @@ func buildGoBinary(
 	pinnedGo string,
 	buildID string,
 ) error {
+	return buildGoBinaryWithIdentityPath(
+		moduleRoot, destination, target, mainPackage, pinnedGo,
+		runtimeBuildIDPath, buildID,
+	)
+}
+
+func buildGoBinaryWithIdentityPath(
+	moduleRoot string,
+	destination string,
+	target targetSpec,
+	mainPackage string,
+	pinnedGo string,
+	buildIDPath string,
+	buildID string,
+) error {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
 	ldflags := "-s -w -buildid="
 	if buildID != "" {
-		ldflags += " -X " + runtimeBuildIDPath + "=" + buildID
+		if buildIDPath == "" {
+			return errors.New("compiled build identity path is required")
+		}
+		ldflags += " -X " + buildIDPath + "=" + buildID
 	}
 	command := exec.Command(
 		"go",
@@ -585,31 +606,38 @@ func materializeRuntimeBinary(
 	return nil
 }
 
-func materializeWindowsLauncher(moduleRoot, destination, pinnedGo string) error {
+func materializeWindowsLauncher(
+	moduleRoot, destination, pinnedGo, buildID string,
+) error {
 	if runtime.GOOS == "windows" {
-		if err := buildGoBinary(
+		if err := buildGoBinaryWithIdentityPath(
 			moduleRoot,
 			destination,
 			windowsLauncherTarget,
 			"./cmd/re-discipline-knowledge-launcher",
 			pinnedGo,
-			"",
+			windowsLauncherBuildIDPath,
+			buildID,
 		); err != nil {
 			return err
 		}
 		return os.Chmod(destination, windowsArtifactMode)
 	}
-	return copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo)
+	return copyCanonicalWindowsLauncher(
+		moduleRoot, destination, pinnedGo, buildID,
+	)
 }
 
-func copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo string) error {
+func copyCanonicalWindowsLauncher(
+	moduleRoot, destination, pinnedGo, expectedBuildID string,
+) error {
 	return copyCanonicalWindowsBinary(
 		moduleRoot,
 		"re-discipline-knowledge.exe",
 		destination,
 		windowsLauncherTarget,
 		pinnedGo,
-		"",
+		expectedBuildID,
 	)
 }
 
@@ -966,7 +994,8 @@ func discoverSharedAssets(moduleRoot string) ([]manifestFile, error) {
 
 func sharedAssetKind(relative string) (string, error) {
 	switch {
-	case relative == "evals/conformance/cases.json":
+	case relative == "evals/conformance/cases.json" ||
+		relative == "evals/conformance/finding-cases.json":
 		return "benchmark-cases", nil
 	case strings.HasPrefix(relative, "evals/conformance/fixture/") &&
 		(strings.HasSuffix(strings.ToLower(relative), ".md") ||
@@ -1189,6 +1218,11 @@ func verifyPackageContents(
 	if err := verifyManifestFiles(moduleRoot, outputRoot, manifest); err != nil {
 		return packageManifest{}, nil, err
 	}
+	if err := verifyWindowsLauncherBuildIdentity(
+		outputRoot, pinnedGo, buildID,
+	); err != nil {
+		return packageManifest{}, nil, err
+	}
 	expectedSums, err := expectedSHA256Sums(moduleRoot, outputRoot, manifest)
 	if err != nil {
 		return packageManifest{}, nil, err
@@ -1201,6 +1235,24 @@ func verifyPackageContents(
 		return packageManifest{}, nil, errors.New("SHA256SUMS does not exactly match package contents")
 	}
 	return manifest, manifestBody, nil
+}
+
+func verifyWindowsLauncherBuildIdentity(
+	outputRoot, pinnedGo, expectedBuildID string,
+) error {
+	if expectedBuildID == "" {
+		return errors.New("windows architecture dispatcher build identity is required")
+	}
+	path, err := packagePath(outputRoot, "re-discipline-knowledge.exe")
+	if err != nil {
+		return err
+	}
+	if err := verifyBuiltBinary(
+		path, windowsLauncherTarget, pinnedGo, expectedBuildID,
+	); err != nil {
+		return fmt.Errorf("verify windows architecture dispatcher: %w", err)
+	}
+	return nil
 }
 
 func readAndValidateManifest(

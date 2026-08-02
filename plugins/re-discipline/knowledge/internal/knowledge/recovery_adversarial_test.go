@@ -97,35 +97,35 @@ func redirectNativeMemoryRoots(t *testing.T, parent string) (string, map[string]
 	return nativeRoot, snapshotRecoveryTree(t, nativeRoot)
 }
 
-func assertMCPStatusReportsInvalid(t *testing.T, root, expectedText string) {
+func assertMCPStateReportsInvalid(t *testing.T, root, expectedText string) {
 	t.Helper()
 	messages := runMCPMessages(
 		t,
 		&MCPServer{AssetRoot: adversarialAssetRoot(t)},
 		initializeMessage(1, false),
-		toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
+		toolCallMessage(2, "state", map[string]any{
+			"projectRoot": root, "mode": "orient", "tokenBudget": 800,
+		}),
 	)
-	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
-	configuration := asObject(t, status["configuration"])
-	if configuration["valid"] != false {
-		t.Fatalf("safely diagnosable malformed configuration was reported valid: %#v", status)
+	state := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+	if state["status"] != "attention" {
+		t.Fatalf("safely diagnosable malformed configuration did not require attention: %#v", state)
 	}
-	errorsValue := asArray(t, configuration["errors"])
-	if len(errorsValue) == 0 {
-		t.Fatalf("invalid configuration omitted diagnostics: %#v", configuration)
+	var health map[string]any
+	for _, value := range asArray(t, state["cards"]) {
+		card := asObject(t, value)
+		if card["id"] == "project-health" {
+			health = card
+			break
+		}
 	}
-	if expectedText != "" && !strings.Contains(
-		strings.Join(func() []string {
-			out := make([]string, 0, len(errorsValue))
-			for _, value := range errorsValue {
-				out = append(out, fmt.Sprint(value))
-			}
-			return out
-		}(), "\n"),
-		expectedText,
-	) {
+	if health == nil || asObject(t, health["metadata"])["configuration"] != "invalid" ||
+		strings.TrimSpace(fmt.Sprint(health["claim"])) == "" {
+		t.Fatalf("invalid configuration omitted health diagnostics: %#v", state)
+	}
+	if expectedText != "" && !strings.Contains(fmt.Sprint(health["claim"]), expectedText) {
 		t.Fatalf("invalid configuration diagnostics omit %q: %#v",
-			expectedText, configuration)
+			expectedText, health)
 	}
 }
 
@@ -163,7 +163,11 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 	if _, err := RecoverProject(root, adversarialPluginRoot(t)); err != nil {
 		t.Fatalf("initial recovery: %v", err)
 	}
-	trackedConfig := []byte("{\n  \"schemaVersion\": 2,\n  \"knowledgeDirectory\": \"knowledge\",\n  \"memory\": {\"mode\": \"shared-only\", \"writePolicy\": \"proposal-only\"},\n  \"knowledge\": {\"enabled\": true, \"profile\": \"plugin:balanced-v1\", \"settingsFile\": \"knowledge/policy.jsonc\", \"projectProfile\": \"knowledge/retrieval-profile.json\"}\n}\n")
+	trackedConfig, err := json.MarshalIndent(DefaultBootstrapConfig(), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trackedConfig = append(trackedConfig, '\n')
 	configPath := filepath.Join(root, ".re-discipline", "config.json")
 	if err := os.WriteFile(configPath, trackedConfig, 0o600); err != nil {
 		t.Fatal(err)
@@ -211,13 +215,17 @@ func TestAdversarialRecoveryPrecedesMCPValidationAndNeverTouchesNativeMemory(t *
 			InitialRoot: root,
 		},
 		initializeMessage(1, false),
-		toolCallMessage(2, "status", map[string]any{}),
+		toolCallMessage(2, "state", map[string]any{
+			"mode": "orient", "tokenBudget": 800,
+		}),
 	)
-	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
-	configuration := asObject(t, status["configuration"])
-	if configuration["memoryMode"] != "shared-only" ||
-		configuration["nativeMemoryTouched"] != false {
-		t.Fatalf("recovered status violates shared-only policy: %#v", status)
+	state := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+	if state["mode"] != "orient" || state["digest"] == "" {
+		t.Fatalf("recovered state orientation is incomplete: %#v", state)
+	}
+	configuration := LoadConfiguration(root)
+	if !configuration.Valid || configuration.Bootstrap.Memory.Mode != "shared-only" {
+		t.Fatalf("recovered configuration violates shared-only policy: %#v", configuration)
 	}
 
 	for path, expected := range map[string][]byte{
@@ -345,7 +353,7 @@ func TestAdversarialRecoveryPreservesMalformedOrAmbiguousFilesAndFailsClosed(t *
 			if _, err := os.Stat(unrelatedMissing); !os.IsNotExist(err) {
 				t.Fatal("recovery made partial changes before validating surviving files")
 			}
-			assertMCPStatusReportsInvalid(t, root, "")
+			assertMCPStateReportsInvalid(t, root, "")
 			assertRecoveryTreeUnchanged(t, nativeRoot, nativeBefore)
 		})
 	}
@@ -458,7 +466,9 @@ func TestAdversarialRecoveryReconcilesTrackedSharedOnlyHostPolicy(t *testing.T) 
 		t,
 		&MCPServer{AssetRoot: adversarialAssetRoot(t), InitialRoot: root},
 		initializeMessage(1, false),
-		toolCallMessage(2, "status", map[string]any{}),
+		toolCallMessage(2, "state", map[string]any{
+			"mode": "orient", "tokenBudget": 800,
+		}),
 	)
 	assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
 }
@@ -472,7 +482,7 @@ func TestAdversarialRecoveryRejectsUnsupportedMarkerWithoutMutation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer := bytes.ReplaceAll(original, []byte("v0.7.0"), []byte("v0.8.0"))
+	newer := bytes.ReplaceAll(original, []byte("v0.8.0"), []byte("v0.9.0"))
 	if err := os.WriteFile(markerPath, newer, 0o600); err != nil {
 		t.Fatal(err)
 	}

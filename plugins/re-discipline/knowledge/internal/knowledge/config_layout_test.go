@@ -7,11 +7,14 @@ func TestBootstrapValidationPinsKnowledgeLayout(t *testing.T) {
 	if err := ValidateBootstrap(valid); err != nil {
 		t.Fatalf("default bootstrap must validate, got %v", err)
 	}
-	if valid.SchemaVersion != 2 {
-		t.Fatalf("bootstrap schemaVersion must be 2, got %d", valid.SchemaVersion)
+	if valid.SchemaVersion != 3 || valid.CampaignSchemaVersion != 2 {
+		t.Fatalf("bootstrap/campaign schemas must be 3/2, got %d/%d", valid.SchemaVersion, valid.CampaignSchemaVersion)
 	}
-	if valid.KnowledgeDirectory != "knowledge" {
-		t.Fatalf("knowledgeDirectory must be knowledge, got %q", valid.KnowledgeDirectory)
+	if valid.State.ActiveRoot != "active" || valid.State.ArchiveRoot != "docs/history/campaigns" {
+		t.Fatalf("canonical state roots changed: %#v", valid.State)
+	}
+	if valid.Authority.DirectStateWrites || valid.Authority.TruthProjection != "closure-only" {
+		t.Fatalf("authority boundary is unsafe: %#v", valid.Authority)
 	}
 	if valid.Knowledge.SettingsFile != "knowledge/policy.jsonc" {
 		t.Fatalf("settingsFile must be knowledge/policy.jsonc, got %q", valid.Knowledge.SettingsFile)
@@ -22,7 +25,7 @@ func TestBootstrapValidationPinsKnowledgeLayout(t *testing.T) {
 	legacy := DefaultBootstrapConfig()
 	legacy.SchemaVersion = 1
 	if err := ValidateBootstrap(legacy); err == nil {
-		t.Fatal("schemaVersion 1 must be rejected by v2 validation")
+		t.Fatal("schemaVersion 1 must be rejected by v3 validation")
 	}
 	wrongPath := DefaultBootstrapConfig()
 	wrongPath.Knowledge.SettingsFile = "settings/knowledge.jsonc"

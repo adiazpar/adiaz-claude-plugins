@@ -9,6 +9,7 @@ on:
       - ".github/workflows/re-discipline.yml"
       - ".github/scripts/re-discipline-*"
       - "plugins/re-discipline/**"
+      - "tests/re_discipline*.py"
       - "tests/test_re_discipline*.py"
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - ".github/workflows/re-discipline.yml"
       - ".github/scripts/re-discipline-*"
       - "plugins/re-discipline/**"
+      - "tests/re_discipline*.py"
       - "tests/test_re_discipline*.py"
   workflow_dispatch:
 

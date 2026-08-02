@@ -1,11 +1,11 @@
 {
   "name": "re-discipline",
-  "version": "0.7.1",
-  "description": "Evidence-based campaigns with one shared project memory, a local knowledge server, thin manager adapters, and governed retrieval.",
+  "version": "0.8.0",
+  "description": "Transactional campaigns, unified runs, atomic findings, bounded context, closure-gated truth, and governed cross-host retrieval.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
   },
-  "keywords": ["reverse-engineering", "research", "knowledge-management", "shared-memory", "retrieval", "workflow"],
+  "keywords": ["research", "knowledge-management", "campaigns", "evidence", "retrieval", "workflow"],
   "mcpServers": "./.mcp.json"
 }

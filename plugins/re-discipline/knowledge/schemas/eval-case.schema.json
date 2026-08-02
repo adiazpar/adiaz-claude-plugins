@@ -16,7 +16,7 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset"]}
+      "items": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset", "campaign", "draft", "provisional", "archive", "intake", "playbook"]}
     },
     "corpusSnapshot": {"type": "string", "pattern": "^(fixture:[a-z0-9-]+|sha256:[a-f0-9]{64})$"},
     "expectedPaths": {
@@ -47,7 +47,7 @@
     "forbiddenTiers": {
       "type": "array",
       "uniqueItems": true,
-      "items": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset"]}
+      "items": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset", "campaign", "draft", "provisional", "archive", "intake", "playbook"]}
     },
     "tokenBudget": {"type": "integer", "minimum": 128, "maximum": 4096},
     "answerable": {"type": "boolean"},

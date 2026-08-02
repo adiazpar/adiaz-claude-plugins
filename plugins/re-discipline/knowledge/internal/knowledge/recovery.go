@@ -37,9 +37,9 @@ type recoveryFile struct {
 
 // SharedLawsMarker is the exact contract handshake between this compiled
 // runtime and a project's canonical profile. Recovery and MCP validation
-// both refuse projects carrying any other version; migration (migrate.go)
-// is the only door from v0.6.0 to this marker.
-const SharedLawsMarker = "<!-- re-discipline:shared-laws v0.7.0 -->"
+// both refuse projects carrying any other version; the explicit 0.7-to-0.8
+// migrator is the only door from a legacy marker to this one.
+const SharedLawsMarker = "<!-- re-discipline:shared-laws v0.8.0 -->"
 
 var managedRecoveryFiles = []recoveryFile{
 	{".re-discipline/config.json", "config.json", "config"},
@@ -88,7 +88,7 @@ func RecoverProject(projectRoot, pluginRoot string) (RecoveryResult, error) {
 	}
 	const marker = SharedLawsMarker
 	if !strings.Contains(string(markerBody), marker) {
-		return RecoveryResult{}, errors.New("recovery requires the supported shared-laws v0.7.0 marker")
+		return RecoveryResult{}, errors.New("recovery requires the supported shared-laws v0.8.0 marker")
 	}
 	pluginAbsolute, err := filepath.Abs(pluginRoot)
 	if err != nil {

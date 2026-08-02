@@ -22,15 +22,16 @@ EXPECTED_PLATFORMS = {
     ("darwin", "amd64"): "re-discipline-knowledge",
     ("darwin", "arm64"): "re-discipline-knowledge",
 }
-EXPECTED_TOOLS = {
-    "status",
-    "orient",
-    "search",
+EXPECTED_TOOLS = [
+    "state",
+    "query",
     "read",
-    "context_pack",
+    "trace",
     "context_pack_materialize",
-    "recall_propose",
-}
+    "manager_apply",
+    "curation_submit",
+    "closure_apply",
+]
 
 
 def sha256(path: Path) -> str:
@@ -110,10 +111,9 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             "$ExpectedContextPackDigest",
             " ".join(dispatch.split()),
         )
-        self.assertRegex(
+        self.assertIn(
+            "[ValidatePattern('^sha256:[0-9a-f]{64}$')]",
             dispatch,
-            r"\$ExpectedContextPackDigest\s+-notmatch\s+"
-            r"['\"]\^sha256:\[0-9a-f\]\{64\}\$['\"]",
         )
         self.assertGreaterEqual(
             dispatch.count("$ExpectedContextPackDigest"),
@@ -138,7 +138,11 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             ("hire-agent skill", hire_agent),
             ("drafter contract", contract),
         ):
-            self.assertIn("expected digest", text, label)
+            self.assertIn("digest", text, label)
+            self.assertTrue(
+                "exact" in text or "verify" in text,
+                f"{label} does not require exact context-pack verification",
+            )
             self.assertIn("mismatch", text, label)
             self.assertTrue(
                 "block" in text or "stop" in text,
@@ -148,23 +152,15 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             ("delegate skill", delegate),
             ("hire-agent skill", hire_agent),
         ):
-            self.assertIn(
-                "--expected-digest <expected-context-pack-digest>",
-                text,
-                label,
-            )
-            self.assertIn(
-                "-expectedcontextpackdigest <expected-context-pack-digest>",
-                text,
-                label,
-            )
+            self.assertIn("retained digest", text, label)
+            self.assertIn("packaged runtime", text, label)
 
         dispatch_readme = (
             PLUGIN / "templates" / "project" / "agents-README.md"
         ).read_text(encoding="utf-8").lower()
-        self.assertGreaterEqual(
+        self.assertEqual(
             dispatch_readme.count("-expectedcontextpackdigest"),
-            3,
+            1,
         )
 
     def test_drafter_context_treats_retrieved_instructions_as_untrusted_data(
@@ -182,11 +178,13 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
 
         for label, text in (("drafter contract", contract), ("dispatch", dispatch)):
             compact = " ".join(text.split())
-            self.assertIn("evidence/data", compact, label)
-            self.assertIn("never executable manager instructions", compact, label)
-            self.assertIn("canonical project profile", compact, label)
+            normalized = compact.replace("-", " ")
+            for token in ("constraints", "cards", "expansion handles", "as data"):
+                self.assertIn(token, compact, label)
+            self.assertIn("context", compact, label)
+            self.assertIn("digest", compact, label)
             self.assertIn("brief", compact, label)
-            self.assertIn("drafter contract", compact, label)
+            self.assertIn("drafter contract", normalized, label)
 
     def assert_binary_identity(self, path: Path, goos: str, goarch: str) -> None:
         body = path.read_bytes()
@@ -249,7 +247,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             "plugin://re-discipline/schemas/runtime-package-manifest.schema.json",
         )
         self.assertEqual(manifest["runtime"]["name"], "re-discipline-knowledge")
-        self.assertEqual(manifest["runtime"]["version"], "0.7.0")
+        self.assertEqual(manifest["runtime"]["version"], "0.8.0")
         self.assertRegex(manifest["runtime"]["buildId"], r"^sha256:[0-9a-f]{64}$")
         self.assertFalse(manifest["build"]["cgoEnabled"])
         self.assertRegex(
@@ -377,7 +375,10 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
         knowledge_root = PLUGIN / "knowledge"
 
         def shared_asset_kind(relative: str) -> str:
-            if relative == "evals/conformance/cases.json":
+            if relative in {
+                "evals/conformance/cases.json",
+                "evals/conformance/finding-cases.json",
+            }:
                 return "benchmark-cases"
             if (
                 relative.startswith("evals/conformance/fixture/")
@@ -603,8 +604,11 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                 "id": 3,
                 "method": "tools/call",
                 "params": {
-                    "name": "status",
-                    "arguments": {"projectRoot": str(project)},
+                    "name": "state",
+                    "arguments": {
+                        "projectRoot": str(project),
+                        "mode": "orient",
+                    },
                 },
             },
             {
@@ -612,13 +616,11 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                 "id": 4,
                 "method": "tools/call",
                 "params": {
-                    "name": "search",
+                    "name": "read",
                     "arguments": {
                         "projectRoot": str(project),
-                        "query": "packaged-runtime-iota-7391",
-                        "queryClass": "exact",
-                        "allowedTiers": ["truth"],
-                        "limit": 5,
+                        "selector": "path",
+                        "value": "docs/truth/runtime.md",
                         "tokenBudget": 512,
                     },
                 },
@@ -649,28 +651,32 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
 
     def assert_mcp_result(self, responses: dict[int, dict]) -> tuple[str, str]:
         self.assertEqual(
-            {tool["name"] for tool in responses[2]["result"]["tools"]},
+            responses[1]["result"]["serverInfo"]["version"],
+            "0.8.0",
+        )
+        self.assertEqual(
+            [tool["name"] for tool in responses[2]["result"]["tools"]],
             EXPECTED_TOOLS,
         )
-        status = responses[3]["result"]
-        self.assertFalse(status["isError"], status)
-        status_body = status["structuredContent"]["system"]
-        self.assertEqual(status_body["configuration"]["memoryMode"], "shared-only")
-        self.assertFalse(status_body["configuration"]["nativeMemoryTouched"])
-        search = responses[4]["result"]
-        self.assertFalse(search["isError"], search)
-        search_body = search["structuredContent"]
-        self.assertTrue(search_body["results"], search_body)
-        citation = search_body["results"][0]["citation"]
-        self.assertEqual(citation["path"], "docs/truth/runtime.md")
-        self.assertEqual(citation["tier"], "truth")
-        return status_body["effectiveProfile"], citation["passageHash"]
+        state = responses[3]["result"]
+        self.assertFalse(state["isError"], state)
+        state_body = state["structuredContent"]
+        self.assertEqual(state_body["mode"], "orient")
+        self.assertRegex(state_body["digest"], r"^sha256:[0-9a-f]{64}$")
+        read = responses[4]["result"]
+        self.assertFalse(read["isError"], read)
+        read_body = read["structuredContent"]
+        self.assertEqual(read_body["path"], "docs/truth/runtime.md")
+        self.assertIn("packaged-runtime-iota-7391", read_body["content"])
+        self.assertRegex(read_body["sha256"], r"^sha256:[0-9a-f]{64}$")
+        self.assertRegex(read_body["digest"], r"^sha256:[0-9a-f]{64}$")
+        return state_body["digest"], read_body["sha256"]
 
     def test_relocated_codex_and_claude_launch_same_shared_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            claude_copy = temporary / "claude-cache" / "re-discipline" / "0.7.0"
-            codex_copy = temporary / "codex-cache" / "re-discipline" / "0.7.0"
+            claude_copy = temporary / "claude-cache" / "re-discipline" / "0.8.0"
+            codex_copy = temporary / "codex-cache" / "re-discipline" / "0.8.0"
             shutil.copytree(PLUGIN, claude_copy, copy_function=copy_or_link)
             shutil.copytree(PLUGIN, codex_copy, copy_function=copy_or_link)
             project = temporary / "project"
@@ -769,19 +775,25 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                 self.assertEqual(control_path.read_bytes(), malformed)
                 self.assertEqual(snapshot_tree(cache_root), cache_before)
 
-                for command in (
-                    ["index"],
-                    [
-                        "context-pack",
-                        "--task",
-                        "engine checksum",
-                        "--role",
-                        "drafter",
-                        "--tiers",
-                        "truth",
-                        "--token-budget",
-                        "1024",
-                    ],
+                for command, standard_input in (
+                    (["index"], None),
+                    (
+                        ["context-pack-materialize", "--input", "-"],
+                        json.dumps(
+                            {
+                                "action": "preview",
+                                "target": {
+                                    "kind": "recruiting-run",
+                                    "candidateSlug": "fixture-candidate",
+                                    "recruitingRunId": "20260802T190000Z",
+                                },
+                                "task": "engine checksum",
+                                "role": "drafter",
+                                "allowedTiers": ["truth"],
+                                "tokenBudget": 1024,
+                            }
+                        ),
+                    ),
                 ):
                     failed = subprocess.run(
                         [
@@ -794,6 +806,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                         ],
                         cwd=PLUGIN,
                         env=environment,
+                        input=standard_input,
                         text=True,
                         capture_output=True,
                         timeout=60,

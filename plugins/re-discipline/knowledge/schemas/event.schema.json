@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/event.schema.json",
+  "title": "Campaign State Event",
+  "type": "object",
+  "required": ["schemaVersion", "id", "timestamp", "actor", "authority", "action", "affectedIds", "previousRevision", "resultingRevision", "idempotencyKey", "correlationId", "previousStateDigest", "resultingStateDigest", "mutationDigest", "digest"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "id": {"type": "string", "pattern": "^E-[0-9]{8}-[0-9]{6}-[A-Z0-9]{6,}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "actor": {"type": "string", "minLength": 1},
+    "authority": {"enum": ["manager", "investigator", "reviewer", "curator", "system"]},
+    "action": {"type": "string", "minLength": 1},
+    "affectedIds": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "previousRevision": {"type": "integer", "minimum": 0},
+    "resultingRevision": {"type": "integer", "minimum": 1},
+    "idempotencyKey": {"type": "string", "minLength": 1},
+    "correlationId": {"type": "string", "minLength": 1},
+    "rationale": {"type": "string"},
+    "reviewHandle": {"type": "string"},
+    "previousEventId": {"type": "string", "pattern": "^E-[0-9]{8}-[0-9]{6}-[A-Z0-9]{6,}$"},
+    "previousStateDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "resultingStateDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "mutationDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

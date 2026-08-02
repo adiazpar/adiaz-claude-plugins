@@ -1,5 +1,5 @@
 {
-  "description": "Cheap cross-host lifecycle bootstrap for re-discipline projects: managed config recovery, bounded read-only knowledge health, compact rehydration, checkpoint reminders, and drafter boundaries. It never indexes, builds models, benchmarks, or touches native memory stores.",
+  "description": "Bounded 0.8 lifecycle context and accident-oriented direct-write guardrails. Canonical safety remains in the shared state engine.",
   "hooks": {
     "SessionStart": [
       {
@@ -9,8 +9,22 @@
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" session-start",
             "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'session-start'\"",
-            "timeout": 15,
-            "statusMessage": "Checking re-discipline project state"
+            "timeout": 10,
+            "statusMessage": "Orienting re-discipline state"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" pre-tool-use",
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'pre-tool-use'\"",
+            "timeout": 5,
+            "statusMessage": "Checking re-discipline write boundary"
           }
         ]
       }
@@ -23,8 +37,8 @@
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" pre-compact",
             "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'pre-compact'\"",
-            "timeout": 10,
-            "statusMessage": "Preserving re-discipline campaign state"
+            "timeout": 5,
+            "statusMessage": "Preserving state handles"
           }
         ]
       }
@@ -38,7 +52,7 @@
             "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" post-compact",
             "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'post-compact'\"",
             "timeout": 5,
-            "statusMessage": "Rehydrating re-discipline context"
+            "statusMessage": "Restoring bounded state"
           }
         ]
       }
@@ -52,7 +66,35 @@
             "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" subagent-start",
             "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'subagent-start'\"",
             "timeout": 5,
-            "statusMessage": "Loading re-discipline drafter boundary"
+            "statusMessage": "Loading run boundary"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" subagent-stop",
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'subagent-stop'\"",
+            "timeout": 5,
+            "statusMessage": "Validating run return"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" stop",
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'stop'\"",
+            "timeout": 5,
+            "statusMessage": "Checking transaction state"
           }
         ]
       }

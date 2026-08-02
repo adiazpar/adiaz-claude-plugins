@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -53,6 +54,9 @@ type Retriever struct {
 	Boundary   Boundary
 	Generation Generation
 	Profile    SelectedProfile
+	// ArchiveTracker is optional operational accounting for raw-report
+	// fallback. It never participates in ranking or cache identity.
+	ArchiveTracker *ArchiveFallbackTracker
 }
 
 func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (SearchResponse, error) {
@@ -178,6 +182,8 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 			Citation: Citation{
 				Path: row.Chunk.Path, Heading: row.Chunk.Heading,
 				StartLine: row.Chunk.StartLine, EndLine: row.Chunk.EndLine,
+				ByteRange: row.Chunk.ByteRange, StartByte: row.Chunk.StartByte,
+				EndByte:     row.Chunk.EndByte,
 				ContentHash: row.Chunk.ContentHash, SourceHash: row.DocumentHash,
 				PassageHash: row.Chunk.ContentHash, Tier: row.Chunk.Tier, URI: uri,
 				ContextHash: chunkContextHash,
@@ -412,11 +418,21 @@ func (retriever Retriever) BestDocumentChunks(
 	if err != nil {
 		return nil, err
 	}
+	// Corpus-wide fusion and reranking are useful for deciding which document
+	// to return, but a required document has already been chosen by the caller.
+	// Within that document, prefer the chunk with the strongest literal query
+	// coverage. This prevents a title/claim-heavy opening chunk from winning a
+	// linear rerank over the later chunk that contains the caller's distinctive
+	// identifier. Ranked order remains the deterministic tie-break.
+	bestScore := map[string]int64{}
 	for _, row := range ranked {
-		if _, taken := selected[row.Chunk.Path]; taken {
+		score := requiredChunkLexicalScore(query, row.Chunk)
+		_, taken := selected[row.Chunk.Path]
+		if taken && score <= bestScore[row.Chunk.Path] {
 			continue
 		}
 		selected[row.Chunk.Path] = *row
+		bestScore[row.Chunk.Path] = score
 	}
 	for _, path := range paths {
 		if _, taken := selected[path]; taken {
@@ -440,6 +456,31 @@ func (retriever Retriever) BestDocumentChunks(
 	return selected, nil
 }
 
+func requiredChunkLexicalScore(query string, chunk Chunk) int64 {
+	terms := map[string]bool{}
+	for _, term := range IdentifierTerms(chunk.Heading + "\n" + chunk.Content) {
+		terms[term] = true
+	}
+	var score int64
+	for _, term := range IdentifierTerms(query) {
+		if !terms[term] {
+			continue
+		}
+		// Long identifier-like forms are much more discriminative than ordinary
+		// prose. Squaring their bounded length is a deterministic approximation
+		// of inverse-document-frequency for this one-document choice.
+		length := len([]rune(term))
+		score += int64(length * length)
+	}
+	if strings.Contains(
+		strings.ToLower(chunk.Heading+"\n"+chunk.Content),
+		strings.ToLower(strings.TrimSpace(query)),
+	) {
+		score += 1_000_000
+	}
+	return score
+}
+
 // openingChunk loads a document's first chunk, or nil when the document is not
 // indexed within the eligible tiers.
 func openingChunk(
@@ -455,13 +496,14 @@ func openingChunk(
 	}
 	var row candidate
 	err := db.QueryRowContext(ctx, `SELECT c.id,c.document_id,c.path,c.tier,c.heading,
-		c.start_line,c.end_line,c.content,c.content_hash,COALESCE(c.parent_id,''),
+		c.start_line,c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content,c.content_hash,COALESCE(c.parent_id,''),
 		COALESCE(c.previous_id,''),COALESCE(c.next_id,''),d.content_hash
 		FROM chunks c JOIN documents d ON d.id=c.document_id
 		WHERE c.path=? AND c.tier IN (`+placeholders+`)
 		ORDER BY c.start_line ASC,c.id ASC LIMIT 1`, args...).Scan(
 		&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
 		&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+		&row.Chunk.ByteRange, &row.Chunk.StartByte, &row.Chunk.EndByte,
 		&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
 		&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash,
 	)
@@ -640,6 +682,7 @@ func loadEligibleChunks(ctx context.Context, db *sql.DB, tiers []string) ([]cand
 		args[index] = tier
 	}
 	query := `SELECT c.id,c.document_id,c.path,c.tier,c.heading,c.start_line,c.end_line,
+		c.byte_range,c.start_byte,c.end_byte,
 		c.content,c.content_hash,COALESCE(c.parent_id,''),COALESCE(c.previous_id,''),
 		COALESCE(c.next_id,''),d.content_hash
 		FROM chunks c JOIN documents d ON d.id=c.document_id
@@ -656,6 +699,7 @@ func loadEligibleChunks(ctx context.Context, db *sql.DB, tiers []string) ([]cand
 		if err := rows.Scan(
 			&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
 			&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+			&row.Chunk.ByteRange, &row.Chunk.StartByte, &row.Chunk.EndByte,
 			&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
 			&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash,
 		); err != nil {
@@ -814,12 +858,13 @@ func loadChunksByID(ctx context.Context, db *sql.DB, ids []rankedID) ([]candidat
 	for _, item := range ids {
 		var row candidate
 		err := db.QueryRowContext(ctx, `SELECT c.id,c.document_id,c.path,c.tier,c.heading,
-			c.start_line,c.end_line,c.content,c.content_hash,COALESCE(c.parent_id,''),
+			c.start_line,c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content,c.content_hash,COALESCE(c.parent_id,''),
 			COALESCE(c.previous_id,''),COALESCE(c.next_id,''),d.content_hash
 			FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.id=?`,
 			item.id).Scan(
 			&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
 			&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+			&row.Chunk.ByteRange, &row.Chunk.StartByte, &row.Chunk.EndByte,
 			&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
 			&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash,
 		)
@@ -860,6 +905,7 @@ func rankFTS(
 	args = append(args, documentArgs...)
 	args = append(args, limit)
 	statement := `SELECT c.id,c.document_id,c.path,c.tier,c.heading,c.start_line,c.end_line,
+		c.byte_range,c.start_byte,c.end_byte,
 		c.content,c.content_hash,COALESCE(c.parent_id,''),COALESCE(c.previous_id,''),
 		COALESCE(c.next_id,''),d.content_hash,bm25(chunks_fts,0.0,3.0,5.0,1.0) AS rank
 		FROM chunks_fts
@@ -879,6 +925,7 @@ func rankFTS(
 		if err := rows.Scan(
 			&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
 			&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+			&row.Chunk.ByteRange, &row.Chunk.StartByte, &row.Chunk.EndByte,
 			&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
 			&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash, &ignoredRank,
 		); err != nil {
@@ -1034,6 +1081,7 @@ func loadDenseCandidates(
 	documentClause, documentArgs := documentFilter("c", paths)
 	args := []any{modelID}
 	statement := `SELECT c.id,c.document_id,c.path,c.tier,c.heading,c.start_line,c.end_line,
+		c.byte_range,c.start_byte,c.end_byte,
 		c.content,c.content_hash,COALESCE(c.parent_id,''),COALESCE(c.previous_id,''),
 		COALESCE(c.next_id,''),d.content_hash,v.vector
 		FROM vectors v JOIN chunks c ON c.id=v.chunk_id
@@ -1064,6 +1112,7 @@ func loadDenseCandidates(
 		if err := rows.Scan(
 			&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
 			&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+			&row.Chunk.ByteRange, &row.Chunk.StartByte, &row.Chunk.EndByte,
 			&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
 			&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash, &vectorBody,
 		); err != nil {
@@ -1105,7 +1154,7 @@ func rankGraph(
 	result := []candidate{}
 	for _, seed := range seeds {
 		rows, err := db.QueryContext(ctx, `SELECT DISTINCT c.id,c.document_id,c.path,c.tier,
-			c.heading,c.start_line,c.end_line,c.content,c.content_hash,
+			c.heading,c.start_line,c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content,c.content_hash,
 			COALESCE(c.parent_id,''),COALESCE(c.previous_id,''),COALESCE(c.next_id,''),
 			d.content_hash
 			FROM edges e
@@ -1123,6 +1172,7 @@ func rankGraph(
 			if err := rows.Scan(
 				&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
 				&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+				&row.Chunk.ByteRange, &row.Chunk.StartByte, &row.Chunk.EndByte,
 				&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
 				&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash,
 			); err != nil {
@@ -1182,7 +1232,18 @@ func (retriever Retriever) verifyChunk(chunk Chunk, documentHash string) bool {
 	if err != nil || hash != documentHash {
 		return false
 	}
-	lines := strings.Split(string(normalizeNewlines(body)), "\n")
+	normalized := normalizeNewlines(body)
+	if chunk.ByteRange {
+		if chunk.StartByte < 0 || chunk.EndByte <= chunk.StartByte || chunk.EndByte > len(normalized) {
+			return false
+		}
+		startLine := bytes.Count(normalized[:chunk.StartByte], []byte("\n")) + 1
+		endLine := bytes.Count(normalized[:chunk.EndByte-1], []byte("\n")) + 1
+		content := string(normalized[chunk.StartByte:chunk.EndByte])
+		return startLine == chunk.StartLine && endLine == chunk.EndLine &&
+			SHA256String(content) == chunk.ContentHash && content == chunk.Content
+	}
+	lines := strings.Split(string(normalized), "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}

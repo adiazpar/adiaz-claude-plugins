@@ -125,6 +125,7 @@ func TestSharedAssetPathIsRestrictedToRuntimeAssetRoots(t *testing.T) {
 	root := t.TempDir()
 	for _, relative := range []string{
 		"evals/conformance/cases.json",
+		"evals/conformance/finding-cases.json",
 		"models/artifacts/model.bin",
 		"models/manifest.json",
 		"profiles/balanced-v1.json",
@@ -162,6 +163,7 @@ func TestPackagedRuntimeAssetsCoverRequiredDataAndPinModelExactlyOnce(t *testing
 	}
 	required := map[string]string{
 		"evals/conformance/cases.json":                   "benchmark-cases",
+		"evals/conformance/finding-cases.json":           "benchmark-cases",
 		"models/artifacts/README.md":                     "model-artifact-documentation",
 		"models/artifacts/glove-6b-50d-top50k-q8-v1.bin": "shared-model-artifact",
 		"models/manifest.json":                           "model-manifest",
@@ -283,8 +285,14 @@ func TestCanonicalWindowsLauncherCopyIsByteExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	buildID, err := computeRuntimeBuildID(moduleRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	destination := filepath.Join(t.TempDir(), "re-discipline-knowledge.exe")
-	if err := copyCanonicalWindowsLauncher(moduleRoot, destination, pinnedGo); err != nil {
+	if err := copyCanonicalWindowsLauncher(
+		moduleRoot, destination, pinnedGo, buildID,
+	); err != nil {
 		t.Fatal(err)
 	}
 	sourceBody, err := os.ReadFile(filepath.Join(moduleRoot, "bin", "re-discipline-knowledge.exe"))
@@ -310,6 +318,127 @@ func TestCanonicalWindowsLauncherCopyIsByteExact(t *testing.T) {
 				windowsArtifactMode,
 			)
 		}
+	}
+}
+
+func TestWindowsLauncherEmbedsAndValidatesRuntimeBuildIdentity(t *testing.T) {
+	moduleRoot, err := findModuleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinnedGo, err := readPinnedGoVersion(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := "sha256:" + strings.Repeat("a", 64)
+	outputRoot := t.TempDir()
+	destination := filepath.Join(outputRoot, "re-discipline-knowledge.exe")
+	if err := buildGoBinaryWithIdentityPath(
+		moduleRoot,
+		destination,
+		windowsLauncherTarget,
+		"./cmd/re-discipline-knowledge-launcher",
+		pinnedGo,
+		windowsLauncherBuildIDPath,
+		expected,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyWindowsLauncherBuildIdentity(
+		outputRoot, pinnedGo, expected,
+	); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte(expected)) {
+		t.Fatal("Windows architecture dispatcher omitted its release build identity")
+	}
+}
+
+func TestWindowsLauncherIdentityValidationRejectsStaleOrMissing(t *testing.T) {
+	moduleRoot, err := findModuleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinnedGo, err := readPinnedGoVersion(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := "sha256:" + strings.Repeat("a", 64)
+	for _, testCase := range []struct {
+		name    string
+		buildID string
+	}{
+		{name: "missing"},
+		{name: "stale", buildID: "sha256:" + strings.Repeat("b", 64)},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			outputRoot := t.TempDir()
+			if err := buildGoBinaryWithIdentityPath(
+				moduleRoot,
+				filepath.Join(outputRoot, "re-discipline-knowledge.exe"),
+				windowsLauncherTarget,
+				"./cmd/re-discipline-knowledge-launcher",
+				pinnedGo,
+				windowsLauncherBuildIDPath,
+				testCase.buildID,
+			); err != nil {
+				t.Fatal(err)
+			}
+			err := verifyWindowsLauncherBuildIdentity(
+				outputRoot, pinnedGo, expected,
+			)
+			if err == nil || !strings.Contains(err.Error(), "omits compiled build identity") {
+				t.Fatalf("%s dispatcher identity returned %v", testCase.name, err)
+			}
+		})
+	}
+}
+
+func TestBuiltPackageCarriesWindowsLauncherIdentityIntoManifestAndChecksums(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-hosted package build is the canonical PE producer")
+	}
+	moduleRoot, err := findModuleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinnedGo, err := readPinnedGoVersion(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildID, err := computeRuntimeBuildID(moduleRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRoot := t.TempDir()
+	manifest, err := buildPackageTree(moduleRoot, outputRoot, pinnedGo, buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := verifyPackageContents(
+		moduleRoot, outputRoot, pinnedGo, buildID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	launcher := manifest.Launchers[1]
+	digest, err := fileSHA256(filepath.Join(outputRoot, launcher.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launcher.SHA256 != "sha256:"+digest {
+		t.Fatalf("dispatcher manifest digest = %s, want sha256:%s", launcher.SHA256, digest)
+	}
+	sums, err := os.ReadFile(filepath.Join(outputRoot, "SHA256SUMS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRow := []byte(digest + "  re-discipline-knowledge.exe\n")
+	if !bytes.Contains(sums, wantRow) {
+		t.Fatalf("SHA256SUMS omitted dispatcher row %q", wantRow)
 	}
 }
 
@@ -373,6 +502,7 @@ func TestCanonicalWindowsLauncherCopyRequiresExistingArtifact(t *testing.T) {
 		t.TempDir(),
 		filepath.Join(t.TempDir(), "re-discipline-knowledge.exe"),
 		"go1.26.0",
+		"sha256:"+strings.Repeat("a", 64),
 	)
 	if err == nil || !strings.Contains(err.Error(), "generate knowledge/bin on Windows first") {
 		t.Fatalf("missing canonical Windows launcher error = %v", err)

@@ -52,7 +52,7 @@ Require a configured provider and its three-file durable record.
 4. Delete only `.re-discipline/agents/providers/<provider>/`.
 5. Search current configuration for unintended provider residue.
 
-Create no retained firing artifact or event-specific chronicle. Never delete
+Create no retained firing artifact or event-specific narrative. Never delete
 the shared root router, manager adapters, external drafter contract, agent
 core, or another provider's configuration. Leave the CLI installed unless the
 user explicitly asks otherwise.

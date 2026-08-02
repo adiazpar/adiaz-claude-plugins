@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+// CompiledBuildID is injected by the release packager. Keeping the dispatcher
+// bound to the same source identity as the runtime targets prevents a stale
+// top-level launcher from being checksummed into an otherwise current package.
+var CompiledBuildID = "development"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "re-discipline-knowledge launcher:", err)
@@ -17,6 +22,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if strings.TrimSpace(CompiledBuildID) == "" {
+		return errors.New("compiled build identity is empty")
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate launcher: %w", err)

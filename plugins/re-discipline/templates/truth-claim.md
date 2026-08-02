@@ -1,40 +1,46 @@
-# <Claim title - short noun phrase>
+---
+schemaVersion: 2
+id: T-<stable-id>
+sourceFinding: F-0001
+sourceFindingRevision: 1
+sourceReview: V-0001
+closureReceipt: CR-0001
+evidenceGrade: direct
+reviewState: manager-ratified
+validity: current
+subject: <subject>
+scope: {}
+aliases: []
+tags: []
+verifiedAt: <UTC timestamp>
+reverifyWhen: <trigger>
+archive: docs/history/campaigns/<date>-<slug>/
+digest: sha256:<digest>
+---
 
-**Claim:** <one value-precise sentence>
+# <Atomic Claim Title>
 
-**Kind:** atomic | synthesis
+## Claim
 
-**Confidence:** Strong | Moderate | Conditional
+<One value-precise, independently supersedable sentence.>
 
-**Scope (synthesis only):** <where the claim holds and where it does not>
+## Applies When
 
-**Validity:**
-- Verified: <YYYY-MM-DD>
-- Subject/source revision: <version, hash, build, or primary artifact>
-- Implementation revision: <commit or version, when relevant>
+<Conditions and subject revisions.>
 
-**Re-verify trigger:** <the change that should cause a new check>
+## Does Not Establish
 
-**Depends-on:**
-- [<other truth file>](../path)
-- or: none
+<Limits and surviving alternatives.>
 
-## Verification
+## Evidence And Reproduction
 
-- **Source:** <maintained primary source path and exact value, or none>
-- **Test or fixture:** <permanent test and maintained fixture, or none>
-- **Recipe:** `<runnable command against the named subject revision>`, or none
-- **Provenance:** `docs/history/chronicles/<date>-<topic>.md`
+- Source: <exact archive or maintained source handle and digest>
+- Reproducer: <permanent test, fixture, or command>
 
-Only DIRECT evidence supports promotion. At least one of Source, Test or
-fixture, or Recipe must let a future manager recheck the claim after campaign
-scratch is deleted. Provenance explains derivation; it is not empirical support.
+## Provenance
 
-## Detail
+- Finding: `<finding handle and revision>`
+- Review: `<immutable review handle>`
+- Closure: `<receipt and archive manifest digests>`
 
-<The explanation, exact values, tables, and necessary boundaries.>
-
-## See Also
-
-- [<related truth>](../path)
-- [<producing chronicle>](../../history/chronicles/...)
+Historical provenance explains derivation but is not sole empirical support.

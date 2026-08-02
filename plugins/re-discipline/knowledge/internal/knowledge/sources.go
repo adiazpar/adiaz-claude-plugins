@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -25,8 +26,11 @@ var (
 	)
 )
 
+const maxChunkBytes = 1400
+
 type SourceInventory struct {
 	Documents       []SourceDocument
+	Findings        []FindingDocument
 	Chunks          []Chunk
 	Edges           []GraphEdge
 	SourceStates    []SourceState
@@ -42,30 +46,19 @@ type GraphEdge struct {
 }
 
 type sourceClass struct {
-	Path      string
-	Tier      string
-	Recursive bool
-	AutoShape bool
-	BaseOnly  string
-	Pattern   string
-	Enabled   bool
-	// PromoteTier and PromoteMarker make a source's tier content-dependent: a
-	// file matching PromoteMarker is indexed at PromoteTier instead of Tier.
-	//
-	// This is how a drafter report moves from `draft` to `campaign` when a
-	// manager stamps it as reviewed. It is a deterministic regex evaluated at
-	// index time, not a judgement, and it fails safe: an unstamped report
-	// stays in `draft` and therefore out of every default tier set.
-	PromoteTier   string
-	PromoteMarker *regexp.Regexp
+	Path          string
+	Tier          string
+	Recursive     bool
+	AutoShape     bool
+	BaseOnly      string
+	Pattern       string
+	Enabled       bool
+	SourceKind    string
+	ExcludePrefix string
 }
 
-// reviewStampRE matches the disposition stamp review-subagent writes into a
-// report head. Line-anchored, so a mention of "Review:" in prose cannot
-// promote an unreviewed report into the retrievable tier.
-var reviewStampRE = regexp.MustCompile(`(?m)^\*\*Review:\*\*[ \t]*\S`)
-
 func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInventory, error) {
+	cutoverCache := map[string]bool{}
 	classes := []sourceClass{
 		{Path: ".re-discipline/project-profile.md", Tier: "profile", Enabled: true},
 		{Path: "docs/INDEX.md", Tier: "navigation", Enabled: true},
@@ -75,35 +68,42 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		// live in docs/ because a goal outlives its campaigns.
 		{Path: "docs/goals", Tier: "navigation", Recursive: true, Enabled: true},
 		{Path: "docs/truth", Tier: "truth", Recursive: true, Enabled: settings.Sources.Truth},
-		{Path: "docs/history", Tier: "history", Recursive: true, Enabled: settings.Sources.History},
-		{Path: "docs/backlog", Tier: "backlog", Recursive: true, Enabled: settings.Sources.Backlog},
-		{Path: "active", Tier: "active", Recursive: true, BaseOnly: "CAMPAIGN.md", Enabled: settings.Sources.ActiveCampaigns},
-		// REVIEWS.md is campaign state, not a drafter claim, so it shares the
-		// `active` tier with the masterfile rather than joining reviewed reports
-		// in `campaign`. The two files are one logical masterfile that was split
-		// only because they grow at different rates - CAMPAIGN.md is rewritten
-		// every checkpoint and must stay small enough to re-read cold, the ledger
-		// only appends - and a split made for size should not also move half the
-		// content into a different epistemic class.
-		//
-		// `campaign` means "a drafter finding a manager rederived": content a
-		// drafter authored and a manager qualified. The ledger contains no drafter
-		// prose at all, only the manager's own dispositions and the destinations
-		// held claims will take. Filing it under `campaign` would make that tier
-		// mean two different things at once.
-		//
-		// It rides the activeCampaigns toggle for the same reason: a project that
-		// declines to index campaign state declines to index both halves of it.
-		{Path: "active", Tier: "active", Recursive: true, BaseOnly: "REVIEWS.md", Enabled: settings.Sources.ActiveCampaigns},
-		// Drafter reports carry a mandated section schema - VERDICT, CLAIMS,
-		// RESIDUAL UNCERTAINTIES, EVIDENCE INDEX - as markdown headings, so
-		// the chunker already partitions them along the epistemic boundary.
-		// Indexing them is what makes an in-flight campaign's own findings
-		// reachable instead of reachable only through its masterfile.
+		// Promoted atomic findings retain their canonical record and exact
+		// evidence handles under docs/truth/findings. The broad truth class above
+		// still indexes their Markdown projection; this more-specific class marks
+		// the same path as a typed finding for card retrieval.
 		{
-			Path: "active", Tier: "draft", Recursive: true, BaseOnly: "report.md",
-			PromoteTier: "campaign", PromoteMarker: reviewStampRE,
-			Enabled: settings.Sources.DrafterReports,
+			Path: "docs/truth/findings", Tier: "truth", Recursive: true, Pattern: "F-*.md",
+			SourceKind: "finding", Enabled: settings.Sources.Truth,
+		},
+		{
+			Path: "docs/history", Tier: "history", Recursive: true,
+			Enabled: settings.Sources.HistoryFindings, ExcludePrefix: "docs/history/campaigns/",
+		},
+		{Path: "docs/backlog", Tier: "backlog", Recursive: true, Enabled: settings.Sources.Backlog},
+		// Atomic finding files are indexed as a typed projection as well as
+		// ordinary Markdown provenance. Their review/validity fields determine
+		// the final retrieval class after strict parsing.
+		{
+			Path: "active", Tier: "provisional", Recursive: true, Pattern: "F-*.md",
+			SourceKind: "finding", Enabled: settings.Sources.ActiveFindings,
+		},
+		// Closed campaign archives preserve normalized findings and raw run
+		// provenance under distinct classes. Archive README prose is navigation,
+		// not a substitute for the typed records, and is intentionally excluded.
+		{
+			Path: "docs/history/campaigns", Tier: "history", Recursive: true, Pattern: "F-*.md",
+			SourceKind: "finding", Enabled: settings.Sources.HistoryFindings,
+		},
+		// Immutable run reports remain a lower-ranked provenance fallback until
+		// the ratified normalized-beats-raw gate permits archive opt-in.
+		{
+			Path: "active", Tier: "archive", Recursive: true, BaseOnly: "report.md",
+			SourceKind: "raw-report", Enabled: settings.Sources.ReportFallback,
+		},
+		{
+			Path: "docs/history/campaigns", Tier: "archive", Recursive: true, BaseOnly: "report.md",
+			SourceKind: "raw-report", Enabled: settings.Sources.ReportFallback,
 		},
 		{Path: ".re-discipline/memory/INDEX.md", Tier: "navigation", Enabled: settings.Sources.SharedMemory},
 		{Path: ".re-discipline/memory/topics", Tier: "memory", Recursive: true, Enabled: settings.Sources.SharedMemory},
@@ -115,8 +115,9 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		})
 	}
 	type candidate struct {
-		Path string
-		Tier string
+		Path       string
+		Tier       string
+		SourceKind string
 	}
 	candidates := map[string]candidate{}
 	sourceStates := map[string]SourceState{}
@@ -155,7 +156,7 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 						"source %s is assigned conflicting tiers %s and %s",
 						class.Path, existing.Tier, class.Tier)
 				}
-				candidates[class.Path] = candidate{class.Path, class.Tier}
+				candidates[class.Path] = candidate{class.Path, class.Tier, class.SourceKind}
 			}
 			continue
 		}
@@ -211,6 +212,14 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 					return nil
 				}
 			}
+			if class.SourceKind == "finding" &&
+				!validFindingSourcePath(boundary, path, cutoverCache) {
+				return nil
+			}
+			if class.SourceKind == "raw-report" &&
+				!validRawReportSourcePath(boundary, path, cutoverCache) {
+				return nil
+			}
 			relative, err := boundary.Relative(path)
 			if err != nil {
 				diagnostics = append(diagnostics, path+": "+err.Error())
@@ -219,25 +228,20 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			if IsForbiddenSource(relative) {
 				return nil
 			}
+			if class.ExcludePrefix != "" && strings.HasPrefix(relative, class.ExcludePrefix) {
+				return nil
+			}
 			if entryInfo, infoErr := entry.Info(); infoErr == nil {
 				sourceStates[relative] = stateFromInfo(relative, entryInfo)
 			}
 			tier := class.Tier
-			if class.PromoteMarker != nil {
-				// Read only to decide the tier. A file that fails to read
-				// keeps the unpromoted tier, which is the safe direction.
-				if body, _, readErr := ReadProjectFile(boundary, relative); readErr == nil &&
-					class.PromoteMarker.Match(body) {
-					tier = class.PromoteTier
-				}
-			}
 			if existing, duplicate := candidates[relative]; duplicate &&
 				existing.Tier != tier {
 				return fmt.Errorf(
 					"source %s is assigned conflicting tiers %s and %s",
 					relative, existing.Tier, tier)
 			}
-			candidates[relative] = candidate{relative, tier}
+			candidates[relative] = candidate{relative, tier, class.SourceKind}
 			return nil
 		})
 		if err != nil {
@@ -251,6 +255,7 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 	}
 	sort.Strings(paths)
 	documents := make([]SourceDocument, 0, len(paths))
+	findings := []FindingDocument{}
 	chunks := []Chunk{}
 	for _, path := range paths {
 		body, hash, err := ReadProjectFile(boundary, path)
@@ -267,10 +272,30 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			continue
 		}
 		title := titleFromMarkdown(string(body), path)
+		candidate := candidates[path]
+		var finding FindingDocument
+		if candidate.SourceKind == "finding" {
+			finding, err = ParseFindingDocument(body, path)
+			if err != nil {
+				diagnostics = append(diagnostics, path+": invalid finding: "+err.Error())
+				continue
+			}
+			title = finding.Record.Subject
+			candidate.Tier = FindingSourceClassAtPath(finding.Record, path)
+			findings = append(findings, finding)
+		}
 		doc := SourceDocument{
-			ID: StableID("doc", path, hash), Path: path, Tier: candidates[path].Tier,
+			ID: StableID("doc", path, hash), Path: path, Tier: candidate.Tier,
 			Title: title, Content: string(body), ContentHash: hash, Size: int64(len(body)),
-			MtimeNS: sourceStates[path].MtimeNS,
+			MtimeNS: sourceStates[path].MtimeNS, SourceKind: candidate.SourceKind,
+		}
+		if candidate.SourceKind == "finding" {
+			doc.FindingID = finding.Record.ID
+			doc.CampaignID = finding.Record.CampaignID
+			doc.FindingClaim = finding.Record.Claim
+			doc.EvidenceGrade = finding.Record.EvidenceGrade
+			doc.ReviewState = finding.Record.ReviewState
+			doc.Validity = finding.Record.Validity
 		}
 		documents = append(documents, doc)
 		chunks = append(chunks, ChunkMarkdown(doc)...)
@@ -283,29 +308,168 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		Title       string `json:"title"`
 		ContentHash string `json:"contentHash"`
 		Size        int64  `json:"size"`
+		SourceKind  string `json:"sourceKind,omitempty"`
+		FindingID   string `json:"findingId,omitempty"`
 	}
 	fingerprintDocuments := make([]fingerprintDocument, 0, len(documents))
 	for _, document := range documents {
 		fingerprintDocuments = append(fingerprintDocuments, fingerprintDocument{
 			ID: document.ID, Path: document.Path, Tier: document.Tier,
 			Title: document.Title, ContentHash: document.ContentHash, Size: document.Size,
+			SourceKind: document.SourceKind, FindingID: document.FindingID,
 		})
 	}
 	fingerprintInput := struct {
 		Parser    string                `json:"parser"`
 		Chunker   string                `json:"chunker"`
+		Analyzer  string                `json:"analyzer"`
 		Documents []fingerprintDocument `json:"documents"`
-	}{ParserVersion, ChunkerVersion, fingerprintDocuments}
+	}{ParserVersion, ChunkerVersion, IdentifierAnalyzerVersion, fingerprintDocuments}
 	fingerprint, err := CanonicalDigest(fingerprintInput)
 	if err != nil {
 		return SourceInventory{}, err
 	}
 	return SourceInventory{
-		Documents: documents, Chunks: chunks, Edges: edges,
+		Documents: documents, Findings: findings, Chunks: chunks, Edges: edges,
 		SourceStates:    sortedSourceStates(sourceStates),
 		DirectoryStates: sortedSourceStates(directoryStates),
 		Fingerprint:     fingerprint, Diagnostics: diagnostics,
 	}, nil
+}
+
+// Typed campaign sources are deliberately constrained to the 0.8 layout.
+// A recursive basename match alone would silently admit legacy subagents/
+// reports or nested lookalikes, weakening both the hard cutover and the
+// provenance handle contract.
+func validFindingSourcePath(boundary Boundary, absolute string, cutoverCache map[string]bool) bool {
+	relative, err := boundary.Relative(absolute)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(relative, "/")
+	if len(parts) == 4 && parts[0] == "docs" && parts[1] == "truth" &&
+		parts[2] == "findings" {
+		return findingIDRE.MatchString(strings.TrimSuffix(parts[3], filepath.Ext(parts[3])))
+	}
+	if len(parts) == 4 && parts[0] == "active" &&
+		managedSlugRE.MatchString(parts[1]) && parts[2] == "findings" {
+		return findingIDRE.MatchString(strings.TrimSuffix(parts[3], filepath.Ext(parts[3]))) &&
+			activeCampaignSourcesVisible(boundary, parts[1], cutoverCache)
+	}
+	if len(parts) == 6 && parts[0] == "docs" && parts[1] == "history" &&
+		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
+		parts[4] == "findings" {
+		destination := strings.Join(parts[:4], "/")
+		return findingIDRE.MatchString(strings.TrimSuffix(parts[5], filepath.Ext(parts[5]))) &&
+			archiveCutoverPublished(boundary, destination, "", cutoverCache)
+	}
+	return false
+}
+
+func validRawReportSourcePath(boundary Boundary, absolute string, cutoverCache map[string]bool) bool {
+	relative, err := boundary.Relative(absolute)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(relative, "/")
+	if len(parts) == 5 && parts[0] == "active" &&
+		managedSlugRE.MatchString(parts[1]) && parts[2] == "runs" &&
+		runIDRE.MatchString(parts[3]) && parts[4] == "report.md" {
+		return activeCampaignSourcesVisible(boundary, parts[1], cutoverCache)
+	}
+	if len(parts) == 7 && parts[0] == "docs" && parts[1] == "history" &&
+		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
+		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
+		parts[6] == "report.md" {
+		return archiveCutoverPublished(boundary, strings.Join(parts[:4], "/"), "", cutoverCache)
+	}
+	return false
+}
+
+// Closure publishes the archive before it marks the active campaign closed.
+// The final receipt and README are the cutover marker: before both exist,
+// discovery keeps using active sources and ignores the staged archive copy.
+// The marker is accepted only after every archived manifest file verifies and
+// receipt truth digests bind the immutable projection inventory. After that
+// hard gate, discovery uses the archive and retires the
+// active copy. This preserves exactly one retrieval identity across every
+// transaction seam and lets journal rollback restore the prior choice without
+// moving source files.
+func activeCampaignSourcesVisible(boundary Boundary, slug string, cutoverCache map[string]bool) bool {
+	campaignPath := filepath.Join(boundary.Root, "active", slug, "campaign.json")
+	body, err := readSingleLinkRegularFile(campaignPath)
+	if err != nil {
+		return true
+	}
+	var campaign CampaignRecord
+	if decodeStrictJSON(body, &campaign) != nil || ValidateCampaign(campaign) != nil ||
+		campaign.Slug != slug || campaign.Status != "closed" {
+		return true
+	}
+	return !archiveCutoverPublished(boundary, campaign.ArchiveDestination, campaign.ID, cutoverCache)
+}
+
+func archiveCutoverPublished(boundary Boundary, destination, campaignID string, cutoverCache map[string]bool) (published bool) {
+	cacheKey := destination + "\x00" + campaignID
+	if cached, present := cutoverCache[cacheKey]; present {
+		return cached
+	}
+	defer func() { cutoverCache[cacheKey] = published }()
+	if validateArchiveDestination(destination) != nil {
+		return false
+	}
+	manifestPath, err := boundary.Resolve(path.Join(destination, "manifest.json"), true)
+	if err != nil {
+		return false
+	}
+	manifestBody, err := readSingleLinkRegularFile(manifestPath)
+	if err != nil {
+		return false
+	}
+	var manifest ArchiveManifest
+	if decodeStrictJSON(manifestBody, &manifest) != nil || ValidateArchiveManifest(manifest) != nil ||
+		(campaignID != "" && manifest.CampaignID != campaignID) {
+		return false
+	}
+	for relative, digest := range manifest.Files {
+		absolute, resolveErr := boundary.Resolve(path.Join(destination, relative), true)
+		if resolveErr != nil {
+			return false
+		}
+		body, readErr := readSingleLinkRegularFile(absolute)
+		if readErr != nil || "sha256:"+SHA256Bytes(body) != digest {
+			return false
+		}
+	}
+	receiptPath, err := boundary.Resolve(path.Join(destination, "closure", "receipt.json"), true)
+	if err != nil {
+		return false
+	}
+	receiptBody, err := readSingleLinkRegularFile(receiptPath)
+	if err != nil {
+		return false
+	}
+	var receipt ClosureReceipt
+	if decodeStrictJSON(receiptBody, &receipt) != nil || ValidateClosureReceipt(receipt) != nil ||
+		receipt.CampaignID != manifest.CampaignID || receipt.ArchiveDestination != destination ||
+		receipt.ArchiveDigest != manifest.Digest || receipt.CoverageDigest != manifest.Coverage.Digest {
+		return false
+	}
+	projectionDigests := map[string]bool{}
+	for _, digest := range manifest.Projections {
+		projectionDigests[digest] = true
+	}
+	for _, digest := range receipt.TruthDigests {
+		if !projectionDigests[digest] {
+			return false
+		}
+	}
+	readmePath, err := boundary.Resolve(path.Join(destination, "README.md"), true)
+	if err != nil {
+		return false
+	}
+	_, err = readSingleLinkRegularFile(readmePath)
+	return err == nil
 }
 
 func SensitiveContentReason(value string) string {
@@ -404,26 +568,37 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	// Confidence - and carries a review disposition instead of a verification
 	// date. Same renderer, same cap, different extractor.
 	var header DocumentPrelude
-	switch document.Tier {
-	case "draft", "campaign":
-		header = ExtractReportPrelude(
-			body, document.Path, document.Tier == "campaign")
+	switch {
+	case document.SourceKind == "finding":
+		header = ExtractFindingPrelude(document)
+	case document.SourceKind == "raw-report":
+		header = ExtractReportPrelude(body, document.Path)
 	default:
 		header = ExtractDocumentPrelude(body, document.Path)
 	}
 	prelude := header.Render()
 
 	chunks := []Chunk{}
+	lineOffsets := make([]int, len(lines))
+	offset := 0
+	for index, line := range lines {
+		lineOffsets[index] = offset
+		offset += len([]byte(line))
+		if index+1 < len(lines) {
+			offset++
+		}
+	}
 	for _, sec := range sections {
-		for _, span := range splitSection(lines, sec.start, sec.end, 2200) {
-			content := strings.Join(lines[span[0]:span[1]+1], "\n")
-			hash := SHA256String(content)
+		for _, span := range splitSectionBytes(lines, lineOffsets, sec.start, sec.end, maxChunkBytes) {
+			hash := SHA256String(span.content)
 			chunks = append(chunks, Chunk{
 				ID: StableID("chunk", document.Path, sec.heading,
-					fmt.Sprintf("%d", span[0]+1), fmt.Sprintf("%d", span[1]+1), hash),
+					fmt.Sprintf("%d", span.startLine+1), fmt.Sprintf("%d", span.endLine+1),
+					fmt.Sprintf("%d", span.startByte), fmt.Sprintf("%d", span.endByte), hash),
 				DocumentID: document.ID, Path: document.Path, Tier: document.Tier,
-				Heading: sec.heading, StartLine: span[0] + 1, EndLine: span[1] + 1,
-				Content: content, ContentHash: hash,
+				Heading: sec.heading, StartLine: span.startLine + 1, EndLine: span.endLine + 1,
+				ByteRange: span.byteRange, StartByte: span.startByte, EndByte: span.endByte,
+				Content: span.content, ContentHash: hash,
 			})
 		}
 	}
@@ -431,12 +606,9 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	// there would duplicate it and spend budget saying nothing new.
 	//
 	// That reasoning holds only for a header the document actually contains.
-	// An unreviewed drafter report's status is synthesized - nothing in the
-	// body says "UNREVIEWED", because the absence of a review stamp is what
-	// makes it unreviewed - so skipping chunk 0 served the one chunk that
-	// carries the VERDICT with no sign that nobody had checked it. That is
-	// precisely the passage a reader must not receive unmarked.
-	firstChunkNeedsPrelude := strings.HasPrefix(header.Status, "UNREVIEWED")
+	// A raw report's provenance status is synthesized, so its first chunk must
+	// carry the same label as every later chunk.
+	firstChunkNeedsPrelude := strings.HasPrefix(header.Status, "UNNORMALIZED PROVENANCE")
 	for index := range chunks {
 		if prelude == "" || (index == 0 && !firstChunkNeedsPrelude) {
 			continue
@@ -461,6 +633,94 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 		}
 	}
 	return chunks
+}
+
+type chunkSourceSpan struct {
+	startLine int
+	endLine   int
+	byteRange bool
+	startByte int
+	endByte   int
+	content   string
+}
+
+// splitSectionBytes enforces maxBytes even for a single very long source line.
+// Ordinary chunks retain the historical line-range citation. Split-line
+// chunks carry an absolute half-open byte range over normalized source bytes.
+func splitSectionBytes(lines []string, lineOffsets []int, start, end, maxBytes int) []chunkSourceSpan {
+	if start > end || maxBytes < 1 {
+		return nil
+	}
+	result := []chunkSourceSpan{}
+	currentStart := -1
+	currentEnd := -1
+	current := []string{}
+	currentBytes := 0
+	flush := func() {
+		if currentStart < 0 {
+			return
+		}
+		result = append(result, chunkSourceSpan{
+			startLine: currentStart, endLine: currentEnd,
+			content: strings.Join(current, "\n"),
+		})
+		currentStart, currentEnd = -1, -1
+		current = nil
+		currentBytes = 0
+	}
+	for lineIndex := start; lineIndex <= end; lineIndex++ {
+		line := lines[lineIndex]
+		lineBytes := []byte(line)
+		if len(lineBytes) > maxBytes {
+			flush()
+			for _, segment := range splitUTF8ByteRanges(lineBytes, maxBytes) {
+				absoluteStart := lineOffsets[lineIndex] + segment[0]
+				absoluteEnd := lineOffsets[lineIndex] + segment[1]
+				result = append(result, chunkSourceSpan{
+					startLine: lineIndex, endLine: lineIndex, byteRange: true,
+					startByte: absoluteStart, endByte: absoluteEnd,
+					content: string(lineBytes[segment[0]:segment[1]]),
+				})
+			}
+			continue
+		}
+		additional := len(lineBytes)
+		if len(current) > 0 {
+			additional++
+		}
+		if len(current) > 0 && currentBytes+additional > maxBytes {
+			flush()
+			additional = len(lineBytes)
+		}
+		if currentStart < 0 {
+			currentStart = lineIndex
+		}
+		currentEnd = lineIndex
+		current = append(current, line)
+		currentBytes += additional
+	}
+	flush()
+	return result
+}
+
+func splitUTF8ByteRanges(value []byte, maxBytes int) [][2]int {
+	result := [][2]int{}
+	for start := 0; start < len(value); {
+		end := start + maxBytes
+		if end > len(value) {
+			end = len(value)
+		}
+		for end > start && !utf8.Valid(value[start:end]) {
+			end--
+		}
+		if end == start {
+			_, size := utf8.DecodeRune(value[start:])
+			end = start + size
+		}
+		result = append(result, [2]int{start, end})
+		start = end
+	}
+	return result
 }
 
 func splitSection(lines []string, start, end, maxBytes int) [][2]int {
@@ -577,19 +837,8 @@ func extractTerms(chunk Chunk) []string {
 	// natural-language summary. Indexing it makes every chunk findable by what
 	// its document asserts, not only by the prose that happens to fall inside
 	// that chunk's line range.
-	fields := strings.FieldsFunc(chunk.Path+"\n"+chunk.Heading+"\n"+
-		chunk.Context+"\n"+chunk.Content, func(r rune) bool {
-		return !(r == '_' || r == '-' || r == '.' || r == '/' || r == ':' || r == '@' ||
-			r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')
-	})
-	terms := []string{}
-	for _, field := range fields {
-		field = strings.ToLower(strings.TrimSpace(field))
-		if len(field) >= 3 && len(field) <= 200 {
-			terms = append(terms, field)
-		}
-	}
-	return SortedUnique(terms)
+	return IdentifierTerms(chunk.Path + "\n" + chunk.Heading + "\n" +
+		chunk.Context + "\n" + chunk.Content)
 }
 
 func termTrigrams(value string) []string {

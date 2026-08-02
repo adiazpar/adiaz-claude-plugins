@@ -57,8 +57,29 @@ func IndexingSettingsDigest(settings KnowledgeSettings) string {
 
 func DefaultBootstrapConfig() BootstrapConfig {
 	return BootstrapConfig{
-		SchemaVersion:      BootstrapSchemaVersion,
-		KnowledgeDirectory: "knowledge",
+		SchemaVersion:         BootstrapSchemaVersion,
+		CampaignSchemaVersion: CampaignSchemaVersion,
+		State: StateConfig{
+			ActiveRoot: "active", ArchiveRoot: "docs/history/campaigns",
+			LockFile: ".re-discipline/state/write.lock", Recovery: "replay-and-verify",
+			GeneratedViewMaxItems: 24,
+		},
+		Authority: AuthorityConfig{
+			ManagerRoles:      []string{"manager", "user"},
+			CuratorWrites:     []string{"curator-run", "intake"},
+			DirectStateWrites: false, TruthProjection: "closure-only",
+		},
+		Context: ContextConfig{
+			ManagerCardTokens: 6144, DrafterCardTokens: 3072,
+			MaxCards: 16, MaxExpansionBytes: 32768, LeaseMode: "none",
+		},
+		Payload: PayloadConfig{
+			CreateLazily: true, MaxInlineBytes: 1048576, RequireRegistration: true,
+		},
+		Closure: ClosureConfig{
+			RequireRunCoverage: true, RequireFindingDisposition: true,
+			RequireFileRetention: true, RequireArchiveVerification: true,
+		},
 		Memory: MemoryConfig{
 			Mode:        "shared-only",
 			WritePolicy: "proposal-only",
@@ -69,16 +90,17 @@ func DefaultBootstrapConfig() BootstrapConfig {
 			SettingsFile:   "knowledge/policy.jsonc",
 			ProjectProfile: "knowledge/retrieval-profile.json",
 		},
+		Migration: MigrationConfig{Mode: "explicit-only", LegacyReaders: "migrator-only"},
 	}
 }
 
 func DefaultKnowledgeSettings() KnowledgeSettings {
 	return KnowledgeSettings{
-		SchemaVersion: 1,
+		SchemaVersion: SettingsSchemaVersion,
 		Sources: SourceSettings{
-			Truth: true, History: true, Backlog: true,
-			ActiveCampaigns: true, SharedMemory: true,
-			DrafterReports: true,
+			Truth: true, HistoryFindings: true, Backlog: true,
+			ActiveFindings: true, SharedMemory: true,
+			ReportFallback: true,
 		},
 		Models:    ModelSettings{Execution: "local"},
 		Telemetry: Telemetry{Mode: "metrics-only"},
@@ -88,7 +110,11 @@ func DefaultKnowledgeSettings() KnowledgeSettings {
 		// cost of 393, and retrieval behaved as top-1.
 		Budgets: BudgetSettings{
 			SearchTokens: 3072, ManagerContextTokens: 6144,
-			DrafterContextTokens: 3072, MaxPassages: 12, MaxBytes: 32768,
+			DrafterContextTokens: 3072, MaxPassages: 16, MaxBytes: 32768,
+		},
+		Archive: ArchiveSettings{
+			ReportFallbackUntilMeasured: true, NormalizationTriggerHits: 3,
+			FallbackMode: "default-fallback",
 		},
 	}
 }
@@ -362,8 +388,36 @@ func ValidateBootstrap(config BootstrapConfig) error {
 	if config.SchemaVersion != BootstrapSchemaVersion {
 		return fmt.Errorf("unsupported bootstrap schemaVersion %d", config.SchemaVersion)
 	}
-	if config.KnowledgeDirectory != "knowledge" ||
-		config.Knowledge.SettingsFile != "knowledge/policy.jsonc" ||
+	if config.CampaignSchemaVersion != CampaignSchemaVersion {
+		return fmt.Errorf("unsupported campaignSchemaVersion %d", config.CampaignSchemaVersion)
+	}
+	if config.State.ActiveRoot != "active" || config.State.ArchiveRoot != "docs/history/campaigns" ||
+		config.State.LockFile != ".re-discipline/state/write.lock" ||
+		config.State.Recovery != "replay-and-verify" ||
+		config.State.GeneratedViewMaxItems < 4 || config.State.GeneratedViewMaxItems > 100 {
+		return errors.New("state configuration must use the canonical roots, lock, recovery policy, and bounded view size")
+	}
+	if stableJSON(SortedUnique(config.Authority.ManagerRoles)) != stableJSON([]string{"manager", "user"}) ||
+		stableJSON(SortedUnique(config.Authority.CuratorWrites)) != stableJSON([]string{"curator-run", "intake"}) ||
+		config.Authority.DirectStateWrites || config.Authority.TruthProjection != "closure-only" {
+		return errors.New("authority configuration must enforce engine-only writes and closure-only truth")
+	}
+	if config.Context.ManagerCardTokens < 512 || config.Context.ManagerCardTokens > 8192 ||
+		config.Context.DrafterCardTokens < 512 || config.Context.DrafterCardTokens > 4096 ||
+		config.Context.MaxCards < 1 || config.Context.MaxCards > 50 ||
+		config.Context.MaxExpansionBytes < 4096 || config.Context.MaxExpansionBytes > 262144 ||
+		!validOne(config.Context.LeaseMode, "none", "memory-only") {
+		return errors.New("context configuration is outside safe bounds")
+	}
+	if !config.Payload.CreateLazily || config.Payload.MaxInlineBytes < 4096 ||
+		!config.Payload.RequireRegistration {
+		return errors.New("payload configuration must be lazy, bounded, and registration-gated")
+	}
+	if !config.Closure.RequireRunCoverage || !config.Closure.RequireFindingDisposition ||
+		!config.Closure.RequireFileRetention || !config.Closure.RequireArchiveVerification {
+		return errors.New("closure configuration cannot disable required gates")
+	}
+	if config.Knowledge.SettingsFile != "knowledge/policy.jsonc" ||
 		config.Knowledge.ProjectProfile != "knowledge/retrieval-profile.json" {
 		return fmt.Errorf("bootstrap paths must use the managed knowledge directory")
 	}
@@ -377,6 +431,9 @@ func ValidateBootstrap(config BootstrapConfig) error {
 	}
 	if config.Memory.WritePolicy != "proposal-only" {
 		return fmt.Errorf("shared memory writePolicy must be proposal-only")
+	}
+	if config.Migration.Mode != "explicit-only" || config.Migration.LegacyReaders != "migrator-only" {
+		return errors.New("migration must be explicit and the migrator must be the sole legacy reader")
 	}
 	return nil
 }
@@ -411,9 +468,9 @@ func ValidateSettings(settings KnowledgeSettings) error {
 		if _, err := filepath.Match(source.Pattern, "probe.md"); err != nil {
 			return fmt.Errorf("additional source %d has an invalid pattern: %w", index, err)
 		}
-		if source.Tier != "asset" {
+		if !validOne(source.Tier, "asset", "profile", "playbook") {
 			return fmt.Errorf(
-				"additional source %d must use the non-claim asset tier", index)
+				"additional source %d must use asset, profile, or playbook", index)
 		}
 		key := clean + "\x00" + source.Pattern + "\x00" + source.Tier
 		if additionalSeen[key] {
@@ -428,6 +485,32 @@ func ValidateSettings(settings KnowledgeSettings) error {
 		b.MaxPassages < 1 || b.MaxPassages > 50 ||
 		b.MaxBytes < 4096 || b.MaxBytes > 262144 {
 		return fmt.Errorf("knowledge budgets are outside safe bounds")
+	}
+	if settings.Archive.NormalizationTriggerHits < 1 || settings.Archive.NormalizationTriggerHits > 1000000 {
+		return fmt.Errorf("archive normalizationTriggerHits is outside safe bounds")
+	}
+	mode := settings.Archive.FallbackMode
+	if mode == "" {
+		mode = "default-fallback"
+	}
+	if !validOne(mode, "default-fallback", "opt-in") {
+		return fmt.Errorf("unsupported archive fallbackMode %q", settings.Archive.FallbackMode)
+	}
+	if !settings.Sources.ReportFallback {
+		return errors.New("archive reportFallback source must remain enabled for provenance expansion")
+	}
+	if settings.Archive.NormalizedBeatsRawReceipt != "" {
+		if err := ValidateArchiveReceiptPath(settings.Archive.NormalizedBeatsRawReceipt); err != nil {
+			return fmt.Errorf("archive normalizedBeatsRawReceipt: %w", err)
+		}
+	}
+	if mode == "opt-in" {
+		if settings.Archive.ReportFallbackUntilMeasured ||
+			settings.Archive.NormalizedBeatsRawReceipt == "" {
+			return errors.New("archive opt-in requires reportFallbackUntilMeasured=false and a ratified receipt path")
+		}
+	} else if !settings.Archive.ReportFallbackUntilMeasured {
+		return errors.New("archive default fallback requires reportFallbackUntilMeasured=true")
 	}
 	return nil
 }

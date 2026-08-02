@@ -107,21 +107,14 @@ type DocumentPrelude struct {
 var (
 	preludeVerdictRE      = regexp.MustCompile(`(?ms)^#{1,4}[ \t]*\d*\.?[ \t]*VERDICT\b[^\n]*\n+(.*?)(?:\n#{1,4}[ \t]|\z)`)
 	preludeOverallRE      = regexp.MustCompile(`(?mi)^#{0,4}[ \t]*\**\s*OVERALL CONFIDENCE\**[: \t]*(.*)$`)
-	preludeReviewRE       = regexp.MustCompile(`(?m)^\*\*Review:\*\*[ \t]*(.*)$`)
 	preludeVerdictLabelRE = regexp.MustCompile(
 		`^(?i)(VERDICT|DIRECT|INFERRED|CONFIRMED|REFUTED|PARTIAL)[ \t]*[:\-]+[ \t]*`)
-	preludeDispositionRE = regexp.MustCompile(`(?m)^\*\*Disposition:\*\*[ \t]*(.*)$`)
 )
 
-// ExtractReportPrelude reads a drafter report and returns its header in the
-// same shape as a truth document's, so one renderer serves both.
-//
-// A report's claim is its VERDICT, its confidence is OVERALL CONFIDENCE, and
-// its status is the manager's review disposition. An unreviewed report carries
-// a status saying so, and that status is never truncated away: a caller must
-// not be able to receive a drafter claim without learning nobody has checked
-// it.
-func ExtractReportPrelude(body, path string, reviewed bool) DocumentPrelude {
+// ExtractReportPrelude labels a raw run report as unnormalized provenance.
+// Manager decisions live in immutable review records and normalized findings,
+// never as mutable annotations inside the report itself.
+func ExtractReportPrelude(body, path string) DocumentPrelude {
 	prelude := DocumentPrelude{Title: normalizePreludeField(titleFromMarkdown(body, path))}
 	if match := preludeVerdictRE.FindStringSubmatch(body); match != nil {
 		// A verdict usually opens with its own epistemic label. Taking the
@@ -140,18 +133,7 @@ func ExtractReportPrelude(body, path string, reviewed bool) DocumentPrelude {
 		}
 		prelude.Confidence = truncateRunes(confidence, preludeConfidBytes)
 	}
-	if !reviewed {
-		prelude.Status = "UNREVIEWED - drafter claim, not evidence"
-		return prelude
-	}
-	prelude.Status = "reviewed"
-	if match := preludeDispositionRE.FindStringSubmatch(body); match != nil {
-		prelude.Correction = truncateRunes(
-			normalizePreludeField(match[1]), preludeCorrectBytes)
-	}
-	if match := preludeReviewRE.FindStringSubmatch(body); match != nil {
-		prelude.Verified = truncateRunes(normalizePreludeField(match[1]), 40)
-	}
+	prelude.Status = "UNNORMALIZED PROVENANCE - expand a finding and review before relying on this report"
 	return prelude
 }
 
@@ -189,6 +171,18 @@ func ExtractDocumentPrelude(body, path string) DocumentPrelude {
 		}
 	}
 	return prelude
+}
+
+// ExtractFindingPrelude projects typed finding metadata into the bounded
+// passage prelude. The normalized card is authoritative; this exists so a
+// legacy chunk fallback can never shed review or validity labels.
+func ExtractFindingPrelude(document SourceDocument) DocumentPrelude {
+	return DocumentPrelude{
+		Title:      normalizePreludeField(document.FindingID + " " + document.Title),
+		Status:     normalizePreludeField(document.ReviewState + "/" + document.Validity),
+		Claim:      firstSentence(document.FindingClaim, preludeClaimBytes),
+		Confidence: normalizePreludeField(document.EvidenceGrade),
+	}
 }
 
 // Render composes the prelude into its wire form, bounded to preludeMaxBytes.

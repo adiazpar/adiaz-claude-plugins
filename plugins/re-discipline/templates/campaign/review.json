@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "id": "V-0001",
+  "createdAt": "2000-01-01T00:00:00Z",
+  "updatedAt": "2000-01-01T00:00:00Z",
+  "revision": 1,
+  "createdBy": "manager",
+  "updatedBy": "manager",
+  "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "correlationId": "review-submit",
+  "campaignId": "C-CAMPAIGN",
+  "reviewer": "manager",
+  "authority": "manager",
+  "intakeId": "I-0001",
+  "intakeRevision": 1,
+  "packetDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "decisions": [
+    {
+      "findingId": "F-0001",
+      "findingRevision": 1,
+      "action": "ratify",
+      "projection": "campaign",
+      "rationale": "Evidence and scope verified"
+    }
+  ],
+  "unresolvedConflicts": [],
+  "resultingEventIds": [],
+  "resultingRecordIds": []
+}

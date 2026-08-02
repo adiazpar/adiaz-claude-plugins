@@ -57,7 +57,7 @@ type ContextPackOutcome struct {
 	RequestedTokenBudget    int      `json:"requestedTokenBudget"`
 	EffectiveTokenBudget    int      `json:"effectiveTokenBudget"`
 	RoleTokenCeiling        int      `json:"roleTokenCeiling"`
-	MaxPassages             int      `json:"maxPassages"`
+	MaxCards                int      `json:"maxCards"`
 	MaxBytes                int      `json:"maxBytes"`
 	PackID                  string   `json:"packId,omitempty"`
 	Digest                  string   `json:"digest,omitempty"`
@@ -67,7 +67,7 @@ type ContextPackOutcome struct {
 	Tiers                   []string `json:"tiers"`
 	RequiredPaths           []string `json:"requiredPaths"`
 	RequiredPathsFound      []string `json:"requiredPathsFound"`
-	PassageCount            int      `json:"passageCount"`
+	CardCount               int      `json:"cardCount"`
 	SerializedBytes         int      `json:"serializedBytes"`
 	EstimatedTokens         int      `json:"estimatedTokens"`
 	RoleCeilingSafe         bool     `json:"roleCeilingSafe"`
@@ -75,7 +75,7 @@ type ContextPackOutcome struct {
 	RequiredEvidencePresent bool     `json:"requiredEvidencePresent"`
 	ExpectedEvidenceFound   bool     `json:"expectedEvidenceFound"`
 	AbstentionCorrect       bool     `json:"abstentionCorrect"`
-	PassageCapSafe          bool     `json:"passageCapSafe"`
+	CardCapSafe             bool     `json:"cardCapSafe"`
 	ByteCapSafe             bool     `json:"byteCapSafe"`
 	TokenAccountingSafe     bool     `json:"tokenAccountingSafe"`
 	BudgetSafe              bool     `json:"budgetSafe"`
@@ -90,6 +90,12 @@ type ContextPackOutcome struct {
 	Passed                  bool     `json:"passed"`
 	Error                   string   `json:"error,omitempty"`
 }
+
+// A v2 pack carries a generation identity, state-head scope, exact handles,
+// and a bounded card envelope. At 512 tokens it can still provide a safe
+// abstaining response, but required evidence cannot be made a quality gate
+// without crowding out the metadata that makes the artifact verifiable.
+const MinimumContextPackEvidenceBudget = 1024
 
 type QualityMetrics struct {
 	RecallAtK                float64 `json:"recallAtK"`
@@ -137,6 +143,7 @@ type ProfileBenchmark struct {
 	MetricsBySplit         map[string]QualityMetrics       `json:"metricsBySplit"`
 	MetricsByBudget        map[string]QualityMetrics       `json:"metricsByBudget"`
 	QualityMetricsByBudget map[string]QualityMetrics       `json:"qualityMetricsByBudget"`
+	FindingEvaluation      FindingAblationReport           `json:"findingEvaluation"`
 	// ComputedEvidence is the evidence block this run measured, suitable for
 	// re-declaration in the packaged profile after an intentional contract
 	// change. EvaluatedAt is stamped by the updater, not here.
@@ -361,6 +368,11 @@ func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (Benchmar
 	if err != nil {
 		return BenchmarkReport{}, err
 	}
+	findingSuite, err := LoadFindingEvalSuite(filepath.Join(
+		assetRoot, "evals", "conformance", "finding-cases.json"))
+	if err != nil {
+		return BenchmarkReport{}, err
+	}
 	profileBody, err := os.ReadFile(filepath.Join(assetRoot, "profiles", "balanced-v1.json"))
 	if err != nil {
 		return BenchmarkReport{}, err
@@ -413,7 +425,7 @@ func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (Benchmar
 				return
 			}
 			var benchmark ProfileBenchmark
-			benchmark, err = benchmarkCases(ctx, service, row, cases)
+			benchmark, err = benchmarkCases(ctx, service, row, cases, findingSuite)
 			if err != nil {
 				return
 			}
@@ -463,6 +475,7 @@ func benchmarkCases(
 	service *Service,
 	row EffectiveProfile,
 	cases []EvalCase,
+	findingSuite FindingEvalSuite,
 ) (ProfileBenchmark, error) {
 	// Pin and lease the generation this profile starts on, exactly as the
 	// project benchmark does. Without the pin every one of the several thousand
@@ -479,8 +492,14 @@ func benchmarkCases(
 	defer lease.Release()
 	service.PinGeneration(generation)
 	defer service.flushTelemetry()
+	findingEvaluation, err := EvaluateFindingSuite(ctx, Retriever{
+		Boundary: service.Boundary, Generation: generation, Profile: selected,
+	}, findingSuite)
+	if err != nil {
+		return ProfileBenchmark{}, err
+	}
 	outcomes := make([]CaseOutcome, 0, len(cases))
-	passed := true
+	passed := findingEvaluationPassed(findingEvaluation)
 	for _, eval := range cases {
 		outcome, err := runEvaluationCase(ctx, eval, eval.TokenBudget, service.Boundary.Root, service.Search)
 		if err != nil {
@@ -563,7 +582,10 @@ func benchmarkCases(
 	}
 	semanticRow := cloneEffectiveProfile(row)
 	semanticRow.Benchmark = BenchmarkEvidence{Suite: row.Benchmark.Suite}
-	evalDigest, _ := CanonicalDigest(cases)
+	evalDigest, _ := CanonicalDigest(struct {
+		PassageCases []EvalCase       `json:"passageCases"`
+		FindingSuite FindingEvalSuite `json:"findingSuite"`
+	}{cases, findingSuite})
 	digestInput := struct {
 		Suite                  string                          `json:"suite"`
 		EffectiveProfile       EffectiveProfile                `json:"effectiveProfile"`
@@ -582,6 +604,7 @@ func benchmarkCases(
 		ContextPackCases       []ContextPackOutcome            `json:"contextPackCases"`
 		ContextPacksByBudget   map[string][]ContextPackOutcome `json:"contextPacksByBudget"`
 		ContextPackRoles       []string                        `json:"contextPackRoles"`
+		FindingEvaluation      FindingAblationReport           `json:"findingEvaluation"`
 	}{
 		"packaged-conformance-v1", semanticRow, evalDigest,
 		generation.CorpusFingerprint, ParserVersion, ChunkerVersion,
@@ -594,6 +617,7 @@ func benchmarkCases(
 		digestBudgets, digestQualityBudgets, digestBudgetCases,
 		contextPackOutcomesForDigest(contextPackCases),
 		contextPackBudgetsForDigest(contextPacksByBudget), contextPackRoles,
+		findingEvaluation,
 	}
 	digest, err := CanonicalDigest(digestInput)
 	if err != nil {
@@ -624,7 +648,20 @@ func benchmarkCases(
 		Metrics:              metrics, HoldoutMetrics: holdoutMetrics,
 		MetricsBySplit: metricsBySplit, MetricsByBudget: metricsByBudget,
 		QualityMetricsByBudget: qualityMetricsByBudget,
+		FindingEvaluation:      findingEvaluation,
 	}, nil
+}
+
+func findingEvaluationPassed(report FindingAblationReport) bool {
+	return report.SuiteID != "" && sha256ValueRE.MatchString(report.SuiteDigest) &&
+		report.FindingRecall == 1 && report.MeanReciprocalRank == 1 && report.RawPathRecall == 1 &&
+		report.AbstentionAccuracy == 1 && report.FindingHandleAccuracy == 1 &&
+		report.EvidenceHandleAccuracy == 1 && report.SourceClassAccuracy == 1 &&
+		report.ReviewStateAccuracy == 1 && report.ValidityAccuracy == 1 &&
+		report.VocabularyDisjointRate == 1 && report.DurabilityLabelAccuracy == 1 &&
+		report.HardNegativeHits == 0 && report.DeterministicReplayRate == 1 &&
+		report.NormalizedMedianTokens > 0 &&
+		report.NormalizedMedianTokens < report.RawMedianTokens
 }
 
 // EvidencePinHealth is the cheap, read-only census of pin rot.
@@ -1103,17 +1140,24 @@ func runContextPackCase(
 		append([]string(nil), eval.MinimumEvidencePaths...),
 		eval.ExpectedCitations...,
 	))
+	minimumEvidenceBudget := eval.TokenBudget
+	if minimumEvidenceBudget < MinimumContextPackEvidenceBudget {
+		minimumEvidenceBudget = MinimumContextPackEvidenceBudget
+	}
 	outcome := ContextPackOutcome{
 		CaseID: eval.ID, Split: eval.Split, Topic: eval.Topic, Role: eval.Role,
 		RequestedTokenBudget: tokenBudget, EffectiveTokenBudget: effectiveBudget,
 		RoleTokenCeiling: roleCeiling,
-		MaxPassages:      selected.Effective.Packing.MaxPassages,
+		MaxCards:         service.Configuration.Bootstrap.Context.MaxCards,
 		MaxBytes:         selected.Effective.Packing.MaxBytes,
 		RequiredPaths:    requiredPaths,
 		Paths:            []string{}, Tiers: []string{},
 		RequiredPathsFound:    []string{},
-		MinimumTokenBudget:    eval.TokenBudget,
-		QualityGateApplicable: tokenBudget >= eval.TokenBudget,
+		MinimumTokenBudget:    minimumEvidenceBudget,
+		QualityGateApplicable: tokenBudget >= minimumEvidenceBudget,
+	}
+	if outcome.MaxCards < 1 {
+		outcome.MaxCards = selected.Effective.Packing.MaxPassages
 	}
 	injectedRequired := requiredPaths
 	if !outcome.QualityGateApplicable {
@@ -1146,14 +1190,14 @@ func runContextPackCase(
 	outcome.Digest = first.Digest
 	outcome.Generation = first.Generation.ID
 	outcome.EffectiveProfile = first.EffectiveProfile
-	outcome.PassageCount = len(first.Passages)
+	outcome.CardCount = len(first.Cards)
 	outcome.SerializedBytes = len(body)
 	outcome.EstimatedTokens = first.EstimatedTokens
 	outcome.ReplayIdentical = stableJSON(first) == stableJSON(second)
 	outcome.RoleCeilingSafe =
 		first.TokenBudget == effectiveBudget &&
 			first.TokenBudget <= roleCeiling
-	outcome.PassageCapSafe = len(first.Passages) <= outcome.MaxPassages
+	outcome.CardCapSafe = len(first.Cards) <= outcome.MaxCards
 	outcome.ByteCapSafe = len(body) <= outcome.MaxBytes
 	outcome.TokenAccountingSafe =
 		EstimateTokens(string(body)) == first.EstimatedTokens
@@ -1167,19 +1211,25 @@ func runContextPackCase(
 	outcome.AllowedTiersSafe = stableJSON(first.AllowedTiers) == stableJSON(allowed)
 	foundPaths := map[string]bool{}
 	expectedFound := false
-	for _, passage := range first.Passages {
-		outcome.Paths = append(outcome.Paths, passage.Citation.Path)
-		outcome.Tiers = append(outcome.Tiers, passage.Citation.Tier)
-		foundPaths[passage.Citation.Path] = true
-		if contains(eval.ExpectedPaths, passage.Citation.Path) {
+	for _, card := range first.Cards {
+		path := card.Metadata["path"]
+		tier := card.Metadata["tier"]
+		if tier == "" {
+			tier = card.SourceClass
+		}
+		if path != "" {
+			outcome.Paths = append(outcome.Paths, path)
+			foundPaths[path] = true
+		}
+		outcome.Tiers = append(outcome.Tiers, tier)
+		if contains(eval.ExpectedPaths, path) {
 			expectedFound = true
 		}
-		if !contains(allowed, passage.Citation.Tier) ||
-			!strings.HasPrefix(
-				passage.Citation.URI,
-				"re-discipline://"+first.Generation.ID+"/",
-			) {
+		if !contextCardAllowedByTiers(card, allowed) {
 			outcome.AllowedTiersSafe = false
+		}
+		if strings.HasPrefix(card.Handle, "re-discipline://") &&
+			!strings.HasPrefix(card.Handle, "re-discipline://"+first.Generation.ID+"/") {
 			outcome.GenerationPinned = false
 		}
 	}
@@ -1194,10 +1244,10 @@ func runContextPackCase(
 		len(outcome.RequiredPathsFound) == len(requiredPaths)
 	if eval.Answerable != nil && *eval.Answerable {
 		outcome.ExpectedEvidenceFound = expectedFound
-		outcome.AbstentionCorrect = len(first.Passages) > 0
+		outcome.AbstentionCorrect = len(first.Cards) > 0
 	} else {
-		outcome.ExpectedEvidenceFound = len(first.Passages) == 0
-		outcome.AbstentionCorrect = len(first.Passages) == 0
+		outcome.ExpectedEvidenceFound = len(first.Cards) == 0
+		outcome.AbstentionCorrect = len(first.Cards) == 0
 	}
 	if _, err := VerifyContextPackValueExpected(
 		first, first.Digest, first.PackID,
@@ -1208,7 +1258,7 @@ func runContextPackCase(
 	}
 	outcome.SafetyPassed =
 		outcome.RoleCeilingSafe && outcome.AllowedTiersSafe &&
-			outcome.PassageCapSafe && outcome.ByteCapSafe &&
+			outcome.CardCapSafe && outcome.ByteCapSafe &&
 			outcome.TokenAccountingSafe && outcome.BudgetSafe &&
 			outcome.GenerationPinned && outcome.ProfilePinned &&
 			outcome.VerificationPassed && outcome.ReplayIdentical
@@ -1217,6 +1267,19 @@ func runContextPackCase(
 			outcome.ExpectedEvidenceFound && outcome.AbstentionCorrect)
 	outcome.Passed = outcome.SafetyPassed && outcome.QualityPassed
 	return outcome
+}
+
+func contextCardAllowedByTiers(card ContextCard, tiers []string) bool {
+	if card.SourceClass == "state" {
+		// State cards are target bindings, not retrieved epistemic content.
+		return true
+	}
+	for _, tier := range tiers {
+		if contextSourceClass(tier) == card.SourceClass || tier == card.Metadata["tier"] {
+			return true
+		}
+	}
+	return false
 }
 
 func evaluationOutcomePassed(outcome CaseOutcome) bool {
@@ -1549,7 +1612,7 @@ func VerifyContextPackValueExpected(
 	expectedDigest string,
 	expectedID string,
 ) (map[string]any, error) {
-	if pack.SchemaVersion != 1 || pack.PackID == "" || pack.Digest == "" {
+	if pack.SchemaVersion != CampaignSchemaVersion || pack.PackID == "" || pack.Digest == "" {
 		return nil, errors.New("context pack identity is missing")
 	}
 	claimedDigest, claimedID := pack.Digest, pack.PackID
@@ -1583,13 +1646,15 @@ func VerifyContextPackValueExpected(
 	}
 	return map[string]any{
 		"valid": true, "packId": claimedID, "digest": claimedDigest,
-		"generation": pack.Generation, "effectiveProfile": pack.EffectiveProfile,
+		"scope": pack.Scope, "generation": pack.Generation,
+		"effectiveProfile": pack.EffectiveProfile,
 	}, nil
 }
 
 func validateContextPackSemantics(pack ContextPack) error {
-	if len([]byte(pack.Query)) < 1 || len([]byte(pack.Query)) > 2000 {
-		return errors.New("context pack query is invalid")
+	if pack.SchemaVersion != CampaignSchemaVersion ||
+		len([]byte(pack.Task)) < 1 || len([]byte(pack.Task)) > 2000 {
+		return errors.New("context pack schema or task is invalid")
 	}
 	if pack.Role != "manager" && pack.Role != "drafter" {
 		return errors.New("context pack role is invalid")
@@ -1668,9 +1733,12 @@ func validateContextPackSemantics(pack ContextPack) error {
 	if _, err := time.Parse(time.RFC3339, pack.Generation.CreatedAt); err != nil {
 		return errors.New("context pack generation createdAt is malformed")
 	}
+	if err := validateContextPackScope(pack.Scope); err != nil {
+		return err
+	}
 	requiredOmissions := map[string]bool{
-		"candidatePassages": true, "budget": true, "documentCap": true,
-		"resultLimit": true, "staleSource": true,
+		"candidateCards": true, "budget": true, "cardLimit": true,
+		"staleSource": true,
 	}
 	if len(pack.Omitted) != len(requiredOmissions) {
 		return errors.New("context pack omission counters have unsupported fields")
@@ -1680,49 +1748,69 @@ func validateContextPackSemantics(pack ContextPack) error {
 			return errors.New("context pack omission counters are invalid")
 		}
 	}
-	if len(pack.Passages) > 50 {
-		return errors.New("context pack passage cardinality is invalid")
+	if len(pack.Cards) > 50 {
+		return errors.New("context pack card cardinality is invalid")
 	}
-	if pack.Verbosity != "" && pack.Verbosity != VerbosityCompact &&
-		pack.Verbosity != VerbosityVerbose {
-		return errors.New("context pack verbosity is invalid")
+	if stableJSON(pack.RequiredHandles) != stableJSON(SortedUnique(pack.RequiredHandles)) {
+		return errors.New("context pack required handles must be unique and sorted")
 	}
-	// A compact pack drops the document hash, which is re-derivable by hashing
-	// the cited file. It keeps the generation-scoped URI: that handle is the
-	// only thing binding each passage to the generation the pack claims, and a
-	// pack is a stored artifact that gets re-verified somewhere else. A pack
-	// written before this field existed carries no verbosity and is held to the
-	// original contract, so nothing that was invalid before becomes valid now.
-	compactCitations := pack.Verbosity == VerbosityCompact
-	seenChunks, seenHandles := map[string]bool{}, map[string]bool{}
-	for _, result := range pack.Passages {
-		if result.ChunkID == "" || seenChunks[result.ChunkID] ||
-			result.Passage == "" {
-			return errors.New("context pack passage identity is invalid or repeated")
+	requiredSet := map[string]bool{}
+	for _, handle := range pack.RequiredHandles {
+		if strings.TrimSpace(handle) != handle || handle == "" || len([]byte(handle)) > 2000 {
+			return errors.New("context pack contains an invalid required handle")
 		}
-		seenChunks[result.ChunkID] = true
-		citation := result.Citation
-		if err := validateEvalPath(citation.Path); err != nil ||
-			citation.StartLine < 1 || citation.EndLine < citation.StartLine ||
-			!hexDigestRE.MatchString(citation.PassageHash) ||
-			citation.PassageHash != SHA256String(result.Passage) ||
-			!AllowedTiers[citation.Tier] || !contains(tiers, citation.Tier) {
-			return errors.New("context pack passage citation is invalid")
+		requiredSet[handle] = true
+	}
+	seenConstraints := map[string]bool{}
+	for _, constraint := range pack.AcceptedConstraints {
+		if constraint.ID == "" || seenConstraints[constraint.ID] ||
+			!validOne(constraint.Kind, "objective", "scope", "exclusion", "success", "closure", "problem", "acceptance", "finding") ||
+			strings.TrimSpace(constraint.Text) == "" || len([]byte(constraint.Text)) > 4000 ||
+			!requiredSet[constraint.SourceHandle] {
+			return errors.New("context pack accepted constraint is invalid or unbound")
 		}
-		if citation.SourceHash != "" || !compactCitations {
-			if !hexDigestRE.MatchString(citation.SourceHash) {
-				return errors.New("context pack passage citation is invalid")
+		seenConstraints[constraint.ID] = true
+	}
+	if pack.Scope.Kind == "active-run" && len(pack.AcceptedConstraints) < 2 {
+		return errors.New("active-run context pack lacks accepted campaign and work constraints")
+	}
+	if pack.Scope.Kind != "active-run" && len(pack.AcceptedConstraints) != 0 {
+		return errors.New("only active-run context packs may carry accepted constraints")
+	}
+	seenIDs, seenHandles := map[string]bool{}, map[string]bool{}
+	for _, card := range pack.Cards {
+		if err := ValidateContextCard(card); err != nil {
+			return fmt.Errorf("context pack card: %w", err)
+		}
+		if seenIDs[card.ID] || seenHandles[card.Handle] {
+			return errors.New("context pack card identities or handles are repeated")
+		}
+		seenIDs[card.ID], seenHandles[card.Handle] = true, true
+		if !requiredSet[card.Handle] && !contextCardAllowedByTiers(card, tiers) {
+			return fmt.Errorf(
+				"context pack card %s (%s, tier %s) is outside the allowed epistemic tiers",
+				card.ID, card.SourceClass, card.Metadata["tier"])
+		}
+		if strings.HasPrefix(card.Handle, "re-discipline://") {
+			prefix := "re-discipline://" + generationID + "/"
+			if !strings.HasPrefix(card.Handle, prefix+"chunks/") &&
+				!strings.HasPrefix(card.Handle, prefix+"sources/") {
+				return errors.New("context pack card belongs to another generation")
 			}
 		}
-		prefix := "re-discipline://" + generationID + "/"
-		if !strings.HasPrefix(citation.URI, prefix+"chunks/") &&
-			!strings.HasPrefix(citation.URI, prefix+"sources/") {
-			return errors.New("context pack citation belongs to another generation")
+		if path := card.Metadata["path"]; path != "" {
+			if err := validateEvalPath(path); err != nil {
+				return errors.New("context pack card carries an invalid source path")
+			}
 		}
-		if seenHandles[citation.URI] {
-			return errors.New("context pack citation handles are repeated")
+		if tier := card.Metadata["tier"]; tier != "" && !AllowedTiers[tier] {
+			return errors.New("context pack card carries an invalid source tier")
 		}
-		seenHandles[citation.URI] = true
+		for _, key := range []string{"passageHash", "sourceHash"} {
+			if value := card.Metadata[key]; value != "" && !hexDigestRE.MatchString(value) {
+				return errors.New("context pack provenance digest is malformed")
+			}
+		}
 	}
 	body, err := json.Marshal(pack)
 	if err != nil {
@@ -1735,36 +1823,77 @@ func validateContextPackSemantics(pack ContextPack) error {
 	return nil
 }
 
+func validateContextPackScope(scope ContextPackScope) error {
+	if scope.StateHeadRevision < 0 || !digestRE.MatchString(scope.StateHeadDigest) {
+		return errors.New("context pack state-head binding is invalid")
+	}
+	if scope.StateHeadRevision == 0 && scope.EventID != "" ||
+		scope.StateHeadRevision > 0 && !eventIDRE.MatchString(scope.EventID) {
+		return errors.New("context pack event-head binding is invalid")
+	}
+	switch scope.Kind {
+	case "project":
+		if scope.CampaignID != "" || scope.CampaignSlug != "" ||
+			scope.CampaignRevision != 0 || scope.WorkItemID != "" ||
+			scope.WorkItemRevision != 0 || scope.RunID != "" || scope.RunRevision != 0 ||
+			scope.CandidateSlug != "" || scope.RecruitingRunID != "" {
+			return errors.New("project context scope carries run bindings")
+		}
+	case "active-run":
+		if !campaignIDRE.MatchString(scope.CampaignID) ||
+			!managedSlugRE.MatchString(scope.CampaignSlug) || scope.CampaignRevision < 1 ||
+			!workItemIDRE.MatchString(scope.WorkItemID) || scope.WorkItemRevision < 1 ||
+			!runIDRE.MatchString(scope.RunID) || scope.RunRevision < 0 ||
+			scope.CandidateSlug != "" || scope.RecruitingRunID != "" {
+			return errors.New("active-run context scope is incomplete or mixed")
+		}
+	case "recruiting-run":
+		if !managedSlugRE.MatchString(scope.CandidateSlug) ||
+			!workspaceIDRE.MatchString(scope.RecruitingRunID) ||
+			scope.CampaignID != "" || scope.CampaignSlug != "" ||
+			scope.CampaignRevision != 0 || scope.WorkItemID != "" ||
+			scope.WorkItemRevision != 0 || scope.RunID != "" || scope.RunRevision != 0 {
+			return errors.New("recruiting-run context scope is incomplete or mixed")
+		}
+	default:
+		return errors.New("context pack target kind is invalid")
+	}
+	return nil
+}
+
 type CalibrationCandidate struct {
-	Identity              string         `json:"identity"`
-	Weights               map[string]int `json:"weights"`
-	DevelopmentHit        int            `json:"developmentHits"`
-	HoldoutHit            int            `json:"holdoutHits"`
-	DevelopmentMetrics    QualityMetrics `json:"developmentMetrics"`
-	HoldoutMetrics        QualityMetrics `json:"holdoutMetrics"`
-	Violations            int            `json:"violations"`
-	HardGatesPassed       bool           `json:"hardGatesPassed"`
-	NonInferiorToBaseline bool           `json:"nonInferiorToBaseline"`
-	Pareto                bool           `json:"pareto"`
-	BenchmarkDigest       string         `json:"benchmarkDigest,omitempty"`
+	Identity              string                    `json:"identity"`
+	Weights               map[string]int            `json:"weights"`
+	DevelopmentHit        int                       `json:"developmentHits"`
+	HoldoutHit            int                       `json:"holdoutHits"`
+	DevelopmentMetrics    QualityMetrics            `json:"developmentMetrics"`
+	HoldoutMetrics        QualityMetrics            `json:"holdoutMetrics"`
+	FindingDevelopment    *FindingEvaluationMetrics `json:"findingDevelopment,omitempty"`
+	FindingHoldout        *FindingEvaluationMetrics `json:"findingHoldout,omitempty"`
+	Violations            int                       `json:"violations"`
+	HardGatesPassed       bool                      `json:"hardGatesPassed"`
+	NonInferiorToBaseline bool                      `json:"nonInferiorToBaseline"`
+	Pareto                bool                      `json:"pareto"`
+	BenchmarkDigest       string                    `json:"benchmarkDigest,omitempty"`
 }
 
 type CalibrationReport struct {
-	SchemaVersion     int                     `json:"schemaVersion"`
-	RunID             string                  `json:"runId"`
-	BaseProfile       string                  `json:"baseProfile"`
-	ActiveBefore      string                  `json:"activeBefore"`
-	ActiveAfter       string                  `json:"activeAfter"`
-	EvalDigest        string                  `json:"evalDigest"`
-	CorpusFingerprint string                  `json:"corpusFingerprint"`
-	ModelFingerprint  string                  `json:"modelFingerprint"`
-	RuntimeContract   RuntimeContractIdentity `json:"runtimeContract"`
-	Candidates        []CalibrationCandidate  `json:"candidates"`
-	ParetoFrontier    []CalibrationCandidate  `json:"paretoFrontier"`
-	Recommended       CalibrationCandidate    `json:"recommended"`
-	CandidatePath     string                  `json:"candidatePath"`
-	CandidateDigest   string                  `json:"candidateDigest"`
-	Activated         bool                    `json:"activated"`
+	SchemaVersion       int                     `json:"schemaVersion"`
+	RunID               string                  `json:"runId"`
+	BaseProfile         string                  `json:"baseProfile"`
+	ActiveBefore        string                  `json:"activeBefore"`
+	ActiveAfter         string                  `json:"activeAfter"`
+	EvalDigest          string                  `json:"evalDigest"`
+	FindingSuiteDigests []string                `json:"findingSuiteDigests,omitempty"`
+	CorpusFingerprint   string                  `json:"corpusFingerprint"`
+	ModelFingerprint    string                  `json:"modelFingerprint"`
+	RuntimeContract     RuntimeContractIdentity `json:"runtimeContract"`
+	Candidates          []CalibrationCandidate  `json:"candidates"`
+	ParetoFrontier      []CalibrationCandidate  `json:"paretoFrontier"`
+	Recommended         CalibrationCandidate    `json:"recommended"`
+	CandidatePath       string                  `json:"candidatePath"`
+	CandidateDigest     string                  `json:"candidateDigest"`
+	Activated           bool                    `json:"activated"`
 	// FailureReason is set when a sweep produced no promotable candidate. The
 	// report is still written so the measurements survive and the operator can
 	// see which gate blocked which candidate.
@@ -1784,6 +1913,7 @@ func (service *Service) persistCalibrationFailure(
 	selected SelectedProfile,
 	candidates []CalibrationCandidate,
 	frontier []CalibrationCandidate,
+	findingSuiteDigests []string,
 	reason string,
 ) string {
 	runID := nowRunID("calibration")
@@ -1800,10 +1930,11 @@ func (service *Service) persistCalibrationFailure(
 	report := CalibrationReport{
 		SchemaVersion: 1, RunID: runID, BaseProfile: service.ProfileCatalog.ProfileID,
 		ActiveBefore: before, ActiveAfter: before, EvalDigest: evalDigest,
-		CorpusFingerprint: generation.CorpusFingerprint,
-		ModelFingerprint:  mustDigest(service.ModelManifest.Models),
-		RuntimeContract:   RuntimeContract(selected.Runtime),
-		Candidates:        candidates, ParetoFrontier: frontier,
+		FindingSuiteDigests: findingSuiteDigests,
+		CorpusFingerprint:   generation.CorpusFingerprint,
+		ModelFingerprint:    mustDigest(service.ModelManifest.Models),
+		RuntimeContract:     RuntimeContract(selected.Runtime),
+		Candidates:          candidates, ParetoFrontier: frontier,
 		Activated: false, FailureReason: reason,
 	}
 	path := filepath.Join(runDir, "report.json")
@@ -1823,6 +1954,12 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 		return CalibrationReport{}, errors.New(
 			"calibration requires topic-isolated development and holdout cases")
 	}
+	findingSuites, err := service.loadProjectFindingEvalSuites()
+	if err != nil {
+		return CalibrationReport{}, err
+	}
+	findingDevelopmentCases, findingHoldoutCases, findingSuiteDigests :=
+		splitFindingEvalSuites(findingSuites)
 	// Calibration measures every candidate against one generation for far
 	// longer than a benchmark does. It never re-ensures, so the lease alone
 	// keeps a concurrently publishing session's retention from deleting the
@@ -1835,6 +1972,12 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	defer lease.Release()
 	before := selected.EffectiveIdentity
 	evalDigest, _ := CanonicalDigest(cases)
+	if len(findingSuites) > 0 {
+		evalDigest, _ = CanonicalDigest(struct {
+			PassageCases  []EvalCase         `json:"passageCases"`
+			FindingSuites []FindingEvalSuite `json:"findingSuites"`
+		}{cases, findingSuites})
+	}
 	baselineRetriever := Retriever{
 		Boundary: service.Boundary, Generation: generation, Profile: selected,
 	}
@@ -1846,8 +1989,20 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	}
 	baselineHoldoutMetrics = ratchetBaseline(
 		selected.Effective.Benchmark, baselineHoldoutMetrics)
+	var baselineFindingHoldout *FindingEvaluationMetrics
+	if len(findingHoldoutCases) > 0 {
+		findingReport, err := EvaluateFindingRetriever(
+			ctx, baselineRetriever, findingHoldoutCases)
+		if err != nil {
+			return CalibrationReport{}, fmt.Errorf(
+				"evaluate active finding holdout baseline: %w", err)
+		}
+		metrics := findingReport.MetricsBySplit["holdout"]
+		baselineFindingHoldout = &metrics
+	}
 	candidates := []CalibrationCandidate{}
 	rowsByIdentity := map[string]EffectiveProfile{}
+	findingDevelopmentCache := map[string]FindingEvaluationMetrics{}
 	for _, exact := range []int{6, 8, 10} {
 		for _, fts := range []int{4, 6, 8} {
 			for _, graph := range []int{1, 2, 3} {
@@ -1878,6 +2033,23 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 							metrics.HardNegativeHits,
 						HardGatesPassed: hardMetricsPassed(metrics),
 					}
+					if len(findingDevelopmentCases) > 0 {
+						cacheKey := findingCalibrationWeightKey(row.Weights)
+						findingMetrics, cached := findingDevelopmentCache[cacheKey]
+						if !cached {
+							findingReport, findingErr := EvaluateFindingRetriever(
+								ctx, retriever, findingDevelopmentCases)
+							if findingErr != nil {
+								return CalibrationReport{}, findingErr
+							}
+							findingMetrics = findingReport.MetricsBySplit["development"]
+							findingDevelopmentCache[cacheKey] = findingMetrics
+						}
+						candidate.FindingDevelopment = &findingMetrics
+						candidate.Violations += findingMetrics.HardNegativeHits
+						candidate.HardGatesPassed = candidate.HardGatesPassed &&
+							findingCalibrationMetricsPassed(findingMetrics)
+					}
 					candidates = append(candidates, candidate)
 					rowsByIdentity[candidate.Identity] = row
 				}
@@ -1888,13 +2060,15 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	if len(frontierIndexes) == 0 {
 		reason := "no calibration candidate reached the Pareto frontier"
 		path := service.persistCalibrationFailure(
-			before, evalDigest, generation, selected, candidates, nil, reason,
+			before, evalDigest, generation, selected, candidates, nil,
+			findingSuiteDigests, reason,
 		)
 		if path != "" {
 			return CalibrationReport{}, fmt.Errorf("%s; measurements written to %s", reason, path)
 		}
 		return CalibrationReport{}, errors.New(reason)
 	}
+	findingHoldoutCache := map[string]FindingEvaluationMetrics{}
 	for _, index := range frontierIndexes {
 		row := rowsByIdentity[candidates[index].Identity]
 		candidateProfile, err := selectedForRow(
@@ -1917,6 +2091,27 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 			candidates[index].HardGatesPassed && hardMetricsPassed(metrics)
 		candidates[index].NonInferiorToBaseline =
 			calibrationNonInferior(metrics, baselineHoldoutMetrics)
+		if len(findingHoldoutCases) > 0 {
+			cacheKey := findingCalibrationWeightKey(row.Weights)
+			findingMetrics, cached := findingHoldoutCache[cacheKey]
+			if !cached {
+				findingReport, findingErr := EvaluateFindingRetriever(
+					ctx, retriever, findingHoldoutCases)
+				if findingErr != nil {
+					return CalibrationReport{}, findingErr
+				}
+				findingMetrics = findingReport.MetricsBySplit["holdout"]
+				findingHoldoutCache[cacheKey] = findingMetrics
+			}
+			candidates[index].FindingHoldout = &findingMetrics
+			candidates[index].Violations += findingMetrics.HardNegativeHits
+			candidates[index].HardGatesPassed = candidates[index].HardGatesPassed &&
+				findingCalibrationMetricsPassed(findingMetrics)
+			candidates[index].NonInferiorToBaseline =
+				candidates[index].NonInferiorToBaseline &&
+					baselineFindingHoldout != nil &&
+					findingCalibrationNonInferior(findingMetrics, *baselineFindingHoldout)
+		}
 		candidates[index].Violations +=
 			metrics.AuthorityViolations + metrics.CitationViolations +
 				metrics.HardNegativeHits
@@ -1927,6 +2122,10 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 			candidates[index].DevelopmentMetrics,
 			candidates[index].HoldoutMetrics,
 			baselineHoldoutMetrics,
+			candidates[index].FindingDevelopment,
+			candidates[index].FindingHoldout,
+			baselineFindingHoldout,
+			findingSuiteDigests,
 		)
 		candidates[index].BenchmarkDigest = benchmarkDigest
 	}
@@ -1948,7 +2147,8 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 			evaluated = append(evaluated, candidates[index])
 		}
 		path := service.persistCalibrationFailure(
-			before, evalDigest, generation, selected, candidates, evaluated, reason,
+			before, evalDigest, generation, selected, candidates, evaluated,
+			findingSuiteDigests, reason,
 		)
 		if path != "" {
 			return CalibrationReport{}, fmt.Errorf("%s; measurements written to %s", reason, path)
@@ -2014,10 +2214,11 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	report := CalibrationReport{
 		SchemaVersion: 1, RunID: runID, BaseProfile: service.ProfileCatalog.ProfileID,
 		ActiveBefore: before, ActiveAfter: before, EvalDigest: evalDigest,
-		CorpusFingerprint: generation.CorpusFingerprint,
-		ModelFingerprint:  mustDigest(service.ModelManifest.Models),
-		RuntimeContract:   RuntimeContract(selected.Runtime),
-		Candidates:        candidates, ParetoFrontier: frontier, Recommended: recommended,
+		FindingSuiteDigests: findingSuiteDigests,
+		CorpusFingerprint:   generation.CorpusFingerprint,
+		ModelFingerprint:    mustDigest(service.ModelManifest.Models),
+		RuntimeContract:     RuntimeContract(selected.Runtime),
+		Candidates:          candidates, ParetoFrontier: frontier, Recommended: recommended,
 		CandidatePath: filepath.ToSlash(candidatePath), CandidateDigest: candidateDigest,
 		Activated: false,
 	}
@@ -2034,19 +2235,29 @@ func calibrationBenchmarkDigest(
 	development QualityMetrics,
 	holdout QualityMetrics,
 	baselineHoldout QualityMetrics,
+	findingDevelopment *FindingEvaluationMetrics,
+	findingHoldout *FindingEvaluationMetrics,
+	baselineFindingHoldout *FindingEvaluationMetrics,
+	findingSuiteDigests []string,
 ) (string, error) {
 	return CanonicalDigest(struct {
-		Suite           string         `json:"suite"`
-		Identity        string         `json:"identity"`
-		EvalDigest      string         `json:"evalDigest"`
-		Corpus          string         `json:"corpusFingerprint"`
-		Development     QualityMetrics `json:"development"`
-		Holdout         QualityMetrics `json:"holdout"`
-		BaselineHoldout QualityMetrics `json:"baselineHoldout"`
+		Suite                  string                    `json:"suite"`
+		Identity               string                    `json:"identity"`
+		EvalDigest             string                    `json:"evalDigest"`
+		Corpus                 string                    `json:"corpusFingerprint"`
+		Development            QualityMetrics            `json:"development"`
+		Holdout                QualityMetrics            `json:"holdout"`
+		BaselineHoldout        QualityMetrics            `json:"baselineHoldout"`
+		FindingDevelopment     *FindingEvaluationMetrics `json:"findingDevelopment,omitempty"`
+		FindingHoldout         *FindingEvaluationMetrics `json:"findingHoldout,omitempty"`
+		BaselineFindingHoldout *FindingEvaluationMetrics `json:"baselineFindingHoldout,omitempty"`
+		FindingSuiteDigests    []string                  `json:"findingSuiteDigests,omitempty"`
 	}{
 		"project-calibration-v1", identity, evalDigest, corpusFingerprint,
 		metricsWithoutLatency(development), metricsWithoutLatency(holdout),
 		metricsWithoutLatency(baselineHoldout),
+		findingDevelopment, findingHoldout, baselineFindingHoldout,
+		append([]string(nil), findingSuiteDigests...),
 	})
 }
 
@@ -2138,7 +2349,8 @@ func paretoFrontierIndexes(candidates []CalibrationCandidate) []int {
 		dominated := false
 		for otherIndex, other := range candidates {
 			if otherIndex != index &&
-				developmentDominates(other.DevelopmentMetrics, candidate.DevelopmentMetrics) {
+				developmentDominates(other.DevelopmentMetrics, candidate.DevelopmentMetrics) &&
+				findingDevelopmentNotWorse(other.FindingDevelopment, candidate.FindingDevelopment) {
 				dominated = true
 				break
 			}
@@ -2175,6 +2387,16 @@ func developmentDominates(left, right QualityMetrics) bool {
 }
 
 func calibrationCandidateLess(left, right CalibrationCandidate) bool {
+	if left.FindingHoldout != nil && right.FindingHoldout != nil {
+		for _, pair := range [][2]float64{
+			{left.FindingHoldout.FindingRecall, right.FindingHoldout.FindingRecall},
+			{left.FindingHoldout.MeanReciprocalRank, right.FindingHoldout.MeanReciprocalRank},
+		} {
+			if pair[0] != pair[1] {
+				return pair[0] > pair[1]
+			}
+		}
+	}
 	for _, pair := range [][2]float64{
 		{left.HoldoutMetrics.CompleteEvidenceCoverage, right.HoldoutMetrics.CompleteEvidenceCoverage},
 		{left.HoldoutMetrics.RecallAtK, right.HoldoutMetrics.RecallAtK},
@@ -2302,7 +2524,13 @@ func (service *Service) loadProjectEvalCases() ([]EvalCase, error) {
 		if entry.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("evaluation corpus contains a symbolic link: %s", path)
 		}
-		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+		if entry.IsDir() {
+			if path != root && entry.Name() == "findings" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
 			return nil
 		}
 		resolved, err := canonicalExistingPath(path)
@@ -2332,4 +2560,313 @@ func (service *Service) loadProjectEvalCases() ([]EvalCase, error) {
 		return nil, fmt.Errorf("combined project evaluation corpus: %w", err)
 	}
 	return cases, nil
+}
+
+// FindingEvalCase and FindingAblationReport are additive finding-card
+// judgments. They intentionally use stable finding/evidence handles rather
+// than adapting the path-only 0.7 case schema in place.
+type FindingEvalCase struct {
+	ID                      string              `json:"id"`
+	Role                    string              `json:"role"`
+	Topic                   string              `json:"topic"`
+	Split                   string              `json:"split"`
+	Query                   string              `json:"query"`
+	QueryClass              string              `json:"queryClass"`
+	AllowedSourceClasses    []string            `json:"allowedSourceClasses"`
+	AllowedReviewStates     []string            `json:"allowedReviewStates"`
+	AllowedValidities       []string            `json:"allowedValidities"`
+	TokenBudget             int                 `json:"tokenBudget"`
+	Options                 FindingQueryOptions `json:"-"`
+	ExpectedFindingIDs      []string            `json:"expectedFindingIds"`
+	ExpectedFindingHandles  []string            `json:"expectedFindingHandles"`
+	ExpectedEvidenceHandles []string            `json:"expectedEvidenceHandles,omitempty"`
+	ExpectedRawPaths        []string            `json:"expectedRawPaths,omitempty"`
+	ExpectedSourceClasses   map[string]string   `json:"expectedSourceClasses"`
+	ExpectedReviewStates    map[string]string   `json:"expectedReviewStates"`
+	ExpectedValidities      map[string]string   `json:"expectedValidities"`
+	HardNegativeFindingIDs  []string            `json:"hardNegativeFindingIds,omitempty"`
+	Answerable              bool                `json:"answerable"`
+}
+
+type FindingCaseOutcome struct {
+	CaseID                       string         `json:"caseId"`
+	Role                         string         `json:"role"`
+	Topic                        string         `json:"topic"`
+	Split                        string         `json:"split"`
+	QueryClass                   string         `json:"queryClass"`
+	Status                       string         `json:"status"`
+	CardIDs                      []string       `json:"cardIds"`
+	FindingIDs                   []string       `json:"findingIds"`
+	RawPaths                     []string       `json:"rawPaths"`
+	RelevantFindingRanks         []int          `json:"relevantFindingRanks"`
+	EvidenceHandlesFound         []string       `json:"evidenceHandlesFound"`
+	HardNegativeHits             []string       `json:"hardNegativeHits"`
+	LaneRelevantHits             map[string]int `json:"laneRelevantHits"`
+	UniqueRelevantFirstHits      map[string]int `json:"uniqueRelevantFirstHits"`
+	RerankDelta                  int            `json:"rerankDelta"`
+	NormalizedTokens             int            `json:"normalizedTokens"`
+	RawTokens                    int            `json:"rawTokens"`
+	AbstentionCorrect            bool           `json:"abstentionCorrect"`
+	EvidenceHandlesComplete      bool           `json:"evidenceHandlesComplete"`
+	FindingHandlesComplete       bool           `json:"findingHandlesComplete"`
+	SourceClassesAccurate        bool           `json:"sourceClassesAccurate"`
+	ReviewStatesAccurate         bool           `json:"reviewStatesAccurate"`
+	ValiditiesAccurate           bool           `json:"validitiesAccurate"`
+	VocabularyDisjointApplicable bool           `json:"vocabularyDisjointApplicable"`
+	ClaimVocabularyDisjoint      bool           `json:"claimVocabularyDisjoint"`
+	DurabilityLabelsAccurate     bool           `json:"durabilityLabelsAccurate"`
+	ReplayIdentical              bool           `json:"replayIdentical"`
+}
+
+type FindingEvaluationMetrics struct {
+	CaseCount               int     `json:"caseCount"`
+	FindingRecall           float64 `json:"findingRecall"`
+	MeanReciprocalRank      float64 `json:"meanReciprocalRank"`
+	RawPathRecall           float64 `json:"rawPathRecall"`
+	AbstentionAccuracy      float64 `json:"abstentionAccuracy"`
+	FindingHandleAccuracy   float64 `json:"findingHandleAccuracy"`
+	EvidenceHandleAccuracy  float64 `json:"evidenceHandleAccuracy"`
+	SourceClassAccuracy     float64 `json:"sourceClassAccuracy"`
+	ReviewStateAccuracy     float64 `json:"reviewStateAccuracy"`
+	ValidityAccuracy        float64 `json:"validityAccuracy"`
+	VocabularyDisjointRate  float64 `json:"vocabularyDisjointRate"`
+	HardNegativeHits        int     `json:"hardNegativeHits"`
+	DeterministicReplayRate float64 `json:"deterministicReplayRate"`
+	NormalizedMedianTokens  int     `json:"normalizedMedianTokens"`
+	RawMedianTokens         int     `json:"rawMedianTokens"`
+}
+
+type FindingAblationReport struct {
+	SchemaVersion             int                                 `json:"schemaVersion"`
+	SuiteID                   string                              `json:"suiteId,omitempty"`
+	SuiteDigest               string                              `json:"suiteDigest,omitempty"`
+	CorpusSnapshot            string                              `json:"corpusSnapshot,omitempty"`
+	Cases                     []FindingCaseOutcome                `json:"cases"`
+	FindingRecall             float64                             `json:"findingRecall"`
+	MeanReciprocalRank        float64                             `json:"meanReciprocalRank"`
+	RawPathRecall             float64                             `json:"rawPathRecall"`
+	AbstentionAccuracy        float64                             `json:"abstentionAccuracy"`
+	EvidenceHandleAccuracy    float64                             `json:"evidenceHandleAccuracy"`
+	FindingHandleAccuracy     float64                             `json:"findingHandleAccuracy"`
+	SourceClassAccuracy       float64                             `json:"sourceClassAccuracy"`
+	ReviewStateAccuracy       float64                             `json:"reviewStateAccuracy"`
+	ValidityAccuracy          float64                             `json:"validityAccuracy"`
+	VocabularyDisjointRate    float64                             `json:"vocabularyDisjointRate"`
+	DurabilityLabelAccuracy   float64                             `json:"durabilityLabelAccuracy"`
+	MetricsBySplit            map[string]FindingEvaluationMetrics `json:"metricsBySplit"`
+	MetricsByRole             map[string]FindingEvaluationMetrics `json:"metricsByRole"`
+	LaneRelevantHits          map[string]int                      `json:"laneRelevantHits"`
+	UniqueRelevantFirstHits   map[string]int                      `json:"uniqueRelevantFirstHits"`
+	RerankImproved            int                                 `json:"rerankImproved"`
+	RerankDegraded            int                                 `json:"rerankDegraded"`
+	NormalizedTokens          int                                 `json:"normalizedTokens"`
+	RawTokens                 int                                 `json:"rawTokens"`
+	NormalizedMedianTokens    int                                 `json:"normalizedMedianTokens"`
+	RawMedianTokens           int                                 `json:"rawMedianTokens"`
+	HardNegativeHits          int                                 `json:"hardNegativeHits"`
+	DeterministicReplayRate   float64                             `json:"deterministicReplayRate"`
+	ArchiveGateDiagnosticOnly bool                                `json:"archiveGateDiagnosticOnly"`
+	Digest                    string                              `json:"digest"`
+}
+
+// EvaluateFindingRetriever records per-lane contribution before packing and
+// rerank movement separately. It never deletes or promotes a lane and never
+// creates an archive-policy receipt; maintainer ratification remains distinct.
+func evaluateFindingRetrieverLegacy(ctx context.Context, retriever Retriever, cases []FindingEvalCase) (FindingAblationReport, error) {
+	report := FindingAblationReport{
+		SchemaVersion: 1, LaneRelevantHits: map[string]int{},
+		UniqueRelevantFirstHits: map[string]int{}, ArchiveGateDiagnosticOnly: true,
+	}
+	var expectedFindings, foundFindings, expectedRaw, foundRaw int
+	var reciprocal float64
+	abstentionCorrect, evidenceComplete, evidenceCases, durabilityCorrect, replay := 0, 0, 0, 0, 0
+	for _, eval := range cases {
+		if strings.TrimSpace(eval.ID) == "" || strings.TrimSpace(eval.Query) == "" {
+			return FindingAblationReport{}, errors.New("finding evaluation cases require id and query")
+		}
+		options := eval.Options
+		options.Query = eval.Query
+		if options.TokenBudget == 0 {
+			options.TokenBudget = 4096
+		}
+		if options.Limit == 0 {
+			options.Limit = 5
+		}
+		first, err := retriever.QueryFindingCards(ctx, options)
+		if err != nil {
+			return FindingAblationReport{}, fmt.Errorf("case %s: %w", eval.ID, err)
+		}
+		second, err := retriever.QueryFindingCards(ctx, options)
+		if err != nil {
+			return FindingAblationReport{}, fmt.Errorf("case %s replay: %w", eval.ID, err)
+		}
+		outcome := FindingCaseOutcome{
+			CaseID: eval.ID, LaneRelevantHits: map[string]int{}, UniqueRelevantFirstHits: map[string]int{},
+			DurabilityLabelsAccurate: true, ReplayIdentical: first.Digest == second.Digest,
+		}
+		if outcome.ReplayIdentical {
+			replay++
+		}
+		findingRanks := map[string]int{}
+		evidenceSeen := map[string]bool{}
+		rawSeen := map[string]bool{}
+		hardNegativeSet := map[string]bool{}
+		for _, id := range eval.HardNegativeFindingIDs {
+			hardNegativeSet[id] = true
+		}
+		for rank, card := range first.Cards {
+			outcome.CardIDs = append(outcome.CardIDs, card.ID)
+			switch card.CardType {
+			case "finding":
+				outcome.FindingIDs = append(outcome.FindingIDs, card.ID)
+				findingRanks[card.ID] = rank + 1
+				outcome.NormalizedTokens += EstimateTokens(stableJSON(card))
+				if card.SourceClass == "archive" || card.SourceClass == "intake" {
+					outcome.DurabilityLabelsAccurate = false
+				}
+				if hardNegativeSet[card.ID] {
+					outcome.HardNegativeHits = append(outcome.HardNegativeHits, card.ID)
+				}
+			case "raw-report":
+				path := card.Metadata["path"]
+				outcome.RawPaths = append(outcome.RawPaths, path)
+				rawSeen[path] = true
+				outcome.RawTokens += EstimateTokens(stableJSON(card))
+				if card.SourceClass != "archive" {
+					outcome.DurabilityLabelsAccurate = false
+				}
+			}
+			if card.EvidenceHandle != "" {
+				evidenceSeen[card.EvidenceHandle] = true
+			}
+		}
+		fusionOrder := append([]FindingCandidateTrace(nil), first.Trace.Candidates...)
+		sort.Slice(fusionOrder, func(i, j int) bool {
+			if fusionOrder[i].FusionScore != fusionOrder[j].FusionScore {
+				return fusionOrder[i].FusionScore > fusionOrder[j].FusionScore
+			}
+			return fusionOrder[i].FindingID < fusionOrder[j].FindingID
+		})
+		fusionRanks := map[string]int{}
+		traces := map[string]FindingCandidateTrace{}
+		for index, candidate := range fusionOrder {
+			fusionRanks[candidate.FindingID] = index + 1
+			traces[candidate.FindingID] = candidate
+		}
+		rerankOrder := append([]FindingCandidateTrace(nil), fusionOrder...)
+		rerankDepth := retriever.Profile.Effective.RerankDepth
+		if rerankDepth < 1 || rerankDepth > len(rerankOrder) {
+			rerankDepth = len(rerankOrder)
+		}
+		sort.SliceStable(rerankOrder[:rerankDepth], func(i, j int) bool {
+			if rerankOrder[i].RerankScore != rerankOrder[j].RerankScore {
+				return rerankOrder[i].RerankScore > rerankOrder[j].RerankScore
+			}
+			if rerankOrder[i].FusionScore != rerankOrder[j].FusionScore {
+				return rerankOrder[i].FusionScore > rerankOrder[j].FusionScore
+			}
+			return rerankOrder[i].FindingID < rerankOrder[j].FindingID
+		})
+		rerankRanks := map[string]int{}
+		for index, candidate := range rerankOrder {
+			rerankRanks[candidate.FindingID] = index + 1
+		}
+		retrievingLanes := map[string]bool{}
+		firstLanes := map[string]bool{}
+		for _, expected := range eval.ExpectedFindingIDs {
+			expectedFindings++
+			if rank := findingRanks[expected]; rank > 0 {
+				foundFindings++
+				outcome.RelevantFindingRanks = append(outcome.RelevantFindingRanks, rank)
+				if len(outcome.RelevantFindingRanks) == 1 {
+					reciprocal += 1 / float64(rank)
+				}
+			}
+			if fusionRanks[expected] > 0 && rerankRanks[expected] > 0 {
+				outcome.RerankDelta += fusionRanks[expected] - rerankRanks[expected]
+			}
+			trace := traces[expected]
+			for lane, rank := range trace.LaneRanks {
+				if rank > 0 {
+					retrievingLanes[lane] = true
+					outcome.LaneRelevantHits[lane]++
+					report.LaneRelevantHits[lane]++
+					if rank == 1 {
+						firstLanes[lane] = true
+					}
+				}
+			}
+		}
+		if len(retrievingLanes) == 1 && len(firstLanes) == 1 {
+			for lane := range firstLanes {
+				outcome.UniqueRelevantFirstHits[lane]++
+				report.UniqueRelevantFirstHits[lane]++
+			}
+		}
+		for _, path := range eval.ExpectedRawPaths {
+			expectedRaw++
+			if rawSeen[path] {
+				foundRaw++
+			}
+		}
+		outcome.EvidenceHandlesComplete = true
+		if len(eval.ExpectedEvidenceHandles) > 0 {
+			evidenceCases++
+		}
+		for _, handle := range eval.ExpectedEvidenceHandles {
+			if evidenceSeen[handle] {
+				outcome.EvidenceHandlesFound = append(outcome.EvidenceHandlesFound, handle)
+			} else {
+				outcome.EvidenceHandlesComplete = false
+			}
+		}
+		if len(eval.ExpectedEvidenceHandles) > 0 && outcome.EvidenceHandlesComplete {
+			evidenceComplete++
+		}
+		if outcome.DurabilityLabelsAccurate {
+			durabilityCorrect++
+		}
+		if eval.Answerable {
+			outcome.AbstentionCorrect = len(first.Cards) > 0
+		} else {
+			outcome.AbstentionCorrect = len(first.Cards) == 0
+		}
+		if outcome.AbstentionCorrect {
+			abstentionCorrect++
+		}
+		if outcome.RerankDelta > 0 {
+			report.RerankImproved++
+		} else if outcome.RerankDelta < 0 {
+			report.RerankDegraded++
+		}
+		report.NormalizedTokens += outcome.NormalizedTokens
+		report.RawTokens += outcome.RawTokens
+		report.HardNegativeHits += len(outcome.HardNegativeHits)
+		report.Cases = append(report.Cases, outcome)
+	}
+	if expectedFindings > 0 {
+		report.FindingRecall = float64(foundFindings) / float64(expectedFindings)
+		report.MeanReciprocalRank = reciprocal / float64(expectedFindings)
+	}
+	if expectedRaw > 0 {
+		report.RawPathRecall = float64(foundRaw) / float64(expectedRaw)
+	}
+	if len(cases) > 0 {
+		report.AbstentionAccuracy = float64(abstentionCorrect) / float64(len(cases))
+		if evidenceCases > 0 {
+			report.EvidenceHandleAccuracy = float64(evidenceComplete) / float64(evidenceCases)
+		} else {
+			report.EvidenceHandleAccuracy = 1
+		}
+		report.DurabilityLabelAccuracy = float64(durabilityCorrect) / float64(len(cases))
+		report.DeterministicReplayRate = float64(replay) / float64(len(cases))
+	}
+	digestInput := report
+	digestInput.Digest = ""
+	digest, err := CanonicalDigest(digestInput)
+	if err != nil {
+		return FindingAblationReport{}, err
+	}
+	report.Digest = digest
+	return report, nil
 }

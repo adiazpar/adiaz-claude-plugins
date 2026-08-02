@@ -1,16 +1,16 @@
 {
   "name": "re-discipline",
-  "version": "0.7.1",
-  "description": "Evidence-based campaigns with one shared project memory, a local knowledge server, thin manager adapters, and governed retrieval.",
+  "version": "0.8.0",
+  "description": "Transactional campaigns, unified runs, atomic findings, bounded context, closure-gated truth, and governed cross-host retrieval.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
   },
   "keywords": [
-    "reverse-engineering",
     "research",
     "knowledge-management",
-    "shared-memory",
+    "campaigns",
+    "evidence",
     "retrieval",
     "workflow"
   ],
@@ -28,8 +28,8 @@
   },
   "interface": {
     "displayName": "Re-Discipline",
-    "shortDescription": "Shared project knowledge and evidence workflow",
-    "longDescription": "Run durable research campaigns, retrieve citable project knowledge through one local server, share governed recall across manager hosts and subagents, and keep provisional work separate from verified truth.",
+    "shortDescription": "Transactional campaigns and atomic project knowledge",
+    "longDescription": "Manage work items, unified runs, atomic findings, immutable reviews, bounded context, resumable closure, and citable project knowledge through one filesystem-canonical engine shared by manager hosts and drafters.",
     "developerName": "Alex Diaz",
     "category": "Productivity",
     "capabilities": [
@@ -38,9 +38,9 @@
     ],
     "defaultPrompt": [
       "Initialize this project with re-discipline.",
-      "Orient me to the current campaign state.",
-      "Search the shared project knowledge.",
-      "Open a focused research campaign."
+      "Orient me with the bounded project state view.",
+      "Search atomic findings and trace their evidence.",
+      "Open a campaign with explicit work and closure criteria."
     ]
   }
 }

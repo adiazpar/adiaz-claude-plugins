@@ -168,31 +168,49 @@ func managedFileURI(t *testing.T, path string) string {
 
 func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 	definitions := toolDefinitions()
-	if len(definitions) != 7 {
-		t.Fatalf("tool count = %d, want 7", len(definitions))
+	encodedDefinitions, err := json.Marshal(definitions)
+	if err != nil {
+		t.Fatal(err)
 	}
-	expected := map[string]bool{
-		"status": true, "orient": true, "search": true,
-		"read": true, "context_pack": true,
-		"context_pack_materialize": true, "recall_propose": true,
+	if len(encodedDefinitions) > 64*1024 {
+		t.Fatalf("tool discovery payload is %d bytes, exceeding the 64 KiB portability ceiling", len(encodedDefinitions))
 	}
-	for _, definition := range definitions {
+	t.Logf("tool discovery payload: %d bytes", len(encodedDefinitions))
+	expected := []string{
+		"state", "query", "read", "trace", "context_pack_materialize",
+		"manager_apply", "curation_submit", "closure_apply",
+	}
+	if len(definitions) != len(expected) {
+		t.Fatalf("tool count = %d, want %d", len(definitions), len(expected))
+	}
+	for index, definition := range definitions {
 		name, _ := definition["name"].(string)
-		if !expected[name] {
-			t.Fatalf("unexpected authority-bearing tool exposed: %q", name)
+		if name != expected[index] {
+			t.Fatalf("tool %d = %q, want %q", index, name, expected[index])
 		}
-		delete(expected, name)
+		if definition["title"] == "" || definition["description"] == "" {
+			t.Fatalf("%s omitted title or description: %#v", name, definition)
+		}
 		schema := asObject(t, definition["inputSchema"])
 		if schema["type"] != "object" || schema["additionalProperties"] != false {
 			t.Fatalf("%s input schema is not closed: %#v", name, schema)
 		}
+		for _, opaque := range []string{"oneOf", "anyOf", "allOf"} {
+			if _, exists := schema[opaque]; exists {
+				t.Fatalf("%s uses non-portable top-level %s: %#v", name, opaque, schema)
+			}
+		}
 		annotations := asObject(t, definition["annotations"])
-		if name == "recall_propose" || name == "context_pack_materialize" {
+		if name == "context_pack_materialize" || name == "manager_apply" ||
+			name == "curation_submit" || name == "closure_apply" {
 			if annotations["readOnlyHint"] != false ||
-				annotations["destructiveHint"] != false ||
 				annotations["idempotentHint"] != true ||
 				annotations["openWorldHint"] != false {
 				t.Fatalf("%s write annotations are unsafe: %#v", name, annotations)
+			}
+			wantDestructive := name == "closure_apply"
+			if annotations["destructiveHint"] != wantDestructive {
+				t.Fatalf("%s destructive hint = %#v, want %t", name, annotations["destructiveHint"], wantDestructive)
 			}
 		} else if annotations["readOnlyHint"] != true ||
 			annotations["destructiveHint"] != false ||
@@ -200,20 +218,48 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 			annotations["openWorldHint"] != false {
 			t.Fatalf("%s read-only annotations are incomplete: %#v", name, annotations)
 		}
-		if name == "orient" {
-			properties := asObject(t, schema["properties"])
+		properties := asObject(t, schema["properties"])
+		if name == "state" {
 			budget := asObject(t, properties["tokenBudget"])
-			if budget["minimum"] != float64(512) && budget["minimum"] != 512 {
-				t.Fatalf("orient schema permits a budget rejected by execution: %#v", budget)
+			if budget["minimum"] != float64(128) && budget["minimum"] != 128 {
+				t.Fatalf("state schema permits a budget rejected by execution: %#v", budget)
 			}
 		}
 		if name == "read" {
-			if _, ok := schema["oneOf"]; !ok {
-				t.Fatal("read schema does not declare exactly one of path, chunkId, or uri")
+			required := map[string]bool{}
+			for _, value := range schema["required"].([]string) {
+				required[value] = true
+			}
+			if !required["selector"] || !required["value"] {
+				t.Fatalf("read schema does not require selector and value: %#v", schema["required"])
 			}
 		}
-		if name == "context_pack" || name == "context_pack_materialize" {
-			properties := asObject(t, schema["properties"])
+		if name == "context_pack_materialize" {
+			required := map[string]bool{}
+			for _, value := range schema["required"].([]string) {
+				required[value] = true
+			}
+			for _, field := range []string{"action", "target", "task", "role"} {
+				if !required[field] {
+					t.Fatalf("context-pack schema does not require %s", field)
+				}
+			}
+			action := asObject(t, properties["action"])
+			if fmt.Sprint(action["enum"]) != "[preview materialize]" {
+				t.Fatalf("context-pack action discriminator is incomplete: %#v", action)
+			}
+			target := asObject(t, properties["target"])
+			targetProperties := asObject(t, target["properties"])
+			kind := asObject(t, targetProperties["kind"])
+			if target["additionalProperties"] != false ||
+				fmt.Sprint(kind["enum"]) != "[active-run recruiting-run]" {
+				t.Fatalf("context-pack target schema is not closed and scoped: %#v", target)
+			}
+			for _, retired := range []string{"path", "verbosity"} {
+				if _, present := properties[retired]; present {
+					t.Fatalf("context-pack schema exposes retired caller field %q", retired)
+				}
+			}
 			requiredPaths := asObject(t, properties["requiredPaths"])
 			if requiredPaths["type"] != "array" ||
 				requiredPaths["uniqueItems"] != true ||
@@ -224,12 +270,9 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 			}
 		}
 	}
-	if len(expected) != 0 {
-		t.Fatalf("missing MCP tools: %v", expected)
-	}
 	for _, forbidden := range []string{
+		"status", "orient", "search", "context_pack", "recall_propose",
 		"accept_memory", "promote_truth", "activate_profile", "close_campaign",
-		"sql", "command", "write_truth",
 	} {
 		for _, definition := range definitions {
 			if definition["name"] == forbidden {
@@ -241,6 +284,7 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 
 func TestAdversarialMCPProjectBudgetsAreEnforcedNotMerelyAdvertised(t *testing.T) {
 	root := makeAdversarialProject(t)
+	writeCanonicalClosureGraph(t, root)
 	settingsPath := filepath.Join(
 		root, ".re-discipline", "knowledge", "policy.jsonc")
 	body, err := os.ReadFile(settingsPath)
@@ -260,39 +304,39 @@ func TestAdversarialMCPProjectBudgetsAreEnforcedNotMerelyAdvertised(t *testing.T
 
 	messages := runMCPMessages(
 		t,
-		&MCPServer{AssetRoot: adversarialAssetRoot(t), InitialRoot: root},
+		&MCPServer{
+			AssetRoot: adversarialAssetRoot(t), InitialRoot: root,
+			DisableDense: true, DisableRerank: true,
+		},
 		initializeMessage(1, false),
 		map[string]any{
 			"jsonrpc": "2.0", "method": "notifications/initialized",
 		},
-		toolCallMessage(2, "search", map[string]any{
-			"query": "A1B2C3D4", "queryClass": "exact",
-			"allowedTiers": []string{"truth"}, "limit": 12, "tokenBudget": 1024,
+		toolCallMessage(2, "query", map[string]any{
+			"query": "implementation complete", "campaignId": "C-TEST",
+			"allowedSourceClasses": []string{"campaign"},
+			"allowedReviewStates":  []string{"manager-ratified"},
+			"allowedValidities":    []string{"current"},
+			"limit":                3, "tokenBudget": 1024,
 		}),
-		toolCallMessage(3, "orient", map[string]any{
-			"role": "drafter",
-		}),
-		toolCallMessage(4, "context_pack", map[string]any{
+		toolCallMessage(4, "context_pack_materialize", map[string]any{
+			"action": "preview",
+			"target": map[string]any{
+				"kind": "recruiting-run", "candidateSlug": "candidate-one",
+				"recruitingRunId": "20260802T190000Z",
+			},
 			"task": "engine serialization", "role": "drafter",
 			"allowedTiers": []string{"truth"}, "tokenBudget": 2048,
 		}),
 	)
-	search := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
-	if search["tokenBudget"] != float64(512) && search["tokenBudget"] != 512 {
+	query := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+	if query["tokenBudget"] != float64(512) && query["tokenBudget"] != 512 {
 		t.Fatalf(
-			"explicit MCP search bypassed configured searchTokens ceiling: %#v",
-			search["tokenBudget"])
+			"explicit MCP query bypassed configured searchTokens ceiling: %#v",
+			query["tokenBudget"])
 	}
-	if len(asArray(t, search["results"])) > 2 {
-		t.Fatalf("explicit MCP search bypassed configured maxPassages: %#v", search["results"])
-	}
-	orientation := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
-	if orientation["role"] != "drafter" ||
-		orientation["tokenBudget"] != float64(1024) &&
-			orientation["tokenBudget"] != 1024 {
-		t.Fatalf(
-			"drafter orientation did not use the configured drafter budget: %#v",
-			orientation)
+	if len(asArray(t, query["cards"])) > 3 {
+		t.Fatalf("explicit MCP query bypassed its card limit: %#v", query["cards"])
 	}
 	pack := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 4))
 	if pack["role"] != "drafter" ||
@@ -304,26 +348,55 @@ func TestAdversarialMCPProjectBudgetsAreEnforcedNotMerelyAdvertised(t *testing.T
 	}
 }
 
-func TestAdversarialMCPInitializeToolsAndStructuredResults(t *testing.T) {
+func TestMCPV8RepresentativeRequestsAndStructuredResults(t *testing.T) {
 	t.Setenv("CLAUDE_PROJECT_DIR", "")
 	root := makeAdversarialProject(t)
-	server := &MCPServer{
-		AssetRoot:   adversarialAssetRoot(t),
-		InitialRoot: filepath.Join(root, "docs", "truth"),
-	}
+	writeCanonicalClosureGraph(t, root)
 	messages := runMCPMessages(
 		t,
-		server,
+		&MCPServer{
+			AssetRoot: adversarialAssetRoot(t), InitialRoot: root,
+			DisableDense: true, DisableRerank: true,
+		},
 		initializeMessage(1, false),
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
 		map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": map[string]any{}},
-		toolCallMessage(3, "status", map[string]any{}),
-		toolCallMessage(4, "search", map[string]any{
-			"query": "A1B2C3D4", "queryClass": "exact",
-			"allowedTiers": []string{"truth"}, "limit": 5, "tokenBudget": 512,
+		toolCallMessage(3, "state", map[string]any{
+			"mode": "resume", "campaignId": "C-TEST", "tokenBudget": 1800,
 		}),
-		toolCallMessage(5, "search", map[string]any{
-			"query": "A1B2C3D4", "unexpected": true,
+		toolCallMessage(4, "query", map[string]any{
+			"query": "implementation complete", "campaignId": "C-TEST",
+			"allowedSourceClasses": []string{"campaign"},
+			"allowedReviewStates":  []string{"manager-ratified"},
+			"allowedValidities":    []string{"current"},
+			"limit":                3, "tokenBudget": 1200, "requestId": "mcp-v8-query",
+		}),
+		toolCallMessage(5, "read", map[string]any{
+			"selector": "finding", "value": "finding:F-0001",
+			"campaignId": "C-TEST", "tokenBudget": 1600,
+		}),
+		toolCallMessage(6, "trace", map[string]any{
+			"campaignId": "C-TEST", "startHandle": "finding:F-0001",
+			"depth": 2, "maxNodes": 12, "tokenBudget": 1800,
+		}),
+		toolCallMessage(7, "context_pack_materialize", map[string]any{
+			"action": "preview", "task": "Review the implementation status",
+			"target": map[string]any{
+				"kind": "recruiting-run", "candidateSlug": "candidate-one",
+				"recruitingRunId": "20260802T190000Z",
+			},
+			"role": "manager", "tokenBudget": 1024,
+		}),
+		toolCallMessage(8, "closure_apply", map[string]any{
+			"action": "status", "campaignId": "C-TEST",
+		}),
+		toolCallMessage(9, "manager_apply", map[string]any{
+			"action": "work.update",
+		}),
+		toolCallMessage(10, "curation_submit", map[string]any{}),
+		toolCallMessage(11, "status", map[string]any{}),
+		toolCallMessage(12, "state", map[string]any{
+			"mode": "orient", "unexpected": true,
 		}),
 	)
 
@@ -336,24 +409,42 @@ func TestAdversarialMCPInitializeToolsAndStructuredResults(t *testing.T) {
 		t.Fatalf("server identity is incomplete: %#v", serverInfo)
 	}
 	toolsResult := asObject(t, rpcResponseByID(t, messages, 2)["result"])
-	if len(asArray(t, toolsResult["tools"])) != 7 {
-		t.Fatalf("tools/list result is incomplete: %#v", toolsResult)
+	tools := asArray(t, toolsResult["tools"])
+	if len(tools) != 8 {
+		t.Fatalf("tools/list returned %d tools, want 8", len(tools))
 	}
-	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))["system"])
-	configuration := asObject(t, status["configuration"])
-	if configuration["nativeMemoryTouched"] != false {
-		t.Fatal("knowledge status reported native-memory mutation")
+	state := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
+	if state["mode"] != "resume" || state["campaignId"] != "C-TEST" || state["digest"] == "" {
+		t.Fatalf("state adapter result is incomplete: %#v", state)
 	}
-	search := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 4))
-	results := asArray(t, search["results"])
-	if len(results) == 0 {
-		t.Fatal("MCP search missed exact fixture identifier")
+	query := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 4))
+	if len(asArray(t, query["cards"])) == 0 || query["digest"] == "" {
+		t.Fatalf("query adapter omitted normalized cards or digest: %#v", query)
 	}
-	citation := asObject(t, asObject(t, results[0])["citation"])
-	if citation["path"] != "docs/truth/engine.md" || citation["tier"] != "truth" {
-		t.Fatalf("MCP result citation is wrong: %#v", citation)
+	read := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 5))
+	if read["recordId"] != "F-0001" || read["handle"] != "finding:F-0001" || read["digest"] == "" {
+		t.Fatalf("read adapter result is incomplete: %#v", read)
 	}
-	assertToolError(t, rpcResponseByID(t, messages, 5), "unknown field")
+	trace := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 6))
+	if len(asArray(t, trace["nodes"])) < 2 || trace["digest"] == "" {
+		t.Fatalf("trace adapter omitted graph context or digest: %#v", trace)
+	}
+	pack := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 7))
+	scope := asObject(t, pack["scope"])
+	if pack["packId"] == "" || pack["digest"] == "" ||
+		scope["kind"] != "recruiting-run" ||
+		scope["candidateSlug"] != "candidate-one" ||
+		len(asArray(t, pack["cards"])) == 0 {
+		t.Fatalf("context-pack preview omitted immutable identity: %#v", pack)
+	}
+	closure := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 8))
+	if closure["action"] != "status" || closure["digest"] == "" || closure["state"] == nil {
+		t.Fatalf("closure status adapter result is incomplete: %#v", closure)
+	}
+	assertToolError(t, rpcResponseByID(t, messages, 9), "manager actor is required")
+	assertToolError(t, rpcResponseByID(t, messages, 10), "unsupported schema version")
+	assertToolError(t, rpcResponseByID(t, messages, 11), `unknown tool "status"`)
+	assertToolError(t, rpcResponseByID(t, messages, 12), "unknown field")
 }
 
 func TestAdversarialMCPRequiresInitialization(t *testing.T) {
@@ -362,7 +453,7 @@ func TestAdversarialMCPRequiresInitialization(t *testing.T) {
 		t,
 		server,
 		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]any{}},
-		toolCallMessage(2, "status", map[string]any{}),
+		toolCallMessage(2, "state", map[string]any{"mode": "orient"}),
 	)
 	for _, id := range []int{1, 2} {
 		response := rpcResponseByID(t, messages, id)
@@ -383,16 +474,16 @@ func TestAdversarialMCPExplicitRootWithoutHostRoots(t *testing.T) {
 		server,
 		initializeMessage(1, false),
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
-		toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
-		toolCallMessage(3, "status", map[string]any{}),
-		toolCallMessage(4, "status", map[string]any{"projectRoot": other}),
+		toolCallMessage(2, "state", map[string]any{"mode": "orient", "projectRoot": root}),
+		toolCallMessage(3, "state", map[string]any{"mode": "orient"}),
+		toolCallMessage(4, "state", map[string]any{"mode": "orient", "projectRoot": other}),
 	)
 	assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
 	assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
 	assertToolError(t, rpcResponseByID(t, messages, 4), "session shard")
 }
 
-func TestAdversarialMCPExplicitStatusDoesNotRecoverAnUngrantedRoot(t *testing.T) {
+func TestAdversarialMCPExplicitStateDoesNotRecoverAnUngrantedRoot(t *testing.T) {
 	t.Setenv("CLAUDE_PROJECT_DIR", "")
 	root := makeAdversarialProject(t)
 	configPath := filepath.Join(root, ".re-discipline", "config.json")
@@ -406,23 +497,22 @@ func TestAdversarialMCPExplicitStatusDoesNotRecoverAnUngrantedRoot(t *testing.T)
 		&MCPServer{AssetRoot: adversarialAssetRoot(t)},
 		initializeMessage(1, false),
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
-		toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
+		toolCallMessage(2, "state", map[string]any{"mode": "orient", "projectRoot": root}),
 	)
-	status := asObject(t, assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
-	configuration := asObject(t, status["configuration"])
-	if configuration["valid"] != false {
-		t.Fatalf("explicit diagnostic status concealed missing configuration: %#v", status)
+	state := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+	if state["status"] != "attention" {
+		t.Fatalf("diagnostic state concealed missing configuration: %#v", state)
 	}
-	errorsValue, ok := configuration["errors"].([]any)
-	if !ok || len(errorsValue) == 0 {
-		t.Fatalf("explicit diagnostic status omitted structured errors: %#v", configuration)
+	cards := asArray(t, state["cards"])
+	if len(cards) == 0 || !strings.Contains(fmt.Sprint(asObject(t, cards[0])["claim"]), ".re-discipline/config.json") {
+		t.Fatalf("diagnostic state omitted configuration failure: %#v", state)
 	}
 	after := snapshotRecoveryTree(t, root)
 	if stableJSON(before) != stableJSON(after) {
-		t.Fatal("explicit status recovered or otherwise mutated an ungranted project root")
+		t.Fatal("explicit state read recovered or otherwise mutated an ungranted project root")
 	}
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-		t.Fatal("explicit status recreated missing bootstrap configuration")
+		t.Fatal("explicit state read recreated missing bootstrap configuration")
 	}
 }
 
@@ -436,7 +526,7 @@ func TestAdversarialMCPRejectsUnsupportedManagedProjectVersion(t *testing.T) {
 	}
 	body = bytes.ReplaceAll(
 		body,
-		[]byte("<!-- re-discipline:shared-laws v0.7.0 -->"),
+		[]byte("<!-- re-discipline:shared-laws v0.8.0 -->"),
 		[]byte("<!-- re-discipline:shared-laws v0.5.0 -->"),
 	)
 	if err := os.WriteFile(profilePath, body, 0o600); err != nil {
@@ -448,9 +538,9 @@ func TestAdversarialMCPRejectsUnsupportedManagedProjectVersion(t *testing.T) {
 		server,
 		initializeMessage(1, false),
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
-		toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
+		toolCallMessage(2, "state", map[string]any{"mode": "orient", "projectRoot": root}),
 	)
-	assertToolError(t, rpcResponseByID(t, messages, 2), "shared-laws v0.7.0")
+	assertToolError(t, rpcResponseByID(t, messages, 2), "runtime-supported re-discipline shared-laws marker")
 	if _, err := os.Stat(filepath.Join(root, ".re-discipline", "cache", "knowledge")); !os.IsNotExist(err) {
 		t.Fatal("unsupported project version was mutated before rejection")
 	}
@@ -475,7 +565,7 @@ func TestAdversarialMCPRootsSingleMultipleAndCrossRoot(t *testing.T) {
 					"roots": []map[string]any{{"uri": managedFileURI(t, filepath.Join(first, "docs"))}},
 				},
 			},
-			toolCallMessage(2, "status", map[string]any{}),
+			toolCallMessage(2, "state", map[string]any{"mode": "orient"}),
 		)
 		request := rpcRequestByMethod(t, messages, "roots/list")
 		if request["id"] != "rd-roots-1" {
@@ -500,9 +590,9 @@ func TestAdversarialMCPRootsSingleMultipleAndCrossRoot(t *testing.T) {
 					},
 				},
 			},
-			toolCallMessage(2, "status", map[string]any{}),
-			toolCallMessage(3, "status", map[string]any{"projectRoot": second}),
-			toolCallMessage(4, "status", map[string]any{"projectRoot": third}),
+			toolCallMessage(2, "state", map[string]any{"mode": "orient"}),
+			toolCallMessage(3, "state", map[string]any{"mode": "orient", "projectRoot": second}),
+			toolCallMessage(4, "state", map[string]any{"mode": "orient", "projectRoot": third}),
 		)
 		assertToolError(t, rpcResponseByID(t, messages, 2), "multiple managed MCP roots")
 		assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
@@ -526,7 +616,7 @@ func TestAdversarialMCPRootsSingleMultipleAndCrossRoot(t *testing.T) {
 					},
 				},
 			},
-			toolCallMessage(2, "status", map[string]any{}),
+			toolCallMessage(2, "state", map[string]any{"mode": "orient"}),
 		)
 		assertToolError(t, rpcResponseByID(t, messages, 2), "no managed MCP root")
 	})
@@ -622,12 +712,14 @@ func TestAdversarialMCPServiceCacheIsCanonicalAndRootIsolated(t *testing.T) {
 
 func TestAdversarialMCPLargeResultsUseCompactCompatibilityText(t *testing.T) {
 	root := makeAdversarialProject(t)
+	writeCanonicalClosureGraph(t, root)
 	messages := runMCPMessages(
 		t,
 		&MCPServer{AssetRoot: adversarialAssetRoot(t), InitialRoot: root},
 		initializeMessage(1, false),
-		toolCallMessage(2, "orient", map[string]any{
-			"role": "manager", "tokenBudget": 2048,
+		toolCallMessage(2, "state", map[string]any{
+			"mode": "work", "campaignId": "C-TEST", "workItemId": "W-0001",
+			"tokenBudget": 2200,
 		}),
 	)
 	response := rpcResponseByID(t, messages, 2)
@@ -651,14 +743,12 @@ func TestAdversarialMCPLargeResultsUseCompactCompatibilityText(t *testing.T) {
 
 func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 	root := makeAdversarialProject(t)
-	relative := "active/fixture-campaign/subagents/mcp-pack-run/context-pack.json"
-	if err := os.MkdirAll(
-		filepath.Join(root, "active", "fixture-campaign", "subagents", "mcp-pack-run"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
 	arguments := map[string]any{
+		"action": "preview",
+		"target": map[string]any{
+			"kind": "recruiting-run", "candidateSlug": "candidate-one",
+			"recruitingRunId": "20260802T190000Z",
+		},
 		"task":          "Explain the engine frame checksum.",
 		"role":          "drafter",
 		"allowedTiers":  []string{"truth"},
@@ -675,8 +765,8 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 		t,
 		&MCPServer{AssetRoot: adversarialAssetRoot(t), InitialRoot: root},
 		initializeMessage(1, false),
-		toolCallMessage(2, "context_pack", arguments),
-		toolCallMessage(5, "context_pack", missing),
+		toolCallMessage(2, "context_pack_materialize", arguments),
+		toolCallMessage(5, "context_pack_materialize", missing),
 	)
 	pack := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
 	expectedDigest, digestOK := pack["digest"].(string)
@@ -684,17 +774,23 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 	if !digestOK || !idOK {
 		t.Fatalf("context pack omitted manager-verifiable identity: %#v", pack)
 	}
-	passages := asArray(t, pack["passages"])
+	if _, legacy := pack["passages"]; legacy {
+		t.Fatal("scoped context pack leaked the retired whole-passage payload")
+	}
+	cards := asArray(t, pack["cards"])
 	foundRequired := false
-	for _, value := range passages {
-		passage := asObject(t, value)
-		citation := asObject(t, passage["citation"])
-		if citation["path"] == "docs/truth/engine.md" {
+	for _, value := range cards {
+		card := asObject(t, value)
+		metadata := asObject(t, card["metadata"])
+		if metadata["path"] == "docs/truth/engine.md" && card["handle"] != "" {
 			foundRequired = true
 		}
 	}
 	if !foundRequired {
 		t.Fatal("required context source was omitted from the pack")
+	}
+	if len(asArray(t, pack["requiredHandles"])) == 0 {
+		t.Fatal("required context source omitted its exact expansion handle")
 	}
 	assertToolError(t, rpcResponseByID(t, messages, 5), "required")
 
@@ -702,7 +798,7 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 	for key, value := range arguments {
 		materialize[key] = value
 	}
-	materialize["path"] = relative
+	materialize["action"] = "materialize"
 	materialize["expectedDigest"] = expectedDigest
 	materialize["expectedPackId"] = expectedPackID
 	invalidTarget := map[string]any{}
@@ -722,6 +818,25 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 	}
 	wrongExpected["expectedDigest"] = "sha256:" + strings.Repeat("0", 64)
 	wrongExpected["expectedPackId"] = "context-" + strings.Repeat("0", 20)
+	previewWithWriteFields := map[string]any{}
+	for key, value := range materialize {
+		previewWithWriteFields[key] = value
+	}
+	previewWithWriteFields["action"] = "preview"
+	activeMaterialize := map[string]any{}
+	for key, value := range materialize {
+		activeMaterialize[key] = value
+	}
+	activeMaterialize["target"] = map[string]any{
+		"kind": "active-run", "campaignId": "C-TEST",
+		"workItemId": "W-0001", "runId": "R-20260802-0001",
+	}
+	if err := os.MkdirAll(filepath.Join(
+		root, ".re-discipline", "agents", "recruiting", "candidate-one",
+		"runs", "20260802T190000Z",
+	), 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	materializeMessages := runMCPMessages(
 		t,
@@ -732,21 +847,32 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 		toolCallMessage(6, "context_pack_materialize", invalidTarget),
 		toolCallMessage(7, "context_pack_materialize", missingExpected),
 		toolCallMessage(8, "context_pack_materialize", wrongExpected),
+		toolCallMessage(9, "context_pack_materialize", previewWithWriteFields),
+		toolCallMessage(11, "context_pack_materialize", activeMaterialize),
 	)
-	first := assertSuccessfulToolResult(t, rpcResponseByID(t, materializeMessages, 3))
-	second := assertSuccessfulToolResult(t, rpcResponseByID(t, materializeMessages, 4))
-	if first["path"] != relative || first["materialized"] != true ||
-		first["digest"] != second["digest"] || first["packId"] != second["packId"] {
-		t.Fatalf("materialization was not exact and idempotent: first=%#v second=%#v",
-			first, second)
+	materializedPath := ".re-discipline/agents/recruiting/candidate-one/runs/" +
+		"20260802T190000Z/context-pack.json"
+	for _, id := range []int{3, 4} {
+		result := assertSuccessfulToolResult(t, rpcResponseByID(t, materializeMessages, id))
+		if result["path"] != materializedPath || result["materialized"] != true ||
+			result["digest"] != expectedDigest || result["packId"] != expectedPackID {
+			t.Fatalf("materialization %d returned the wrong immutable identity: %#v", id, result)
+		}
 	}
-	absolute := filepath.Join(root, filepath.FromSlash(relative))
-	if _, err := VerifyContextPack(absolute); err != nil {
-		t.Fatalf("MCP materialized an invalid context pack: %v", err)
+	materialized, err := VerifyContextPack(filepath.Join(
+		root, filepath.FromSlash(materializedPath),
+	))
+	if err != nil {
+		t.Fatalf("materialized context pack failed verification: %v", err)
 	}
-	assertToolError(t, rpcResponseByID(t, materializeMessages, 6), "managed drafter")
-	assertToolError(t, rpcResponseByID(t, materializeMessages, 7), "expected digest")
+	if materialized["digest"] != expectedDigest || materialized["packId"] != expectedPackID {
+		t.Fatalf("materialized context pack identity changed: %#v", materialized)
+	}
+	assertToolError(t, rpcResponseByID(t, materializeMessages, 6), "unknown field")
+	assertToolError(t, rpcResponseByID(t, materializeMessages, 7), "requires expectedDigest")
 	assertToolError(t, rpcResponseByID(t, materializeMessages, 8), "expected")
+	assertToolError(t, rpcResponseByID(t, materializeMessages, 9), "does not accept materialization fields")
+	assertToolError(t, rpcResponseByID(t, materializeMessages, 11), "manager_apply run.prepare")
 	if _, err := os.Stat(filepath.Join(root, "docs", "context-pack.json")); !os.IsNotExist(err) {
 		t.Fatal("invalid materialization left a partial artifact")
 	}
@@ -782,9 +908,9 @@ func TestAdversarialMalformedConfigurationHasReadOnlyStatusAndFailsClosed(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			relativePack := "active/fixture-campaign/subagents/invalid-config/context-pack.json"
+			relativePack := "active/fixture-campaign/runs/R-20260802-0099/context-pack.json"
 			if err := os.MkdirAll(filepath.Join(
-				root, "active", "fixture-campaign", "subagents", "invalid-config"),
+				root, "active", "fixture-campaign", "runs", "R-20260802-0099"),
 				0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -844,18 +970,17 @@ func TestAdversarialMalformedConfigurationHasReadOnlyStatusAndFailsClosed(t *tes
 				t,
 				&MCPServer{AssetRoot: adversarialAssetRoot(t)},
 				initializeMessage(1, false),
-				toolCallMessage(2, "status", map[string]any{"projectRoot": root}),
-				toolCallMessage(3, "search", map[string]any{
-					"query": "A1B2C3D4", "queryClass": "exact",
-					"allowedTiers": []string{"truth"}, "limit": 5,
+				toolCallMessage(2, "state", map[string]any{
+					"mode": "orient", "projectRoot": root,
+				}),
+				toolCallMessage(3, "query", map[string]any{
+					"query": "A1B2C3D4", "limit": 5,
 					"tokenBudget": 1024, "projectRoot": root,
 				}),
 			)
-			mcpStatus := asObject(t,
-				assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))["system"])
-			mcpConfiguration := asObject(t, mcpStatus["configuration"])
-			if mcpConfiguration["valid"] != false {
-				t.Fatalf("MCP status did not preserve invalid diagnostics: %#v", mcpStatus)
+			mcpState := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 2))
+			if mcpState["status"] != "attention" || len(asArray(t, mcpState["cards"])) == 0 {
+				t.Fatalf("MCP state did not preserve invalid diagnostics: %#v", mcpState)
 			}
 			assertToolError(t, rpcResponseByID(t, messages, 3), "configuration")
 
@@ -1014,7 +1139,9 @@ func TestAdversarialPackagedWindowsBinaryMCPProtocol(t *testing.T) {
 		initializeMessage(1, false),
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
 		map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": map[string]any{}},
-		toolCallMessage(3, "status", map[string]any{"projectRoot": root}),
+		toolCallMessage(3, "state", map[string]any{
+			"mode": "orient", "projectRoot": root,
+		}),
 	}
 	var input bytes.Buffer
 	encoder := json.NewEncoder(&input)
@@ -1055,9 +1182,28 @@ func TestAdversarialPackagedWindowsBinaryMCPProtocol(t *testing.T) {
 		}
 		messages = append(messages, message)
 	}
-	assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
+	initialize := asObject(t, rpcResponseByID(t, messages, 1)["result"])
+	serverInfo := asObject(t, initialize["serverInfo"])
+	if serverInfo["version"] != RuntimeVersion {
+		t.Fatalf("packaged binary version = %#v, want %s", serverInfo["version"], RuntimeVersion)
+	}
+	stateResult := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
+	if stateResult["mode"] != "orient" || stateResult["digest"] == "" {
+		t.Fatalf("packaged binary returned an incomplete state view: %#v", stateResult)
+	}
 	tools := asObject(t, rpcResponseByID(t, messages, 2)["result"])
-	if len(asArray(t, tools["tools"])) != 7 {
-		t.Fatal("packaged binary exposed an incomplete MCP surface")
+	toolRows := asArray(t, tools["tools"])
+	expected := []string{
+		"state", "query", "read", "trace", "context_pack_materialize",
+		"manager_apply", "curation_submit", "closure_apply",
+	}
+	if len(toolRows) != len(expected) {
+		t.Fatalf("packaged binary exposed %d tools, want %d", len(toolRows), len(expected))
+	}
+	for index, value := range toolRows {
+		definition := asObject(t, value)
+		if definition["name"] != expected[index] {
+			t.Fatalf("packaged tool %d = %#v, want %q", index, definition["name"], expected[index])
+		}
 	}
 }
