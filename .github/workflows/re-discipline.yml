@@ -214,9 +214,9 @@ jobs:
           }
 
   race:
-    name: Go race detector
+    name: Concurrency-critical Go race detector
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -238,9 +238,37 @@ jobs:
           go-version-file: plugins/re-discipline/knowledge/go.mod
           cache-dependency-path: plugins/re-discipline/knowledge/go.sum
 
-      - name: Run race-enabled unit tests
+      - name: Run race detector on explicit concurrency scenarios
+        shell: pwsh
         working-directory: plugins/re-discipline/knowledge
-        run: go test -race -timeout=20m -count=1 ./...
+        run: |
+          # The complete deterministic suite runs in every OS validation job.
+          # These are every test that currently starts a goroutine. Keep this
+          # list aligned with new explicit concurrency scenarios so heavyweight
+          # single-threaded benchmarks cannot consume the race detector's
+          # budget without increasing concurrency coverage.
+          $raceTests = @(
+            "TestAdversarialTelemetryIsBoundedAggregateOnlyAndOffMeansNoWrites"
+            "TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration"
+            "TestAdversarialMeasurementLeaseSurvivesConcurrentPublication"
+            "TestStateTransactionConcurrentStaleWriters"
+          )
+          $available = @(go test -list '^Test' ./internal/knowledge)
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          foreach ($test in $raceTests) {
+            if ($available -notcontains $test) {
+              Write-Error "configured race test is missing: $test"
+              exit 1
+            }
+          }
+          $escaped = @($raceTests | ForEach-Object { [Regex]::Escape($_) })
+          $pattern = '^(' + ($escaped -join '|') + ')$'
+          go test -race -timeout=10m -count=3 -v -run $pattern ./internal/knowledge
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Run Go vulnerability analysis
         working-directory: plugins/re-discipline/knowledge
