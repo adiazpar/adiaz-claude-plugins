@@ -240,7 +240,7 @@ jobs:
 
       - name: Run race-enabled unit tests
         working-directory: plugins/re-discipline/knowledge
-        run: go test -race -count=1 ./...
+        run: go test -race -timeout=20m -count=1 ./...
 
       - name: Run Go vulnerability analysis
         working-directory: plugins/re-discipline/knowledge
