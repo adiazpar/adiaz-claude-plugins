@@ -481,7 +481,20 @@ def _synchronize_checkout_bytes(source: Path, backup: Path) -> None:
         source_path = source / Path(*PurePosixPath(relative).parts)
         backup_path = backup / Path(*PurePosixPath(relative).parts)
         if backup_path.is_symlink() or not backup_path.is_file():
-            _fail("checkoutRoots", f"detached checkout is missing {relative}")
+            try:
+                probe = repr(backup_path.lstat())
+            except OSError as error:
+                probe = f"lstat failed: errno={error.errno} winerror={getattr(error, 'winerror', None)} {error}"
+            siblings: list[str] = []
+            try:
+                siblings = sorted(item.name for item in backup_path.parent.iterdir())[:8]
+            except OSError as error:
+                siblings = [f"parent iterdir failed: {error}"]
+            _fail(
+                "checkoutRoots",
+                f"detached checkout is missing {relative} "
+                f"(target={backup_path} probe={probe} siblings={siblings!r})",
+            )
         backup_path.write_bytes(source_path.read_bytes())
 
 
