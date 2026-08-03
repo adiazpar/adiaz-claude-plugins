@@ -1394,9 +1394,12 @@ func rewriteMigratedTruthLinks(projectRoot string, plan MigrationPlan) error {
 				}
 				return strings.Replace(match, parts[1], filepath.ToSlash(rewritten)+fragment, 1)
 			})
-			for source, destination := range mapping {
-				text = strings.ReplaceAll(text, source, destination)
-			}
+			// Deliberately no blind path substitution here. Rewriting every
+			// occurrence of a path string also rewrote prose and code spans
+			// that merely name a document, which both misstates the record and
+			// breaks the byte-for-byte preservation promised for unchanged
+			// history and backlog material. Only link targets, handled above,
+			// are relations.
 			if text != string(body) {
 				return AtomicWrite(absolute, []byte(text), 0o600)
 			}
@@ -1430,7 +1433,10 @@ func renderMigratedTruthSplitManifest(
 ) []byte {
 	var builder strings.Builder
 	builder.WriteString("# Migrated atomic findings\n\n")
-	builder.WriteString("The accepted legacy truth at `" + source.Path + "` required a manager-reviewed atomic split. ")
+	// Name the preserved provenance rather than the legacy path. The legacy
+	// location does not survive activation, so quoting it would leave a
+	// generated navigation document pointing at a path that no longer exists.
+	builder.WriteString("This accepted truth required a manager-reviewed atomic split. ")
 	provenanceRelative, err := filepath.Rel(filepath.Dir(source.Destination), filepath.FromSlash(provenancePath))
 	if err != nil {
 		provenanceRelative = provenancePath
