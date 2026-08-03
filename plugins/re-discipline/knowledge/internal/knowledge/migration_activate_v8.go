@@ -1373,27 +1373,7 @@ func rewriteMigratedTruthLinks(projectRoot string, plan MigrationPlan) error {
 			if err != nil {
 				return err
 			}
-			text := string(body)
-			text = migrationMarkdownTargetRE.ReplaceAllStringFunc(text, func(match string) string {
-				parts := migrationMarkdownTargetRE.FindStringSubmatch(match)
-				if len(parts) < 2 || strings.Contains(parts[1], "://") || strings.HasPrefix(parts[1], "#") {
-					return match
-				}
-				target, fragment := parts[1], ""
-				if index := strings.Index(target, "#"); index >= 0 {
-					target, fragment = target[:index], target[index:]
-				}
-				resolved := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(relative), filepath.FromSlash(target))))
-				destination := mapping[resolved]
-				if destination == "" {
-					return match
-				}
-				rewritten, relErr := filepath.Rel(filepath.Dir(relative), filepath.FromSlash(destination))
-				if relErr != nil {
-					return match
-				}
-				return strings.Replace(match, parts[1], filepath.ToSlash(rewritten)+fragment, 1)
-			})
+			text := rewriteMigratedTruthLinkTargets(string(body), relative, mapping)
 			// Deliberately no blind path substitution here. Rewriting every
 			// occurrence of a path string also rewrote prose and code spans
 			// that merely name a document, which both misstates the record and
@@ -3526,4 +3506,50 @@ func (engine *MigrationEngine) carryForwardUnplannedFiles(
 		}
 	}
 	return nil
+}
+
+// rewriteMigratedTruthLinkTargets retargets Markdown links that point at a
+// converted truth document. It is a pure function of the document bytes, its
+// project-relative path, and the conversion mapping, so verification can
+// recompute the exact expected result from frozen provenance instead of
+// demanding byte equality from a document whose links were legitimately
+// rewritten.
+func rewriteMigratedTruthLinkTargets(
+	text string,
+	relative string,
+	mapping map[string]string,
+) string {
+	return migrationMarkdownTargetRE.ReplaceAllStringFunc(text, func(match string) string {
+		parts := migrationMarkdownTargetRE.FindStringSubmatch(match)
+		if len(parts) < 2 || strings.Contains(parts[1], "://") || strings.HasPrefix(parts[1], "#") {
+			return match
+		}
+		target, fragment := parts[1], ""
+		if index := strings.Index(target, "#"); index >= 0 {
+			target, fragment = target[:index], target[index:]
+		}
+		resolved := filepath.ToSlash(filepath.Clean(
+			filepath.Join(filepath.Dir(relative), filepath.FromSlash(target))))
+		destination := mapping[resolved]
+		if destination == "" {
+			return match
+		}
+		rewritten, relErr := filepath.Rel(filepath.Dir(relative), filepath.FromSlash(destination))
+		if relErr != nil {
+			return match
+		}
+		return strings.Replace(match, parts[1], filepath.ToSlash(rewritten)+fragment, 1)
+	})
+}
+
+// migratedTruthLinkMapping is the converted-truth destination map used by both
+// the rewriter and its verification.
+func migratedTruthLinkMapping(plan MigrationPlan) map[string]string {
+	mapping := map[string]string{}
+	for _, source := range plan.Sources {
+		if source.Role == "truth" {
+			mapping[source.Path] = source.Destination
+		}
+	}
+	return mapping
 }

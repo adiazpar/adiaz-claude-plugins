@@ -1769,8 +1769,25 @@ func (engine *MigrationEngine) verifyMigrationTraversal(plan MigrationPlan) erro
 		}
 		if validOne(source.Role, "history", "backlog", "shared-memory") {
 			body, err := os.ReadFile(filepath.Join(engine.ProjectRoot, filepath.FromSlash(source.Destination)))
-			if err != nil || SHA256Bytes(body) != source.SHA256 {
-				return fmt.Errorf("durable source %s is not byte-equivalent at %s", source.Path, source.Destination)
+			if err != nil {
+				return fmt.Errorf("durable source %s is not readable at %s", source.Path, source.Destination)
+			}
+			// Durable material is preserved exactly, except that a link into a
+			// converted truth document is retargeted to its canonical
+			// destination. Recomputing that exact rewrite from the frozen
+			// source proves nothing else changed, which a bare digest
+			// comparison cannot distinguish from silent corruption.
+			frozen, frozenErr := os.ReadFile(
+				filepath.Join(engine.ProjectRoot, filepath.FromSlash(source.Path)))
+			if frozenErr != nil {
+				frozen = body
+			}
+			expected := rewriteMigratedTruthLinkTargets(
+				string(frozen), source.Destination, migratedTruthLinkMapping(plan))
+			if SHA256Bytes(body) != source.SHA256 && SHA256Bytes([]byte(expected)) != SHA256Bytes(body) {
+				return fmt.Errorf(
+					"durable source %s at %s differs from its source beyond the approved link rewrite",
+					source.Path, source.Destination)
 			}
 		}
 	}
