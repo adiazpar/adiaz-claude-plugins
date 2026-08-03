@@ -3620,8 +3620,16 @@ func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
 		}
 		for index := range cases {
 			eval := &cases[index]
+			retargeted := false
+			note := func(before, after string) string {
+				if before != after {
+					retargeted = true
+				}
+				return after
+			}
 			for position := range eval.ExpectedPaths {
-				eval.ExpectedPaths[position] = retarget(eval.ExpectedPaths[position])
+				eval.ExpectedPaths[position] = note(
+					eval.ExpectedPaths[position], retarget(eval.ExpectedPaths[position]))
 			}
 			for position := range eval.MinimumEvidencePaths {
 				eval.MinimumEvidencePaths[position] = retarget(eval.MinimumEvidencePaths[position])
@@ -3640,7 +3648,16 @@ func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
 				eval.GradedRelevantPaths = graded
 			}
 			for position := range eval.EvidencePins {
-				eval.EvidencePins[position].Path = retarget(eval.EvidencePins[position].Path)
+				eval.EvidencePins[position].Path = note(
+					eval.EvidencePins[position].Path, retarget(eval.EvidencePins[position].Path))
+			}
+			// A target-disjoint attestation is a manager's review of one
+			// query against one target's exact wording. Conversion replaces
+			// that wording, so carrying the attestation onto the new text
+			// would assert a review nobody performed. Drop it and let the
+			// case be re-attested deliberately.
+			if retargeted {
+				eval.VocabularyPolicy = ""
 			}
 		}
 		relative, relErr := filepath.Rel(engine.ProjectRoot, current)
