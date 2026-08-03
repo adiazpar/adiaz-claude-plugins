@@ -2383,8 +2383,13 @@ func validateProjectDecision(
 	regressions int,
 	lane string,
 ) error {
+	// Added safety regressions are the hard bar; ranking losses are ordinary
+	// retrieval variance. A lane is retained when its unique positive events
+	// strictly outnumber losses, removed when it contributes nothing, and
+	// inconclusive otherwise. This mirrors the measurement builder and the
+	// packaged validator exactly.
 	expectedAction := "remove"
-	if len(caseIDs) > 0 && (losses > 0 || regressions > 0) {
+	if regressions > 0 || (len(caseIDs) > 0 && losses >= len(caseIDs)) {
 		expectedAction = "inconclusive"
 	} else if len(caseIDs) > 0 {
 		expectedAction = "retain"
