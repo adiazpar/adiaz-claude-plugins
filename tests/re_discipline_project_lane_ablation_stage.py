@@ -1338,10 +1338,12 @@ def stage(
     artifact_root = output_root / "artifacts"
     disposable_project = output_root / "disposable" / "project"
     backup_root = output_root / "checkout-roots"
-    cache_root = output_root / "cache"
+    # The runtime grants explicit cache roots only below the project or the
+    # deterministic machine-local base, so the disposable measurement cache
+    # lives inside the disposable project and is retained with it.
+    cache_root = disposable_project / ".re-discipline" / "cache" / "knowledge"
     output_root.mkdir(parents=True)
     artifact_root.mkdir()
-    cache_root.mkdir()
     _clone_project(
         project_repository,
         project_revision,
@@ -1551,7 +1553,7 @@ def verify_stage(
         _fail("checkout.preservedCheckoutPath", "unexpected staging layout")
     disposable_project = output_root / "disposable" / "project"
     backup_root = output_root / "checkout-roots"
-    cache_root = output_root / "cache"
+    cache_root = disposable_project / ".re-discipline" / "cache" / "knowledge"
     for label, path in (
         ("disposableProject", disposable_project),
         ("preservedCheckout", backup_root),
