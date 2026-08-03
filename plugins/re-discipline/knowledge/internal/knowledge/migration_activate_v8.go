@@ -3648,8 +3648,23 @@ func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
 				eval.GradedRelevantPaths = graded
 			}
 			for position := range eval.EvidencePins {
-				eval.EvidencePins[position].Path = note(
-					eval.EvidencePins[position].Path, retarget(eval.EvidencePins[position].Path))
+				pin := &eval.EvidencePins[position]
+				pin.Path = note(pin.Path, retarget(pin.Path))
+				// A pin gates on what its document claims, so that ordinary
+				// drift invalidates a case. Conversion is not drift: it is the
+				// manager-reviewed transformation this migration exists to
+				// perform, and its result is the document the case must now
+				// measure. Re-pin against the staged destination, or every
+				// converted case reports a corpus mismatch forever.
+				staged := filepath.Join(projectStagingRoot, filepath.FromSlash(pin.Path))
+				body, pinErr := readSingleLinkRegularFile(staged)
+				if pinErr != nil {
+					continue
+				}
+				pin.ClaimSha256 = ClaimDigest(string(body), pin.Path)
+				if pin.ContentSha256 != "" {
+					pin.ContentSha256 = "sha256:" + SHA256Bytes(body)
+				}
 			}
 			// A target-disjoint attestation is a manager's review of one
 			// query against one target's exact wording. Conversion replaces
