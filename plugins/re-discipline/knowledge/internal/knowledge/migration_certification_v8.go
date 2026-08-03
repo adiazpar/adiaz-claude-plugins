@@ -359,7 +359,14 @@ func readMigrationEvidenceReference(
 	if err != nil {
 		return nil, "", err
 	}
-	if !withinRoot(projectRoot, resolved) {
+	// The evidence path is fully resolved, so the root must be compared in
+	// the same canonical form: an unresolved project root differs through
+	// macOS /var symlinks and Windows 8.3 short names.
+	root, err := canonicalExistingPath(projectRoot)
+	if err != nil {
+		return nil, "", err
+	}
+	if !withinRoot(root, resolved) {
 		return nil, "", errors.New("certification evidence escapes the project")
 	}
 	info, err := os.Lstat(path)
