@@ -81,7 +81,14 @@ func requireMeasurableProject(projectRoot string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrMigrationIncomplete, err)
 	}
-	if exists && state.State != "migrated" {
+	// Certification requires a benchmark of the converted project, and the
+	// migration plan sequences that measurement before the gate receipts are
+	// recorded. Once the canonical tree is physically active, measuring it is
+	// exactly the remaining work, so read-only measurement is permitted from
+	// that point on. Earlier states are still refused, because their tree is
+	// mid-conversion and would measure neither layout honestly. Mutation keeps
+	// its own fail-closed guard regardless of this decision.
+	if exists && !validOne(state.State, "migrated", "physically-reorganized", "traversal-verified") {
 		return fmt.Errorf("%w: transaction %s is %s; use migrate-project status/resume/verify/ratify",
 			ErrMigrationIncomplete, state.TransactionID, state.State)
 	}
