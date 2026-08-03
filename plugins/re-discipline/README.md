@@ -69,21 +69,43 @@ provenance. Returned report chunks remain a lower-ranked default fallback
 until the ratified known-question benchmark shows normalized retrieval is
 non-inferior on recall and better on token cost.
 
-The default dense lane is a learned embedding built from a checksum-pinned,
-bundled subset of Stanford GloVe 6B 50d vectors. It runs entirely local with a
-deterministic fixed-point sentence encoder. The optional rerank lane is a
-deterministic integer linear scorer over phrase, identifier, path, heading,
-and token-overlap features; neither lane downloads models or sends corpus
-content over the network.
+The 0.8 release-candidate profile uses identifier-aware exact matching,
+SQLite FTS5, relationship-graph expansion, and one checksum-pinned local
+GloVe dense lane. An independently benchmarked lexical-graph profile remains
+available when that embedding cannot load. The packaged holdout fixture was
+too small to justify removing dense retrieval; a frozen pre-removal 64-case
+project run measured two dense-only rescues with no added hard-gate regression.
+Dense therefore remains pending a fresh current-runtime two-arm final-corpus
+run. Reranking produced no measured benefit in the packaged holdout or the
+separately frozen historical project layer and has been removed. The packager
+recomputes both decisions from their own per-case runtime layers and requires
+the final project receipt, historical archive, lane decisions, profile
+inventories, and model inventories to agree before release.
+
+A caller may name a process-local `contextLeaseId` on `query`. The default
+memory-only lease suppresses repeated cards and returns cumulative token and
+source-digest accounting. `resetContextLease` resets that derived lease after
+real compaction without touching campaign state. MCP naturally keeps that
+ledger for the server process; the CLI provides `query --session --input
+<path-or->` for a stream of queries that must share the same lease ledger.
+Separate one-shot CLI invocations intentionally start fresh ledgers.
 
 ## Write Boundary
 
 PowerShell and POSIX hooks provide symmetric orientation, compaction handles,
-run context, return checks, and Stop warnings. PreToolUse denies accidental
-direct Write/Edit access to engine-owned campaign and truth paths while
-allowing a run report and lazy payload. This is an accident boundary, not
-adversarial authentication. Safety remains in engine validation,
-reconciliation, atomic publication, and replay even when hooks are omitted.
+run context, return checks, and Stop warnings. `PreToolUse` treats Claude Code
+`Write`/`Edit` and Codex `apply_patch` as the same write-class guard: it denies
+accidental direct access to engine-owned campaign and truth paths while
+allowing a run report and lazy payload. When the host supplies a current run
+ID, the hooks resolve its canonical `run.json` and permit ordinary project
+writes only through its sealed exact-path or bounded-directory grants;
+unknown, ambiguous, and terminal runs fail closed. `SubagentStart` and
+`SubagentStop` remain silent for ordinary host subagents. They inject run
+context or a return check only when explicit dispatch metadata resolves one
+unique registered run and matches that run's immutable context-pack identity.
+This accident boundary is not adversarial authentication.
+Safety remains in engine validation, reconciliation, atomic publication, and
+replay even when hooks are omitted.
 
 ## Worked Example
 
@@ -110,9 +132,18 @@ identical.
 ## Migration
 
 `migrate-project` is the sole prior-version reader. It previews and hashes all
-inputs, requires approval of the exact plan digest, applies only 0.8 records
+inputs, exports a digest-bound legacy retrieval-profile packet when an exact
+non-activating packaged-baseline decision is required, exports review packets
+for truth claims that require a manager-approved rewrite or split, requires
+approval of the regenerated exact plan digest, applies only 0.8 records
 resumably, verifies live campaign coverage and archive reachability, and emits
 an immutable certification receipt. Initialization and ordinary state commands
-never auto-convert a project.
+never auto-convert a project or promote a retrieval profile.
+
+Retrieval and host certification use strict evidence rather than named checks
+plus arbitrary fingerprints. The engine re-hashes the exact final full
+benchmark, calibration, unapproved candidate profile, and paired blinded
+holdout trials. It also verifies a complete captured MCP/CLI/Claude Code/Codex
+request-result-failure matrix and derives all semantic and host fingerprints.
 
 See `references/` for governance, internals, reporting, and host adapters.

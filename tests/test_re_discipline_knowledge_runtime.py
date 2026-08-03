@@ -31,6 +31,8 @@ EXPECTED_TOOLS = [
     "manager_apply",
     "curation_submit",
     "closure_apply",
+    "normalization_queue",
+    "migrate_project",
 ]
 
 
@@ -380,6 +382,17 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                 "evals/conformance/finding-cases.json",
             }:
                 return "benchmark-cases"
+            if relative == "evals/conformance/lane-ablation-decision.json":
+                return "lane-ablation-decision"
+            if relative == "evals/conformance/lane-ablation-report.json":
+                return "lane-ablation-report"
+            if relative == "evals/conformance/project-lane-ablation.json":
+                return "project-lane-ablation-measurement"
+            if (
+                relative.startswith("evals/conformance/evidence/")
+                and relative.lower().endswith(".zip")
+            ):
+                return "lane-ablation-evidence-archive"
             if (
                 relative.startswith("evals/conformance/fixture/")
                 and relative.lower().endswith((".md", ".json", ".jsonc"))

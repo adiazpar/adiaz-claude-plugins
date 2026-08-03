@@ -3,7 +3,7 @@
   "$id": "plugin://re-discipline/schemas/review.schema.json",
   "title": "Immutable Manager Review",
   "type": "object",
-  "required": ["schemaVersion", "id", "createdAt", "updatedAt", "revision", "createdBy", "updatedBy", "digest", "correlationId", "campaignId", "reviewer", "authority", "intakeId", "intakeRevision", "packetDigest", "decisions"],
+  "required": ["schemaVersion", "id", "createdAt", "updatedAt", "revision", "createdBy", "updatedBy", "digest", "correlationId", "campaignId", "reviewer", "authority", "intakeId", "intakeRevision", "packetDigest", "reviewLoad", "decisions"],
   "properties": {
     "schemaVersion": {"const": 2},
     "id": {"type": "string", "pattern": "^V-[0-9]{4,}$"},
@@ -20,22 +20,12 @@
     "intakeId": {"type": "string", "pattern": "^I-[0-9]{4,}$"},
     "intakeRevision": {"type": "integer", "minimum": 1},
     "packetDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "reviewLoad": {"$ref": "review-load-receipt.schema.json"},
     "decisions": {
       "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["findingId", "findingRevision", "action", "rationale"],
-        "properties": {
-          "findingId": {"type": "string", "pattern": "^F-[0-9]{4,}$"},
-          "findingRevision": {"type": "integer", "minimum": 1},
-          "action": {"enum": ["ratify", "reject", "challenge", "merge", "split", "hold", "correct-grade", "supersede"]},
-          "evidenceCorrection": {"enum": ["direct", "inferred", "reported", "unknown"]},
-          "projection": {"enum": ["none", "campaign", "truth", "history", "backlog", "playbook", "maintained", "archive", "rejected"]},
-          "rationale": {"type": "string", "minLength": 1}
-        },
-        "additionalProperties": false
-      }
+      "minItems": 0,
+      "maxItems": 10,
+      "items": {"$ref": "review-decision.schema.json"}
     },
     "unresolvedConflicts": {"type": "array", "items": {"type": "string"}},
     "priorReviewId": {"type": "string", "pattern": "^V-[0-9]{4,}$"},

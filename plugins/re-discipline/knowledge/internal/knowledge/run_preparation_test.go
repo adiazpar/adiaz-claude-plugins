@@ -25,17 +25,25 @@ func newRunPreparationFixture(t *testing.T) runPreparationFixture {
 	store, opening := openContextPackTestCampaign(t, root)
 	service := newAdversarialService(t, root, nil)
 	runID := "R-20260802-0091"
+	grants := []WriteGrant{
+		{Mode: "directory", Path: "generated/output"},
+		{Mode: "exact", Path: "src/engine.go"},
+	}
 	pack, err := service.ContextPackOptions(context.Background(), ContextPackRequest{
 		Target: ContextPackTarget{
 			Kind: "active-run", CampaignID: "C-TEST", WorkItemID: "W-0001", RunID: runID,
 		},
 		Task: "Inspect the canonical campaign state and report exact evidence",
-		Role: "drafter", TokenBudget: 1024,
+		Role: "drafter", TokenBudget: 2048, WriteGrants: grants,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	brief := []byte("# Delegated objective\n\nInspect the canonical state and return exact evidence.\n")
+	rawBrief := "# Delegated objective\n\nInspect the canonical state and return exact evidence.\n"
+	brief, err := canonicalRunBrief(rawBrief, grants)
+	if err != nil {
+		t.Fatal(err)
+	}
 	packBody, err := canonicalJSON(pack)
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +57,7 @@ func newRunPreparationFixture(t *testing.T) runPreparationFixture {
 		},
 		CampaignID: "C-TEST", PrimaryWorkItemID: "W-0001",
 		ActorID: "drafter-1", Role: "investigator", Status: "prepared",
+		WriteGrants: grants,
 		Brief: &FileHandle{
 			Path: prefix + "brief.md", SHA256: "sha256:" + SHA256Bytes(brief),
 		},
@@ -71,7 +80,7 @@ func newRunPreparationFixture(t *testing.T) runPreparationFixture {
 		ExpectedHeadRevision: opening.ResultingHead.Revision, ExpectedHeadDigest: opening.ResultingHead.Digest,
 		ExpectedRecordDigests: map[string]string{"W-0001": graph.WorkItems["W-0001"].Digest},
 		WorkItems:             []WorkItemRecord{work}, Runs: []RunRecord{run},
-		RunPreparation: &RunPreparation{Brief: string(brief), ContextPack: pack},
+		RunPreparation: &RunPreparation{Brief: rawBrief, ContextPack: pack},
 	}
 	return runPreparationFixture{
 		root: root, service: service, store: store, request: request, brief: brief, packBody: packBody,
@@ -97,16 +106,23 @@ func TestManagerRunPreparationPublishesLaunchAtomicallyAndIdempotently(t *testin
 	if err != nil {
 		t.Fatalf("prepare delegated run: %v", err)
 	}
-	if len(receipt.Artifacts) != 2 {
+	if len(receipt.Artifacts) != 3 {
 		t.Fatalf("run preparation published %d launch artifacts", len(receipt.Artifacts))
 	}
+	overridePath := filepath.Join(fixture.root, "active", "test-campaign", "runs", fixture.request.Runs[0].ID, "AGENTS.override.md")
 	briefPath := filepath.Join(fixture.root, "active", "test-campaign", "runs", fixture.request.Runs[0].ID, "brief.md")
 	packPath := filepath.Join(fixture.root, "active", "test-campaign", "runs", fixture.request.Runs[0].ID, "context-pack.json")
+	override, overrideErr := os.ReadFile(overridePath)
 	brief, briefErr := os.ReadFile(briefPath)
 	packBody, packErr := os.ReadFile(packPath)
-	if briefErr != nil || packErr != nil || !reflect.DeepEqual(brief, fixture.brief) ||
+	if overrideErr != nil || briefErr != nil || packErr != nil ||
+		string(override) != strings.TrimSpace(migrationDrafterOverrideTemplate)+"\n" || !reflect.DeepEqual(brief, fixture.brief) ||
 		!reflect.DeepEqual(packBody, fixture.packBody) {
-		t.Fatalf("launch artifacts differ: briefErr=%v packErr=%v", briefErr, packErr)
+		t.Fatalf("launch artifacts differ: overrideErr=%v briefErr=%v packErr=%v", overrideErr, briefErr, packErr)
+	}
+	if !strings.Contains(string(brief), sealedWriteGrantMarker) ||
+		!strings.Contains(string(brief), `{"mode":"directory","path":"generated/output"}`) {
+		t.Fatal("published brief does not contain the engine-sealed structured grants")
 	}
 	if _, err := VerifyContextPack(
 		packPath, fixture.request.RunPreparation.ContextPack.Digest,
@@ -135,8 +151,12 @@ func TestManagerRunPreparationPublishesLaunchAtomicallyAndIdempotently(t *testin
 	tampered.RunPreparation = &tamperedPreparation
 	tampered.Runs = append([]RunRecord(nil), fixture.request.Runs...)
 	tamperedRun := tampered.Runs[0]
+	tamperedBriefBody, err := canonicalRunBrief(tamperedBrief, tamperedRun.WriteGrants)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tamperedRun.Brief = &FileHandle{
-		Path: tamperedRun.Brief.Path, SHA256: "sha256:" + SHA256String(tamperedBrief),
+		Path: tamperedRun.Brief.Path, SHA256: "sha256:" + SHA256Bytes(tamperedBriefBody),
 	}
 	tampered.Runs[0] = tamperedRun
 	if _, err := fixture.service.ManagerApply(context.Background(), tampered); !errors.Is(err, ErrIdempotencyConflict) {
@@ -220,6 +240,7 @@ func TestDelegatedRunPreparationRecoversArtifactPublicationCrash(t *testing.T) {
 	fixture := newRunPreparationFixture(t)
 	request := fixture.transactionRequest(t)
 	runID := fixture.request.Runs[0].ID
+	overridePath := filepath.Join(fixture.root, "active", "test-campaign", "runs", runID, "AGENTS.override.md")
 	briefPath := filepath.Join(fixture.root, "active", "test-campaign", "runs", runID, "brief.md")
 	packPath := filepath.Join(fixture.root, "active", "test-campaign", "runs", runID, "context-pack.json")
 	fixture.store.Failpoint = func(hit StateFailpoint) error {
@@ -235,6 +256,9 @@ func TestDelegatedRunPreparationRecoversArtifactPublicationCrash(t *testing.T) {
 	recovered := reopenStateTestStore(t, fixture.root)
 	if err := recovered.Recover(context.Background()); err != nil {
 		t.Fatalf("recover delegated launch: %v", err)
+	}
+	if _, err := os.Stat(overridePath); !os.IsNotExist(err) {
+		t.Fatalf("rollback retained half-published drafter override: %v", err)
 	}
 	if _, err := os.Stat(briefPath); !os.IsNotExist(err) {
 		t.Fatalf("rollback retained half-published brief: %v", err)
@@ -255,8 +279,11 @@ func TestDelegatedRunPreparationRecoversArtifactPublicationCrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retry after recovery: %v", err)
 	}
-	if len(receipt.Artifacts) != 2 {
+	if len(receipt.Artifacts) != 3 {
 		t.Fatalf("recovered retry published %d artifacts", len(receipt.Artifacts))
+	}
+	if _, err := os.Stat(overridePath); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(briefPath); err != nil {
 		t.Fatal(err)

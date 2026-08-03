@@ -26,6 +26,10 @@
     "maxInlineBytes": 1048576,
     "requireRegistration": true
   },
+  "reviewLoad": {
+    "targetMinutesPerPacket": 12,
+    "targetPacketsPerSession": 6
+  },
   "closure": {
     "requireRunCoverage": true,
     "requireFindingDisposition": true,

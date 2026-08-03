@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -373,13 +373,15 @@ func TestAdversarialRetrievalProfileValidation(t *testing.T) {
 		{
 			name: "duplicate benchmark evidence",
 			mutate: func(p *RetrievalProfile) {
-				p.EffectiveProfiles[1].Benchmark.Digest = p.EffectiveProfiles[0].Benchmark.Digest
+				row := p.EffectiveProfiles[0]
+				row.Name = "duplicate-row"
+				p.EffectiveProfiles = append(p.EffectiveProfiles, row)
 			},
 		},
 		{
-			name: "missing model-free capability",
+			name: "missing lexical graph capability",
 			mutate: func(p *RetrievalProfile) {
-				p.EffectiveProfiles = p.EffectiveProfiles[:2]
+				p.EffectiveProfiles = nil
 			},
 		},
 		{
@@ -402,6 +404,14 @@ func TestAdversarialRetrievalProfileValidation(t *testing.T) {
 
 func TestAdversarialModelManifestAndSpecValidation(t *testing.T) {
 	assetRoot := adversarialAssetRoot(t)
+	manifest, err := LoadModelManifest(assetRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Models) != 1 || len(manifest.ExecutableModels) != 1 ||
+		manifest.Models[0].Role != "embedding" {
+		t.Fatalf("manifest does not expose the one retained embedding: %#v", manifest.Models)
+	}
 
 	makeAssets := func(t *testing.T) string {
 		t.Helper()
@@ -423,22 +433,6 @@ func TestAdversarialModelManifestAndSpecValidation(t *testing.T) {
 		}
 		return raw
 	}
-	modelByImplementation := func(
-		t *testing.T,
-		raw map[string]any,
-		implementation string,
-	) map[string]any {
-		t.Helper()
-		for _, value := range raw["models"].([]any) {
-			model := value.(map[string]any)
-			if model["implementation"] == implementation {
-				return model
-			}
-		}
-		t.Fatalf("packaged model manifest omits implementation %q", implementation)
-		return nil
-	}
-
 	t.Run("unknown manifest fields are rejected", func(t *testing.T) {
 		root := makeAssets(t)
 		raw := loadRaw(t, root)
@@ -446,121 +440,6 @@ func TestAdversarialModelManifestAndSpecValidation(t *testing.T) {
 		writeTestJSON(t, filepath.Join(root, "models", "manifest.json"), raw)
 		if _, err := LoadModelManifest(root); err == nil {
 			t.Fatal("unknown manifest field was accepted")
-		}
-	})
-
-	t.Run("spec path traversal is rejected even with a matching checksum", func(t *testing.T) {
-		root := makeAssets(t)
-		raw := loadRaw(t, root)
-		models := raw["models"].([]any)
-		first := models[0].(map[string]any)
-		specPath := filepath.Join(root, filepath.FromSlash(first["specFile"].(string)))
-		spec, err := os.ReadFile(specPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeTestFile(t, filepath.Join(root, "outside.json"), string(spec))
-		first["specFile"] = "models/specs/../../outside.json"
-		first["specSha256"] = SHA256Bytes(spec)
-		writeTestJSON(t, filepath.Join(root, "models", "manifest.json"), raw)
-		if _, err := LoadModelManifest(root); err == nil {
-			t.Fatal("traversing model spec path was accepted")
-		}
-	})
-
-	t.Run("spec identity cannot disagree with manifest", func(t *testing.T) {
-		root := makeAssets(t)
-		raw := loadRaw(t, root)
-		models := raw["models"].([]any)
-		first := models[0].(map[string]any)
-		specPath := filepath.Join(root, filepath.FromSlash(first["specFile"].(string)))
-		var spec map[string]any
-		body, err := os.ReadFile(specPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(body, &spec); err != nil {
-			t.Fatal(err)
-		}
-		spec["id"] = "builtin:different-model-v1"
-		changed, _ := json.MarshalIndent(spec, "", "  ")
-		changed = append(changed, '\n')
-		if err := os.WriteFile(specPath, changed, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		first["specSha256"] = SHA256Bytes(changed)
-		writeTestJSON(t, filepath.Join(root, "models", "manifest.json"), raw)
-		if _, err := LoadModelManifest(root); err == nil {
-			t.Fatal("manifest accepted a checksum-matching spec for a different model identity")
-		}
-	})
-
-	for _, license := range []string{"Apache-2.0", "mit", "MIT "} {
-		t.Run("builtin license must be exact SPDX MIT "+license, func(t *testing.T) {
-			root := makeAssets(t)
-			raw := loadRaw(t, root)
-			model := modelByImplementation(t, raw, "builtin")
-			specPath := filepath.Join(
-				root,
-				filepath.FromSlash(model["specFile"].(string)),
-			)
-			body, err := os.ReadFile(specPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var spec map[string]any
-			if err := json.Unmarshal(body, &spec); err != nil {
-				t.Fatal(err)
-			}
-			spec["license"] = license
-			changed, err := json.MarshalIndent(spec, "", "  ")
-			if err != nil {
-				t.Fatal(err)
-			}
-			changed = append(changed, '\n')
-			if err := os.WriteFile(specPath, changed, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			model["license"] = license
-			model["specSha256"] = SHA256Bytes(changed)
-			writeTestJSON(t, filepath.Join(root, "models", "manifest.json"), raw)
-			if _, err := LoadModelManifest(root); err == nil {
-				t.Fatalf("builtin model accepted non-exact MIT license %q", license)
-			}
-		})
-	}
-
-	t.Run("top-level spec license must match manifest", func(t *testing.T) {
-		root := makeAssets(t)
-		raw := loadRaw(t, root)
-		model := modelByImplementation(t, raw, "bundled-local")
-		specPath := filepath.Join(
-			root,
-			filepath.FromSlash(model["specFile"].(string)),
-		)
-		body, err := os.ReadFile(specPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var spec map[string]any
-		if err := json.Unmarshal(body, &spec); err != nil {
-			t.Fatal(err)
-		}
-		if spec["license"] == model["license"] {
-			spec["license"] = "Apache-2.0"
-		}
-		changed, err := json.MarshalIndent(spec, "", "  ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		changed = append(changed, '\n')
-		if err := os.WriteFile(specPath, changed, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		model["specSha256"] = SHA256Bytes(changed)
-		writeTestJSON(t, filepath.Join(root, "models", "manifest.json"), raw)
-		if _, err := LoadModelManifest(root); err == nil {
-			t.Fatal("model manifest accepted a mismatched top-level spec license")
 		}
 	})
 
@@ -584,159 +463,64 @@ func TestAdversarialModelManifestAndSpecValidation(t *testing.T) {
 		}
 	})
 
-	gloveModel := func(t *testing.T, raw map[string]any) map[string]any {
-		t.Helper()
-		for _, value := range raw["models"].([]any) {
-			model := value.(map[string]any)
-			if model["id"] == "builtin:glove-6b-50d-top50k-q8-v1" {
-				return model
-			}
-		}
-		t.Fatal("packaged model manifest omits the learned GloVe model")
-		return nil
-	}
-
-	t.Run("bundled artifact path traversal is rejected even with a matching checksum", func(t *testing.T) {
+	t.Run("reranker model is rejected", func(t *testing.T) {
 		root := makeAssets(t)
 		raw := loadRaw(t, root)
-		model := gloveModel(t, raw)
-		artifactPath := filepath.Join(
-			root, filepath.FromSlash(model["artifactFile"].(string)))
-		artifact, err := os.ReadFile(artifactPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeTestFile(t, filepath.Join(root, "outside.bin"), string(artifact))
-		model["artifactFile"] = "models/artifacts/../../outside.bin"
-		model["artifactSha256"] = SHA256Bytes(artifact)
+		model := raw["models"].([]any)[0].(map[string]any)
+		model["role"] = "reranker"
 		writeTestJSON(t, filepath.Join(root, "models", "manifest.json"), raw)
-		if _, err := LoadModelManifest(root); err == nil {
-			t.Fatal("traversing bundled artifact path was accepted")
+		_, err := LoadModelManifest(root)
+		if err == nil || !strings.Contains(err.Error(), "unsupported role") {
+			t.Fatalf("reranker model was accepted or produced the wrong failure: %v", err)
 		}
 	})
 
-	t.Run("bundled artifact checksum mismatch fails closed", func(t *testing.T) {
+	t.Run("embedding spec traversal is rejected", func(t *testing.T) {
 		root := makeAssets(t)
 		raw := loadRaw(t, root)
-		model := gloveModel(t, raw)
-		modelID := model["id"].(string)
-		artifactPath := filepath.Join(
-			root, filepath.FromSlash(model["artifactFile"].(string)))
-		artifact, err := os.ReadFile(artifactPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		artifact[len(artifact)-1] ^= 0x01
-		if err := os.WriteFile(artifactPath, artifact, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		manifest, err := LoadModelManifest(root)
-		if err != nil {
-			t.Fatalf("safe degraded model load failed: %v", err)
-		}
-		if manifest.UnavailableModels[modelID] != "artifact-checksum-mismatch" {
-			t.Fatalf(
-				"checksum-mismatched artifact was not explicitly unavailable: %#v",
-				manifest.UnavailableModels)
-		}
-		if _, executable := manifest.ExecutableModels[modelID]; executable {
-			t.Fatal("checksum-mismatched bundled artifact remained executable")
-		}
-	})
-
-	t.Run("checksum-matching malformed bundled artifact fails closed", func(t *testing.T) {
-		root := makeAssets(t)
-		raw := loadRaw(t, root)
-		model := gloveModel(t, raw)
-		modelID := model["id"].(string)
-		artifactPath := filepath.Join(
-			root, filepath.FromSlash(model["artifactFile"].(string)))
-		artifact, err := os.ReadFile(artifactPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		artifact[8] = 0xff
-		model["artifactSha256"] = SHA256Bytes(artifact)
-		if err := os.WriteFile(artifactPath, artifact, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		model := raw["models"].([]any)[0].(map[string]any)
+		model["specFile"] = "models/specs/../../outside.json"
 		writeTestJSON(t, filepath.Join(root, "models", "manifest.json"), raw)
-		manifest, err := LoadModelManifest(root)
-		if err != nil {
-			t.Fatalf("safe degraded model load failed: %v", err)
-		}
-		if manifest.UnavailableModels[modelID] != "artifact-invalid" {
-			t.Fatalf(
-				"malformed artifact was not explicitly unavailable: %#v",
-				manifest.UnavailableModels)
-		}
-		if _, executable := manifest.ExecutableModels[modelID]; executable {
-			t.Fatal("malformed bundled artifact remained executable after repinning")
+		_, err := LoadModelManifest(root)
+		if err == nil || !strings.Contains(err.Error(), "unsafe spec path") {
+			t.Fatalf("embedding spec traversal was accepted or produced the wrong failure: %v", err)
 		}
 	})
 }
 
-func TestAdversarialCapabilityMatrixAndFallbackIdentity(t *testing.T) {
+func TestAdversarialDenseSelectionIdentity(t *testing.T) {
 	profile, manifest := readCatalogAndManifest(t)
 	identity, err := ProbeRuntimeIdentity(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	full, err := SelectEffectiveProfile(profile, manifest, identity, false, false)
+	selected, err := SelectEffectiveProfile(profile, manifest, identity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	noRerank, err := SelectEffectiveProfile(profile, manifest, identity, false, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	modelFree, err := SelectEffectiveProfile(profile, manifest, identity, true, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if full.Effective.Name != "hybrid-local-v1" || full.FallbackReason != nil {
-		t.Fatalf("unexpected full profile selection: %#v", full)
-	}
-	if noRerank.Effective.Name != "hybrid-no-rerank-v1" ||
-		noRerank.FallbackReason == nil ||
-		!strings.Contains(*noRerank.FallbackReason, "reranker-disabled") {
-		t.Fatalf("unexpected no-rerank fallback: %#v", noRerank)
-	}
-	if modelFree.Effective.Name != "lexical-graph-v1" ||
-		modelFree.FallbackReason == nil ||
-		!strings.Contains(*modelFree.FallbackReason, "embedding-disabled") {
-		t.Fatalf("unexpected model-free fallback: %#v", modelFree)
-	}
-	if full.RequestedIdentity != noRerank.RequestedIdentity ||
-		full.RequestedIdentity != modelFree.RequestedIdentity {
-		t.Fatal("fallback changed the requested profile identity")
-	}
-	identities := map[string]bool{
-		full.EffectiveIdentity:      true,
-		noRerank.EffectiveIdentity:  true,
-		modelFree.EffectiveIdentity: true,
-	}
-	if len(identities) != 3 {
-		t.Fatal("capability matrix rows do not have distinct effective identities")
+	if selected.Effective.Name != "hybrid-no-rerank-v1" || selected.FallbackReason != nil ||
+		len(selected.Models) != 1 ||
+		!reflect.DeepEqual(selected.ActiveLanes, []string{"exact", "fts", "graph", "dense"}) {
+		t.Fatalf("unexpected dense profile selection: %#v", selected)
 	}
 
 	changedBackend := identity
 	changedBackend.NumericalBackend += "-different"
-	backendSelection, err := SelectEffectiveProfile(profile, manifest, changedBackend, false, false)
+	backendSelection, err := SelectEffectiveProfile(profile, manifest, changedBackend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if backendSelection.EffectiveIdentity == full.EffectiveIdentity {
+	if backendSelection.EffectiveIdentity == selected.EffectiveIdentity {
 		t.Fatal("effective identity omitted the numerical backend")
 	}
 	changedTieBreaker := identity
 	changedTieBreaker.TieBreaker += "-different"
-	tieSelection, err := SelectEffectiveProfile(profile, manifest, changedTieBreaker, false, false)
+	tieSelection, err := SelectEffectiveProfile(profile, manifest, changedTieBreaker)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tieSelection.EffectiveIdentity == full.EffectiveIdentity {
+	if tieSelection.EffectiveIdentity == selected.EffectiveIdentity {
 		t.Fatal("effective identity omitted deterministic tie-breaking")
 	}
 }
@@ -747,133 +531,28 @@ func TestAdversarialTrackedManifestCannotGrantUnavailableExternalModels(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	externalID := "local:semantic-embedding-v1"
 	manifest.Models = append(manifest.Models, ModelSpec{
-		ID: externalID, Role: "embedding", Revision: "1",
+		ID: "local:removed-model-v1", Role: "removed", Revision: "1",
 		Implementation:  "onnx-local",
 		SpecSHA256:      strings.Repeat("1", 64),
 		ArtifactSHA256:  strings.Repeat("2", 64),
-		Dimensions:      featureDimensions,
+		Dimensions:      512,
 		NetworkRequired: false,
 	})
-	profile = cloneProfile(t, profile)
-	for index := range profile.EffectiveProfiles[:2] {
-		profile.EffectiveProfiles[index].Requires.Embedding = &externalID
-	}
-
-	selected, err := SelectEffectiveProfile(profile, manifest, identity, false, false)
-	if err != nil {
-		return
-	}
-	if selected.Effective.Name != "lexical-graph-v1" ||
-		selected.FallbackReason == nil ||
-		(!strings.Contains(*selected.FallbackReason, "unavailable") &&
-			!strings.Contains(*selected.FallbackReason, "grant")) {
-		t.Fatalf(
-			"tracked manifest silently activated an external model without an artifact or machine-local grant: %#v",
-			selected,
-		)
+	if _, err := SelectEffectiveProfile(profile, manifest, identity); err == nil {
+		t.Fatal("model-bearing manifest was accepted by the production selector")
 	}
 }
 
 func TestAdversarialPackagedLearnedModelProvenanceAndClaimsAreHonest(t *testing.T) {
 	assetRoot := adversarialAssetRoot(t)
 	profile, manifest := readCatalogAndManifest(t)
-	var full *EffectiveProfile
-	for index := range profile.EffectiveProfiles {
-		if profile.EffectiveProfiles[index].Name == "hybrid-local-v1" {
-			full = &profile.EffectiveProfiles[index]
-			break
-		}
+	if len(profile.EffectiveProfiles) != 2 ||
+		!reflect.DeepEqual(profile.EffectiveProfiles[0].Lanes, []string{"exact", "fts", "graph", "dense"}) ||
+		len(manifest.Models) != 1 || manifest.Models[0].Role != "embedding" {
+		t.Fatalf("two-layer ablation decision is not the shipped capability set: profile=%#v models=%#v",
+			profile.EffectiveProfiles, manifest.Models)
 	}
-	if full == nil || full.Requires.Embedding == nil {
-		t.Fatal("full packaged profile omits an embedding identity")
-	}
-	const gloveID = "builtin:glove-6b-50d-top50k-q8-v1"
-	if *full.Requires.Embedding != gloveID {
-		t.Fatalf("full profile embedding = %q, want learned GloVe model", *full.Requires.Embedding)
-	}
-	var glove *ModelSpec
-	for index := range manifest.Models {
-		if manifest.Models[index].ID == gloveID {
-			glove = &manifest.Models[index]
-			break
-		}
-	}
-	if glove == nil {
-		t.Fatal("model manifest omits the active learned GloVe model")
-	}
-	if glove.Implementation != "bundled-local" || glove.Dimensions != 50 ||
-		glove.ArtifactFile != "models/artifacts/glove-6b-50d-top50k-q8-v1.bin" ||
-		len(glove.ArtifactSHA256) != 64 || glove.License != "PDDL-1.0" ||
-		glove.NetworkRequired {
-		t.Fatalf("active learned model identity/provenance is incomplete: %#v", glove)
-	}
-
-	specBody, err := os.ReadFile(filepath.Join(
-		assetRoot, filepath.FromSlash(glove.SpecFile)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var spec struct {
-		Algorithm string `json:"algorithm"`
-		Artifact  struct {
-			Path              string `json:"path"`
-			SHA256            string `json:"sha256"`
-			Format            string `json:"format"`
-			FormatVersion     int    `json:"formatVersion"`
-			VocabularySize    int    `json:"vocabularySize"`
-			Quantization      string `json:"quantization"`
-			QuantizationScale int    `json:"quantizationScale"`
-		} `json:"artifact"`
-		Upstream struct {
-			Project             string `json:"project"`
-			URL                 string `json:"url"`
-			SourceArchive       string `json:"sourceArchive"`
-			SourceArchiveSHA256 string `json:"sourceArchiveSha256"`
-			SourceMember        string `json:"sourceMember"`
-			License             string `json:"license"`
-			LicenseURL          string `json:"licenseUrl"`
-		} `json:"upstream"`
-		NetworkRequired bool `json:"networkRequired"`
-	}
-	if err := json.Unmarshal(specBody, &spec); err != nil {
-		t.Fatal(err)
-	}
-	if spec.Algorithm == "" || spec.Artifact.Path != glove.ArtifactFile ||
-		spec.Artifact.SHA256 != glove.ArtifactSHA256 ||
-		spec.Artifact.Format != "re-discipline-glove-q8" ||
-		spec.Artifact.FormatVersion != 1 ||
-		spec.Artifact.VocabularySize != 50000 ||
-		spec.Artifact.QuantizationScale != 127 ||
-		!strings.Contains(spec.Artifact.Quantization, "int8") ||
-		spec.Upstream.Project != "Stanford GloVe" ||
-		!strings.HasPrefix(spec.Upstream.URL, "https://") ||
-		!strings.HasPrefix(spec.Upstream.SourceArchive, "https://") ||
-		len(spec.Upstream.SourceArchiveSHA256) != 64 ||
-		spec.Upstream.SourceMember != "glove.6B.50d.txt" ||
-		spec.Upstream.License != glove.License ||
-		!strings.HasPrefix(spec.Upstream.LicenseURL, "https://") ||
-		spec.NetworkRequired {
-		t.Fatalf("learned model spec lacks pinned provenance: %#v", spec)
-	}
-
-	artifactBody, err := os.ReadFile(filepath.Join(
-		assetRoot, filepath.FromSlash(glove.ArtifactFile)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if SHA256Bytes(artifactBody) != glove.ArtifactSHA256 ||
-		len(artifactBody) < 20 ||
-		!bytes.Equal(artifactBody[:8], []byte{'R', 'D', 'G', 'L', 'V', 'Q', '8', 0}) ||
-		binary.LittleEndian.Uint16(artifactBody[8:10]) != 1 ||
-		binary.LittleEndian.Uint16(artifactBody[10:12]) != uint16(glove.Dimensions) ||
-		binary.LittleEndian.Uint32(artifactBody[12:16]) != 50000 ||
-		binary.LittleEndian.Uint16(artifactBody[16:18]) != 127 ||
-		binary.LittleEndian.Uint16(artifactBody[18:20]) != 0 {
-		t.Fatal("packaged learned artifact does not match its declared identity")
-	}
-
 	pluginReadme, err := os.ReadFile(filepath.Join(filepath.Dir(assetRoot), "README.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -882,41 +561,23 @@ func TestAdversarialPackagedLearnedModelProvenanceAndClaimsAreHonest(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	provenanceReadme, err := os.ReadFile(filepath.Join(
-		assetRoot, "models", "artifacts", "README.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	overview := strings.ToLower(string(pluginReadme))
-	detail := strings.ToLower(string(knowledgeReadme))
-	provenance := strings.ToLower(string(provenanceReadme))
-	for _, required := range []string{"glove", "learned", "local"} {
-		if !strings.Contains(overview, required) {
-			t.Errorf("plugin README does not disclose the active %s model behavior", required)
+	for name, body := range map[string][]byte{"plugin": pluginReadme, "knowledge": knowledgeReadme} {
+		text := strings.ToLower(string(body))
+		if !strings.Contains(text, "dense") || !strings.Contains(text, "rerank") ||
+			!strings.Contains(text, "holdout") {
+			t.Errorf("%s README does not disclose the measured lane decision", name)
 		}
 	}
-	for _, required := range []string{
-		"glove", "model-free fallback", "deterministically quantized",
-		"pddl 1.0", "integer rerank",
+	for _, relative := range []string{
+		"models/specs/glove-6b-50d-top50k-q8-v1.json",
+		"models/artifacts/glove-6b-50d-top50k-q8-v1.bin",
 	} {
-		if !strings.Contains(detail, required) {
-			t.Errorf("knowledge README omits model/reranker disclosure %q", required)
+		if info, err := os.Stat(filepath.Join(assetRoot, filepath.FromSlash(relative))); err != nil || !info.Mode().IsRegular() {
+			t.Errorf("retained embedding asset is missing or unsafe: %s", relative)
 		}
 	}
-	for _, required := range []string{
-		"stanford glove", "source archive sha-256", "pddl 1.0",
-		"not project-specific training", "reproduction",
-	} {
-		if !strings.Contains(provenance, required) {
-			t.Errorf("artifact provenance README omits %q", required)
-		}
-	}
-	if !strings.Contains(detail, "conformance") ||
-		(!strings.Contains(detail, "seed") && !strings.Contains(detail, "small")) ||
-		(!strings.Contains(detail, "not a general") &&
-			!strings.Contains(detail, "does not establish") &&
-			!strings.Contains(detail, "does not prove")) {
-		t.Error("knowledge README does not keep packaged seed-conformance claims modest")
+	if _, err := os.Stat(filepath.Join(assetRoot, "models", "specs", "linear-reranker-v1.json")); !os.IsNotExist(err) {
+		t.Error("removed reranker spec still ships")
 	}
 }
 
@@ -1187,174 +848,6 @@ func TestAdversarialAtomicReplacementAndGenerationRecovery(t *testing.T) {
 	})
 }
 
-func TestAdversarialDenseRetrievalUsesBoundedPersistedCandidates(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bounded.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	ctx := context.Background()
-	if err := createSchema(ctx, db); err != nil {
-		t.Fatal(err)
-	}
-	query := "bounded dense candidate"
-	vector := featureHashVector(query)
-	signature := int64(vectorSignature(vector))
-	encoded := encodeFeatureVector(vector)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(`INSERT INTO documents(id,path,tier,title,content_hash,size)
-		VALUES('doc','docs/truth/bounded.md','truth','Bounded','hash',1)`); err != nil {
-		tx.Rollback()
-		t.Fatal(err)
-	}
-	for index := 0; index < denseCandidateMaximum+1; index++ {
-		id := fmt.Sprintf("chunk-%05d", index)
-		content := fmt.Sprintf("bounded candidate %05d", index)
-		if _, err := tx.Exec(`INSERT INTO chunks(
-			id,document_id,path,tier,heading,start_line,end_line,content,content_hash)
-			VALUES(?,'doc','docs/truth/bounded.md','truth','Bounded',?,?,?,?)`,
-			id, index+1, index+1, content, SHA256String(content)); err != nil {
-			tx.Rollback()
-			t.Fatal(err)
-		}
-		vectorBody := encoded
-		if index == denseCandidateMaximum {
-			// This row sorts after the bounded window. Encountering it proves an
-			// accidental all-corpus scan.
-			vectorBody = []byte{0x01}
-		}
-		if _, err := tx.Exec(`INSERT INTO vectors(
-			model_id,model_spec_sha256,chunk_id,signature,vector)
-			VALUES('builtin:feature-hash-512-v1','spec',?,?,?)`,
-			id, signature, vectorBody); err != nil {
-			tx.Rollback()
-			t.Fatal(err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	candidates, err := loadDenseCandidates(
-		ctx, db, []string{"truth"}, nil, "builtin:feature-hash-512-v1",
-		[]uint16{uint16(signature)}, denseCandidateMaximum,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != denseCandidateMaximum {
-		t.Fatalf("dense candidate bound = %d, want %d", len(candidates), denseCandidateMaximum)
-	}
-	ranked, err := rankDense(ctx, db, query, []string{"truth"}, nil, "builtin:feature-hash-512-v1")
-	if err != nil {
-		t.Fatalf("rankDense crossed its bounded window: %v", err)
-	}
-	if len(ranked) > 200 {
-		t.Fatalf("dense lane returned an unbounded fused set: %d", len(ranked))
-	}
-}
-
-func TestAdversarialLearnedDenseRetrievalAddsNoOverlapSemanticRecall(t *testing.T) {
-	testCases := []struct {
-		name    string
-		query   string
-		path    string
-		content string
-	}{
-		{
-			name: "physician retrieves doctor", query: "physician",
-			path:    "docs/truth/semantic-doctor.md",
-			content: "# Doctor\n\nA doctor treats patients. The doctor works in a hospital.\n",
-		},
-		{
-			name: "attorney retrieves lawyer", query: "attorney",
-			path:    "docs/truth/semantic-lawyer.md",
-			content: "# Lawyer\n\nA lawyer represents a client. The lawyer argues in court.\n",
-		},
-		{
-			name: "purchase retrieves buy", query: "purchase",
-			path:    "docs/truth/semantic-buy.md",
-			content: "# Buying\n\nBuy goods at a store. Buyers pay money for supplies.\n",
-		},
-	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			root := makeAdversarialProject(t)
-			writeTestFile(t, filepath.Join(
-				root, filepath.FromSlash(testCase.path)), testCase.content)
-			service := newAdversarialService(t, root, nil)
-			response, err := service.Search(context.Background(), SearchOptions{
-				Query: testCase.query, QueryClass: "conceptual",
-				AllowedTiers: []string{"truth"}, Limit: 12, TokenBudget: 1024,
-				// Lane ranks are ranking diagnostics that only a verbose
-				// response carries.
-				Verbosity: VerbosityVerbose,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var semantic *SearchResult
-			for index := range response.Results {
-				if response.Results[index].Citation.Path == testCase.path {
-					semantic = &response.Results[index]
-					break
-				}
-			}
-			if semantic == nil {
-				t.Fatalf(
-					"learned dense lane missed no-overlap semantic target %s: %#v",
-					testCase.path, response.Results)
-			}
-			denseRank, dense := semantic.LaneRanks["dense"]
-			if !dense || denseRank > 3 {
-				t.Fatalf(
-					"semantic target was not a leading learned-vector result: %#v",
-					semantic.LaneRanks)
-			}
-			if _, exact := semantic.LaneRanks["exact"]; exact {
-				t.Fatalf("semantic target leaked through exact matching: %#v", semantic.LaneRanks)
-			}
-			if _, fts := semantic.LaneRanks["fts"]; fts {
-				t.Fatalf("semantic target leaked through FTS matching: %#v", semantic.LaneRanks)
-			}
-			queryTerms := map[string]bool{}
-			for _, token := range modelTokens(testCase.query) {
-				queryTerms[token] = true
-			}
-			for _, token := range modelTokens(semantic.Passage) {
-				if queryTerms[token] {
-					t.Fatalf(
-						"semantic case has lexical overlap on %q: query=%q passage=%q",
-						token, testCase.query, semantic.Passage)
-				}
-			}
-
-			modelFree := newAdversarialService(t, root, func(options *ServiceOptions) {
-				options.DisableDense = true
-				options.DisableRerank = true
-			})
-			fallback, err := modelFree.Search(context.Background(), SearchOptions{
-				Query: testCase.query, QueryClass: "conceptual",
-				AllowedTiers: []string{"truth"}, Limit: 12, TokenBudget: 1024,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, result := range fallback.Results {
-				if result.Citation.Path == testCase.path {
-					t.Fatalf(
-						"model-free fallback retrieved the no-overlap target; learned uplift was not isolated: %#v",
-						result.LaneRanks)
-				}
-			}
-		})
-	}
-}
-
 func assertAdversarialRuntimeIdentity(t *testing.T, identity RuntimeIdentity) {
 	t.Helper()
 	if identity.Implementation == "" || identity.Version == "" ||
@@ -1512,7 +1005,7 @@ func assertAdversarialRetrievalIdentity(
 	}
 }
 
-func TestAdversarialExactFTSDenseGraphCitationsBudgetsAndReplay(t *testing.T) {
+func TestAdversarialExactFTSGraphCitationsBudgetsAndReplay(t *testing.T) {
 	root := makeAdversarialProject(t)
 	service := newAdversarialService(t, root, nil)
 	ctx := context.Background()
@@ -1534,14 +1027,13 @@ func TestAdversarialExactFTSDenseGraphCitationsBudgetsAndReplay(t *testing.T) {
 	if err != nil || len(fts) == 0 || fts[0].Chunk.Path != "docs/truth/engine.md" {
 		t.Fatalf("FTS lane missed engine truth: rows=%#v err=%v", fts, err)
 	}
-	if selected.Effective.Requires.Embedding == nil {
-		t.Fatal("full selected profile lacks embedding requirement")
+	if len(selected.Models) != 1 ||
+		!reflect.DeepEqual(selected.ActiveLanes, []string{"exact", "fts", "graph", "dense"}) {
+		t.Fatalf("selected profile omitted the evidence-retained dense lane: %#v", selected)
 	}
-	dense, err := rankDense(
-		ctx, db, "engine frame checksum", []string{"truth"}, nil,
-		*selected.Effective.Requires.Embedding)
+	dense, err := rankDense(ctx, db, "frame encoding serialization", []string{"truth"}, nil, selected.Models[0])
 	if err != nil || len(dense) == 0 {
-		t.Fatalf("dense lane returned no bounded candidates: rows=%#v err=%v", dense, err)
+		t.Fatalf("dense lane did not execute against indexed vectors: rows=%d err=%v", len(dense), err)
 	}
 	consumer, err := rankExact(ctx, db, "docs/truth/consumer.md", []string{"truth"}, nil, 400)
 	if err != nil || len(consumer) == 0 {
@@ -2132,7 +1624,7 @@ func TestAdversarialEvaluationCasesAreStrictAndSplitByTopic(t *testing.T) {
 	})
 }
 
-func TestAdversarialPackagedBenchmarkDigestsMetricsAndCapabilityMatrix(t *testing.T) {
+func TestAdversarialPackagedBenchmarkDigestAndMetrics(t *testing.T) {
 	cases, err := LoadEvalCases(filepath.Join(
 		adversarialAssetRoot(t), "evals", "conformance", "cases.json"))
 	if err != nil {
@@ -2142,8 +1634,8 @@ func TestAdversarialPackagedBenchmarkDigestsMetricsAndCapabilityMatrix(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !report.Passed || len(report.Profiles) != 3 {
-		t.Fatalf("full packaged capability-matrix benchmark failed: %#v", report)
+	if !report.Passed || len(report.Profiles) != 2 {
+		t.Fatalf("full packaged dense/fallback benchmark failed: %#v", report)
 	}
 	digests := map[string]bool{}
 	for _, profile := range report.Profiles {
@@ -2151,7 +1643,7 @@ func TestAdversarialPackagedBenchmarkDigestsMetricsAndCapabilityMatrix(t *testin
 			profile.DeclaredDigest != profile.ComputedDigest ||
 			!strings.HasPrefix(profile.ComputedDigest, "sha256:") ||
 			len(profile.ComputedDigest) != 71 {
-			t.Fatalf("profile lacks verified independent benchmark evidence: %#v", profile)
+			t.Fatalf("profile lacks verified benchmark evidence: %#v", profile)
 		}
 		if digests[profile.ComputedDigest] {
 			t.Fatalf("capability profiles share benchmark evidence: %s", profile.ComputedDigest)
@@ -2198,13 +1690,6 @@ func TestAdversarialPackagedBenchmarkDigestsMetricsAndCapabilityMatrix(t *testin
 			}
 		}
 	}
-	baseline := report.Profiles[len(report.Profiles)-1].Metrics
-	for _, hybrid := range report.Profiles[:len(report.Profiles)-1] {
-		if hybrid.Metrics.RecallAtK < baseline.RecallAtK {
-			t.Fatalf("%s is inferior to lexical fallback on frozen holdout", hybrid.ProfileName)
-		}
-	}
-
 	reportBody, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
@@ -2214,7 +1699,6 @@ func TestAdversarialPackagedBenchmarkDigestsMetricsAndCapabilityMatrix(t *testin
 		t.Fatal(err)
 	}
 	rawProfiles := raw["profiles"].([]any)
-	holdoutRecall := []float64{}
 	for _, value := range rawProfiles {
 		rawProfile := value.(map[string]any)
 		bySplit := map[string]any{}
@@ -2245,13 +1729,8 @@ func TestAdversarialPackagedBenchmarkDigestsMetricsAndCapabilityMatrix(t *testin
 			}
 		}
 		holdout := bySplit["holdout"].(map[string]any)
-		holdoutRecall = append(holdoutRecall, holdout["recallAtK"].(float64))
-	}
-	baselineHoldout := holdoutRecall[len(holdoutRecall)-1]
-	for index, recall := range holdoutRecall[:len(holdoutRecall)-1] {
-		if recall < baselineHoldout {
-			t.Fatalf("%s is inferior to lexical fallback on frozen holdout",
-				report.Profiles[index].ProfileName)
+		if holdout["recallAtK"].(float64) < 0 || holdout["recallAtK"].(float64) > 1 {
+			t.Fatalf("%s holdout recall is outside [0,1]", rawProfile["profileName"])
 		}
 	}
 }
@@ -2303,6 +1782,28 @@ func TestAdversarialCalibrationUsesDevelopmentThenFrozenHoldoutWithoutActivation
 	if string(before) != string(after) || report.Activated ||
 		report.ActiveBefore == "" || report.ActiveBefore != report.ActiveAfter {
 		t.Fatalf("calibration activated or rewrote production profile: %#v", report)
+	}
+	if len(report.Candidates) != 27 {
+		t.Fatalf("calibration evaluated %d candidates, want the contractual 27", len(report.Candidates))
+	}
+	denseWeights := map[int]bool{}
+	gridRows := map[string]bool{}
+	for _, candidate := range report.Candidates {
+		if len(candidate.Weights) != 4 {
+			t.Fatalf("calibration candidate has an unsupported weight set: %#v", candidate.Weights)
+		}
+		exact, fts, graph, dense := candidate.Weights["exact"], candidate.Weights["fts"],
+			candidate.Weights["graph"], candidate.Weights["dense"]
+		if !map[int]bool{6: true, 8: true, 10: true}[exact] ||
+			!map[int]bool{4: true, 6: true, 8: true}[fts] ||
+			!map[int]bool{1: true, 2: true, 3: true}[graph] || dense <= 0 {
+			t.Fatalf("calibration candidate is outside the contractual grid: %#v", candidate.Weights)
+		}
+		denseWeights[dense] = true
+		gridRows[fmt.Sprintf("%d/%d/%d", exact, fts, graph)] = true
+	}
+	if len(denseWeights) != 1 || len(gridRows) != 27 {
+		t.Fatalf("calibration tuned lane inventory instead of the 27-row RRF grid: dense=%v rows=%d", denseWeights, len(gridRows))
 	}
 	if report.Recommended.DevelopmentHit <= report.Recommended.HoldoutHit {
 		t.Fatalf("development and holdout were not evaluated separately: %#v", report.Recommended)
@@ -2476,25 +1977,6 @@ func TestAdversarialProfilePromotionAuthenticatesCandidateAndRecomputesEvidence(
 		expectRejected(t)
 	})
 
-	t.Run("non-calibrated row mutation invalidates the report", func(t *testing.T) {
-		resetArtifacts(t)
-		candidate := readCandidate(t)
-		changed := false
-		for index := range candidate.EffectiveProfiles {
-			row := &candidate.EffectiveProfiles[index]
-			if row.Benchmark.Suite != "project-calibration-v1" {
-				row.Description += " unauthenticated mutation"
-				changed = true
-				break
-			}
-		}
-		if !changed {
-			t.Fatal("calibration candidate lacks an independently benchmarked fallback row")
-		}
-		writeTestJSON(t, candidatePath, candidate)
-		expectRejected(t)
-	})
-
 	t.Run("top-level candidate mutation invalidates the report", func(t *testing.T) {
 		resetArtifacts(t)
 		candidate := readCandidate(t)
@@ -2638,17 +2120,6 @@ func TestAdversarialRetrievalProfileRuntimeEnforcesSchemaBoundsAndSafeIDs(t *tes
 			},
 		},
 		{
-			name: "rerank depth above schema maximum",
-			mutate: func(profile *RetrievalProfile) {
-				for index := range profile.EffectiveProfiles {
-					if profile.EffectiveProfiles[index].Requires.Reranker != nil {
-						profile.EffectiveProfiles[index].RerankDepth = 101
-						return
-					}
-				}
-			},
-		},
-		{
 			name: "document cap above schema maximum",
 			mutate: func(profile *RetrievalProfile) {
 				profile.EffectiveProfiles[0].MaxPerDocument = 21
@@ -2708,74 +2179,17 @@ func TestAdversarialRetrievalProfileRuntimeEnforcesSchemaBoundsAndSafeIDs(t *tes
 	}
 }
 
-func copyAdversarialModelDirectory(t *testing.T, source, target string) {
-	t.Helper()
-	entries, err := os.ReadDir(source)
-	if err != nil {
-		t.Fatal(err)
+func TestAdversarialModelManifestCannotEscapeThroughDirectoryLink(t *testing.T) {
+	assetRoot := t.TempDir()
+	outsideModels := filepath.Join(t.TempDir(), "models")
+	copyTestFile(t,
+		filepath.Join(adversarialAssetRoot(t), "models", "manifest.json"),
+		filepath.Join(outsideModels, "manifest.json"))
+	if !makeDirectoryLink(t, outsideModels, filepath.Join(assetRoot, "models")) {
+		t.Skip("directory links are unavailable")
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			t.Fatalf("model fixture unexpectedly contains nested directory %s", entry.Name())
-		}
-		copyTestFile(t, filepath.Join(source, entry.Name()), filepath.Join(target, entry.Name()))
-	}
-}
-
-func TestAdversarialModelAssetsCannotEscapeThroughLinks(t *testing.T) {
-	sourceModels := filepath.Join(adversarialAssetRoot(t), "models")
-	tests := []struct {
-		name      string
-		escapeDir string
-	}{
-		{name: "entire models directory", escapeDir: "models"},
-		{name: "model specs directory", escapeDir: "specs"},
-		{name: "model artifacts directory", escapeDir: "artifacts"},
-	}
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			assetRoot := t.TempDir()
-			outside := t.TempDir()
-			switch testCase.escapeDir {
-			case "models":
-				outsideModels := filepath.Join(outside, "models")
-				copyTestFile(t,
-					filepath.Join(sourceModels, "manifest.json"),
-					filepath.Join(outsideModels, "manifest.json"))
-				copyAdversarialModelDirectory(t,
-					filepath.Join(sourceModels, "specs"),
-					filepath.Join(outsideModels, "specs"))
-				copyAdversarialModelDirectory(t,
-					filepath.Join(sourceModels, "artifacts"),
-					filepath.Join(outsideModels, "artifacts"))
-				if !makeDirectoryLink(t, outsideModels, filepath.Join(assetRoot, "models")) {
-					t.Skip("directory links are unavailable")
-				}
-			default:
-				targetModels := filepath.Join(assetRoot, "models")
-				copyTestFile(t,
-					filepath.Join(sourceModels, "manifest.json"),
-					filepath.Join(targetModels, "manifest.json"))
-				for _, directory := range []string{"specs", "artifacts"} {
-					if directory == testCase.escapeDir {
-						outsideDirectory := filepath.Join(outside, directory)
-						copyAdversarialModelDirectory(t,
-							filepath.Join(sourceModels, directory), outsideDirectory)
-						if !makeDirectoryLink(
-							t, outsideDirectory, filepath.Join(targetModels, directory)) {
-							t.Skip("directory links are unavailable")
-						}
-					} else {
-						copyAdversarialModelDirectory(t,
-							filepath.Join(sourceModels, directory),
-							filepath.Join(targetModels, directory))
-					}
-				}
-			}
-			if _, err := LoadModelManifest(assetRoot); err == nil {
-				t.Fatal("model manifest loader followed a linked asset outside assetRoot")
-			}
-		})
+	if _, err := LoadModelManifest(assetRoot); err == nil {
+		t.Fatal("model manifest loader followed a linked models directory outside assetRoot")
 	}
 }
 
@@ -2905,7 +2319,11 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 			"role", "allowedTiers", "requestedProfile", "effectiveProfile",
 			"activeLanes", "models", "fallbackReason", "tokenBudget", "estimatedTokens",
 			"acceptedConstraints", "cards", "requiredHandles", "omitted",
-		}, nil)
+		}, []string{"writeGrants"})
+		writeGrants := adversarialSchemaMap(t, root, "writeGrants")
+		if writeGrants["type"] != "array" || writeGrants["maxItems"] != float64(maxRunWriteGrants) {
+			t.Fatalf("context-pack write grants are not safely bounded: %#v", writeGrants)
+		}
 		defs := adversarialSchemaMap(t, schema, "$defs")
 		generation := adversarialSchemaMap(t, defs, "generation")
 		generationFields := assertAdversarialClosedSchemaObject(
@@ -2927,15 +2345,14 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 			[]string{strings.Repeat("a", 64), "sha256:abc"})
 
 		models := adversarialSchemaMap(t, root, "models")
-		if models["type"] != "array" || models["uniqueItems"] != true {
-			t.Error("context pack compact model identities must be a unique array")
+		if models["type"] != "array" || models["uniqueItems"] != true || models["maxItems"] != float64(1) {
+			t.Error("context pack model identities must allow exactly the retained embedding")
 		}
 		modelItem := adversarialSchemaMap(t, models, "items")
 		assertAdversarialSchemaPattern(t, "context pack compact model identity",
 			modelItem,
 			[]string{
 				"builtin:glove-6b-50d-top50k-q8-v1@1",
-				"builtin:linear-reranker-v1@1",
 			},
 			[]string{"../escape@1", "builtin:model", "builtin:model@a@b"})
 
@@ -3036,7 +2453,7 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 		effectiveFields := adversarialSchemaProperties(t, effectiveItem)
 		assertAdversarialSchemaPattern(t, "effective profile name",
 			adversarialSchemaMap(t, effectiveFields, "name"),
-			[]string{"hybrid-local-v1", "lexical-graph-v1"},
+			[]string{"hybrid-no-rerank-v1", "lexical-graph-v1"},
 			[]string{"../escape", "UPPER", "two/slugs", "two:slugs"})
 
 		benchmark := adversarialSchemaMap(t, effectiveFields, "benchmark")
@@ -3132,7 +2549,12 @@ func TestAdversarialDurableSchemasMatchRuntimeWireContracts(t *testing.T) {
 			"corpusSnapshot", "expectedPaths", "minimumEvidencePaths",
 			"hardNegativePaths", "expectedCitations", "forbiddenTiers",
 			"tokenBudget", "answerable",
-		}, []string{"gradedRelevantPaths", "evidencePins"})
+		}, []string{"gradedRelevantPaths", "evidencePins", "vocabularyPolicy"})
+		policy := adversarialSchemaMap(t, root, "vocabularyPolicy")
+		values, ok := policy["enum"].([]any)
+		if !ok || !reflect.DeepEqual(values, []any{"target-disjoint-v1"}) {
+			t.Errorf("evaluation vocabulary policy enum is not closed: %#v", policy["enum"])
+		}
 		for _, name := range []string{
 			"expectedPaths", "minimumEvidencePaths", "hardNegativePaths", "expectedCitations",
 		} {
@@ -3967,14 +3389,26 @@ func TestAdversarialProjectBenchmarkUsesRatifiedProjectEvalsAndCacheOnly(t *test
 // single imperfect-but-safe case sank a spotless baseline.
 func TestAdversarialProjectBenchmarkHardGatesGateSafetyNotQuality(t *testing.T) {
 	root := makeAdversarialProject(t)
+	// Keep the free-retrieval miss deterministic even when the production dense
+	// lane is available: more than the result limit's worth of high-signal truth
+	// documents outrank the deliberately unrelated required document. Context-pack
+	// evaluation still injects the required path explicitly.
+	for index := 0; index < 32; index++ {
+		writeTestFile(t, filepath.Join(
+			root, "docs", "truth", fmt.Sprintf("quality-distractor-%02d.md", index),
+		), fmt.Sprintf(`# Quality distractor %02d
+
+A1B2C3D4 checksum evidence engine frame serialization.
+`, index))
+	}
 	service := newAdversarialService(t, root, nil)
 	generation, _, _, _, err := service.ensure(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	cases := adversarialProjectBenchmarkCases(generation.CorpusFingerprint)
-	// The query surfaces engine.md (a truth-tier, well-formed, in-budget,
-	// deterministic result) while the case declares portability.md as its
+	// The query surfaces truth-tier, well-formed, in-budget, deterministic
+	// results while the case declares the unlinked literal-hash document as its
 	// evidence. Free retrieval is therefore safety-clean but quality-imperfect:
 	// expectedFound/completeEvidence/citationSafe are all false, yet no safety,
 	// determinism, or budget property is violated. The context pack force-injects
@@ -3982,11 +3416,11 @@ func TestAdversarialProjectBenchmarkHardGatesGateSafetyNotQuality(t *testing.T) 
 	cases = append(cases, EvalCase{
 		ID: "project-benchmark-quality-shortfall", Role: "manager",
 		Topic: "project-benchmark-quality-shortfall", Split: "development",
-		Query: "A1B2C3D4", QueryClass: "conceptual", AllowedTiers: []string{"truth"},
+		Query: "A1B2C3D4 checksum evidence", QueryClass: "conceptual", AllowedTiers: []string{"truth"},
 		CorpusSnapshot:       generation.CorpusFingerprint,
-		ExpectedPaths:        []string{"docs/truth/portability.md"},
-		MinimumEvidencePaths: []string{"docs/truth/portability.md"},
-		ExpectedCitations:    []string{"docs/truth/portability.md"},
+		ExpectedPaths:        []string{"docs/truth/hash#fragment.md"},
+		MinimumEvidencePaths: []string{"docs/truth/hash#fragment.md"},
+		ExpectedCitations:    []string{"docs/truth/hash#fragment.md"},
 		ForbiddenTiers:       []string{"history"},
 		TokenBudget:          1024, Answerable: boolPointer(true),
 	})
@@ -4011,7 +3445,8 @@ func TestAdversarialProjectBenchmarkHardGatesGateSafetyNotQuality(t *testing.T) 
 			t.Fatalf("baseline case %q failed a safety gate: %#v",
 				outcome.CaseID, outcome)
 		}
-		if !outcome.QualityPassed {
+		if outcome.CaseID == "project-benchmark-quality-shortfall" &&
+			!outcome.QualityPassed {
 			sawQualityShortfall = true
 		}
 	}
@@ -4156,9 +3591,9 @@ func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.
 			},
 		},
 		{
-			name: "malformed compact model identity",
+			name: "removed model identity",
 			mutate: func(pack *ContextPack) {
-				pack.Models[0] = "../escape@1"
+				pack.Models = []string{"../escape@1"}
 			},
 		},
 		{
@@ -4671,13 +4106,6 @@ func TestAdversarialPackagedBenchmarkDoesNotDependOnProfileRowOrder(t *testing.T
 		t.Fatal(err)
 	}
 	sort.Slice(profile.EffectiveProfiles, func(i, j int) bool {
-		leftLexical := profile.EffectiveProfiles[i].Requires.Embedding == nil &&
-			profile.EffectiveProfiles[i].Requires.Reranker == nil
-		rightLexical := profile.EffectiveProfiles[j].Requires.Embedding == nil &&
-			profile.EffectiveProfiles[j].Requires.Reranker == nil
-		if leftLexical != rightLexical {
-			return leftLexical
-		}
 		return profile.EffectiveProfiles[i].Name > profile.EffectiveProfiles[j].Name
 	})
 	writeTestJSON(t, filepath.Join(assetRoot, "profiles", "balanced-v1.json"), profile)

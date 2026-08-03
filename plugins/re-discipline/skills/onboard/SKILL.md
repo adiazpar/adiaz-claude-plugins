@@ -44,7 +44,7 @@ Report:
 
 - the project mission in one sentence;
 - active campaign handles and current focus;
-- blocked or due-deferred work;
+- blocked or due-or-near deferred work;
 - pending returned runs or review packets;
 - knowledge availability and delegation route;
 - the next valid state transition.

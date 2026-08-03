@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adiaz/re-discipline-knowledge/internal/knowledge"
 )
@@ -16,6 +20,13 @@ func TestRetiredContextPackCLICommandIsRemoved(t *testing.T) {
 	err := run(context.Background(), []string{"context-pack"})
 	if err == nil || !strings.Contains(err.Error(), "usage: re-discipline-knowledge") {
 		t.Fatalf("retired context-pack command remained callable: %v", err)
+	}
+}
+
+func TestNormalizedVsRawCLIRequiresExplicitProjectRoot(t *testing.T) {
+	err := run(context.Background(), []string{"normalized-vs-raw"})
+	if err == nil || err.Error() != "normalized-vs-raw requires --project-root" {
+		t.Fatalf("normalized-vs-raw accepted an implicit project: %v", err)
 	}
 }
 
@@ -62,6 +73,166 @@ func TestContextPackCLIRequestMatchesMCPInput(t *testing.T) {
 		request.ExpectedDigest != "sha256:"+strings.Repeat("a", 64) ||
 		request.ExpectedPackID != "context-aaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("CLI did not decode the shared MCP operation request exactly: %#v", request)
+	}
+}
+
+func TestQueryCLIRequestDecodesContextLeaseControls(t *testing.T) {
+	input := writeCLIRequest(t, `{
+  "query": "Which registration table is current?",
+  "queryClass": "contradiction",
+  "allowedProvenanceTiers": ["history", "backlog"],
+  "contextLeaseId": "campaign-C-0042",
+  "resetContextLease": true
+}`)
+	var request knowledge.FindingQueryOptions
+	if err := decodeCLIRequest(input, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Query != "Which registration table is current?" || request.QueryClass != "contradiction" ||
+		len(request.AllowedProvenanceTiers) != 2 || request.AllowedProvenanceTiers[0] != "history" ||
+		request.AllowedProvenanceTiers[1] != "backlog" ||
+		request.ContextLeaseID != "campaign-C-0042" ||
+		!request.ResetContextLease {
+		t.Fatalf("CLI did not decode context lease controls exactly: %#v", request)
+	}
+}
+
+func TestQueryCLISessionKeepsOneLeaseCapableProcess(t *testing.T) {
+	input := writeCLIRequest(t, `
+{"query":"first","contextLeaseId":"campaign-C-0042"}
+{"query":"second","contextLeaseId":"campaign-C-0042"}
+`)
+	var output bytes.Buffer
+	queryCount := 0
+	err := runQuerySessionInput(
+		context.Background(), input, &output,
+		func(_ context.Context, request knowledge.FindingQueryOptions) (knowledge.FindingQueryResponse, error) {
+			queryCount++
+			return knowledge.FindingQueryResponse{
+				Query: request.Query, QueryClass: "auto", Status: "sufficient",
+				Cards: []knowledge.ContextCard{}, TierDisagreements: []knowledge.TierDisagreement{},
+				ContextLease: &knowledge.ContextLeaseReceipt{
+					SchemaVersion: 1, LeaseID: request.ContextLeaseID,
+					Mode: "memory-only", QueryCount: queryCount,
+				},
+			}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output.Bytes()))
+	for expected := 1; expected <= 2; expected++ {
+		var response knowledge.FindingQueryResponse
+		if err := decoder.Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+		if response.ContextLease == nil ||
+			response.ContextLease.LeaseID != "campaign-C-0042" ||
+			response.ContextLease.QueryCount != expected {
+			t.Fatalf("session response %d lost lease continuity: %#v", expected, response)
+		}
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		t.Fatalf("query session emitted an unexpected trailing value: %v", err)
+	}
+}
+
+func TestQueryCLISessionStreamsBeforeInputClosesAndPreservesLeaseDedup(t *testing.T) {
+	inputReader, inputWriter := io.Pipe()
+	outputReader, outputWriter := io.Pipe()
+	done := make(chan error, 1)
+	delivered := false
+	go func() {
+		err := runQuerySession(
+			context.Background(), inputReader, outputWriter,
+			func(_ context.Context, request knowledge.FindingQueryOptions) (knowledge.FindingQueryResponse, error) {
+				response := knowledge.FindingQueryResponse{
+					Query: request.Query, QueryClass: "auto", Status: "sufficient",
+					Cards: []knowledge.ContextCard{}, TierDisagreements: []knowledge.TierDisagreement{},
+					ContextLease: &knowledge.ContextLeaseReceipt{
+						SchemaVersion: 1, LeaseID: request.ContextLeaseID, Mode: "memory-only",
+					},
+				}
+				if !delivered {
+					delivered = true
+					response.Cards = []knowledge.ContextCard{{SchemaVersion: 1, ID: "F-0001", CardType: "finding"}}
+					response.ContextLease.QueryCount = 1
+					response.ContextLease.ReturnedCards = 1
+					return response, nil
+				}
+				response.Status = "abstained"
+				response.ContextLease.QueryCount = 2
+				response.ContextLease.DeduplicatedCards = 1
+				return response, nil
+			},
+		)
+		_ = outputWriter.CloseWithError(err)
+		done <- err
+	}()
+
+	decoder := json.NewDecoder(outputReader)
+	readResponse := func() <-chan struct {
+		response knowledge.FindingQueryResponse
+		err      error
+	} {
+		result := make(chan struct {
+			response knowledge.FindingQueryResponse
+			err      error
+		}, 1)
+		go func() {
+			var response knowledge.FindingQueryResponse
+			err := decoder.Decode(&response)
+			result <- struct {
+				response knowledge.FindingQueryResponse
+				err      error
+			}{response: response, err: err}
+		}()
+		return result
+	}
+
+	if _, err := fmt.Fprintln(inputWriter, `{"query":"first","contextLeaseId":"campaign-C-0042"}`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-readResponse():
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if len(result.response.Cards) != 1 || result.response.ContextLease == nil ||
+			result.response.ContextLease.QueryCount != 1 {
+			t.Fatalf("first streamed response was incomplete: %#v", result.response)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first session response waited for stdin to close")
+	}
+
+	if _, err := fmt.Fprintln(inputWriter, `{"query":"second","contextLeaseId":"campaign-C-0042"}`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-readResponse():
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if len(result.response.Cards) != 0 || result.response.ContextLease == nil ||
+			result.response.ContextLease.QueryCount != 2 ||
+			result.response.ContextLease.DeduplicatedCards != 1 {
+			t.Fatalf("second streamed response lost lease deduplication: %#v", result.response)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second session response was not streamed")
+	}
+	if err := inputWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("query session did not finish after stdin closed")
 	}
 }
 

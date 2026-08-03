@@ -207,13 +207,26 @@ func ValidateFindingEvalCases(cases []FindingEvalCase) error {
 	if len(cases) == 0 || len(cases) > 10000 {
 		return errors.New("finding evaluation case set is empty or too large")
 	}
-	seen, topicSplits := map[string]bool{}, map[string]string{}
+	seenIDs, seenQueries := map[string]bool{}, map[string]string{}
+	topicSplits := map[string]string{}
+	type splitOwner struct {
+		split  string
+		caseID string
+		label  string
+	}
+	judgmentSplits := map[string]splitOwner{}
 	for _, eval := range cases {
-		if !managedSlugRE.MatchString(eval.ID) || seen[eval.ID] ||
+		queryIdentity := evaluationQueryIdentity(eval.Query)
+		if !managedSlugRE.MatchString(eval.ID) || seenIDs[eval.ID] ||
 			strings.TrimSpace(eval.Query) == "" || len([]byte(eval.Query)) > 1000 {
 			return errors.New("finding evaluation IDs and queries must be unique and nonempty")
 		}
-		seen[eval.ID] = true
+		if prior := seenQueries[queryIdentity]; prior != "" {
+			return fmt.Errorf(
+				"finding evaluation query is repeated by cases %s and %s", prior, eval.ID)
+		}
+		seenIDs[eval.ID] = true
+		seenQueries[queryIdentity] = eval.ID
 		if !validOne(eval.Role, "manager", "drafter") ||
 			!managedSlugRE.MatchString(eval.Topic) ||
 			!validOne(eval.Split, "development", "holdout") {
@@ -263,6 +276,41 @@ func ValidateFindingEvalCases(cases []FindingEvalCase) error {
 				return fmt.Errorf("case %s lacks exact state judgments for %s", eval.ID, id)
 			}
 		}
+		claimJudgment := func(key, label string) error {
+			if previous, exists := judgmentSplits[key]; exists && previous.split != eval.Split {
+				return fmt.Errorf(
+					"finding evaluation judgment %q leaks across %s case %s (%s) and %s case %s (%s)",
+					strings.TrimPrefix(strings.TrimPrefix(key, "finding:"), "evidence:"),
+					previous.split, previous.caseID, previous.label,
+					eval.Split, eval.ID, label)
+			}
+			if _, exists := judgmentSplits[key]; !exists {
+				judgmentSplits[key] = splitOwner{
+					split: eval.Split, caseID: eval.ID, label: label,
+				}
+			}
+			return nil
+		}
+		for _, id := range eval.ExpectedFindingIDs {
+			if err := claimJudgment("finding:"+id, "expected"); err != nil {
+				return err
+			}
+		}
+		for _, id := range eval.HardNegativeFindingIDs {
+			if err := claimJudgment("finding:"+id, "hard-negative"); err != nil {
+				return err
+			}
+		}
+		for _, handle := range eval.ExpectedEvidenceHandles {
+			if err := claimJudgment("evidence:"+handle, "evidence"); err != nil {
+				return err
+			}
+		}
+		for _, path := range eval.ExpectedRawPaths {
+			if err := claimJudgment("raw:"+path, "raw-path"); err != nil {
+				return err
+			}
+		}
 		if len(eval.ExpectedFindingHandles) != len(eval.ExpectedFindingIDs) ||
 			len(eval.ExpectedSourceClasses) != len(eval.ExpectedFindingIDs) ||
 			len(eval.ExpectedReviewStates) != len(eval.ExpectedFindingIDs) ||
@@ -308,6 +356,7 @@ func validateFindingEvalFilter(caseID, label string, values []string, allowed ..
 func (eval FindingEvalCase) queryOptions() FindingQueryOptions {
 	options := eval.Options
 	options.Query = eval.Query
+	options.QueryClass = eval.QueryClass
 	if len(eval.AllowedSourceClasses) > 0 {
 		options.AllowedSourceClasses = append([]string(nil), eval.AllowedSourceClasses...)
 	}

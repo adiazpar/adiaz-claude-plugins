@@ -29,6 +29,23 @@ func stateTestFileHandle(name string) *FileHandle {
 	return &FileHandle{Path: "active/test-campaign/runs/R-20260802-0001/" + name, SHA256: stateTestDigest("1")}
 }
 
+func stateTestReviewLoad(reviewID, campaignID, packetDigest string, routine, attention int) ReviewLoadReceipt {
+	ceiling := DefaultBootstrapConfig().ReviewLoad
+	ceilingDigest, _ := ReviewLoadCeilingDigest(ceiling)
+	receipt := ReviewLoadReceipt{
+		SchemaVersion: CampaignSchemaVersion, ReviewID: reviewID, CampaignID: campaignID,
+		PacketDigest: packetDigest, SessionID: "test-review-session", PacketOrdinal: 1,
+		MeasurementStatus: "measured", OverTargetKnown: true,
+		StartedAt: "2026-08-02T17:50:00Z", CompletedAt: stateTestTime, DurationSeconds: 600,
+		RoutineRows: routine, AttentionRows: attention,
+		TargetMinutesPerPacket:  ceiling.TargetMinutesPerPacket,
+		TargetPacketsPerSession: ceiling.TargetPacketsPerSession, CeilingDigest: ceilingDigest,
+		GranularityDecision: "retain",
+	}
+	_ = SealReviewLoadReceipt(&receipt)
+	return receipt
+}
+
 func TestStateRecordsDelegatedRunRequiresBriefAndContextPack(t *testing.T) {
 	run := RunRecord{
 		RecordMeta: stateTestMeta("R-20260802-0001", 1),
@@ -50,7 +67,11 @@ func TestStateRecordsDeferredWorkRequiresCompleteContract(t *testing.T) {
 		RecordMeta: stateTestMeta("W-0001", 1), CampaignID: "C-TEST",
 		Kind: "task", Title: "Deferred work", Problem: "Wait for evidence",
 		State: "deferred", Priority: "normal", Acceptance: []string{"Evidence arrives"}, Owner: "manager",
-		Deferment: &DefermentContract{Reason: "Input unavailable", RevisitWhen: "Input is published"},
+		Deferment: &DefermentContract{
+			Reason:        "Input unavailable",
+			RevisitWhen:   DefermentTrigger{Type: DefermentTriggerEvent, Action: "input.published"},
+			BlocksClosure: true, ClosureDisposition: DefermentDispositionResolve,
+		},
 	}
 	if err := ValidateWorkItem(item); err == nil {
 		t.Fatal("deferment without an accountable owner was accepted")
@@ -66,6 +87,7 @@ func TestStateRecordsReviewerCannotRatify(t *testing.T) {
 		RecordMeta: stateTestMeta("V-0001", 1), CampaignID: "C-TEST",
 		Reviewer: "independent-reviewer", Authority: "reviewer",
 		IntakeID: "I-0001", IntakeRevision: 1, PacketDigest: stateTestDigest("9"),
+		ReviewLoad: stateTestReviewLoad("V-0001", "C-TEST", stateTestDigest("9"), 1, 0),
 		Decisions: []ReviewDecision{{
 			FindingID: "F-0001", FindingRevision: 1,
 			Action: "ratify", Rationale: "Looks correct",

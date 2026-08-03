@@ -114,6 +114,19 @@ func BuildUserStatus(system map[string]any) UserStatusBlock {
 			"A tuned search profile from a previous calibration is awaiting your decision - "+
 				"accept or reject it with decide-retrieval-profile.")
 	}
+	if disagreements, ok := system["tierDisagreements"].(TierDisagreementStatus); ok && disagreements.Count > 0 {
+		user.Attention = append(user.Attention, fmt.Sprintf(
+			"%d accepted memory note(s) explicitly disagree with current truth. Truth remains authoritative; review the signals before changing either tier.",
+			disagreements.Count))
+	}
+	canonicalState := systemObject(system, "canonicalState")
+	if clean, present := canonicalState["clean"].(bool); present && !clean {
+		dirty, _ := canonicalState["dirtyPaths"].([]string)
+		if len(dirty) != 0 || systemString(canonicalState, "error") != "" {
+			user.Attention = append(user.Attention,
+				"Project state has changes outside the managed workflow. Ordinary updates are paused until a manager reconciles or restores those files.")
+		}
+	}
 
 	return user
 }

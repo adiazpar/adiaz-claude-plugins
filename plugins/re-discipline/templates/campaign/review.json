@@ -14,6 +14,27 @@
   "intakeId": "I-0001",
   "intakeRevision": 1,
   "packetDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "reviewLoad": {
+    "schemaVersion": 2,
+    "reviewId": "V-0001",
+    "campaignId": "C-CAMPAIGN",
+    "packetDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "measurementStatus": "measured",
+    "sessionId": "review-session-1",
+    "packetOrdinal": 1,
+    "startedAt": "2000-01-01T00:00:00Z",
+    "completedAt": "2000-01-01T00:10:00Z",
+    "durationSeconds": 600,
+    "routineRows": 1,
+    "attentionRows": 0,
+    "targetMinutesPerPacket": 12,
+    "targetPacketsPerSession": 6,
+    "ceilingDigest": "sha256:6d4e9b8cc73f289280ac7c848fce2feba2a32043535496673f66b4818816a79a",
+    "overTargetKnown": true,
+    "overTarget": false,
+    "granularityDecision": "retain",
+    "digest": "sha256:0f512d70956a8966ae40190018c3616d2bd9ddab8cba35dfa2179f6fdb015f3a"
+  },
   "decisions": [
     {
       "findingId": "F-0001",

@@ -21,7 +21,8 @@
       "items": {
         "anyOf": [
           {"enum": ["conflict", "challenged", "supersession", "stale"]},
-          {"type": "string", "pattern": "^(?:supports|contradicts|depends-on|supersedes|duplicates|answers|incoming-supports|incoming-contradicts|incoming-depends-on|incoming-duplicates|incoming-answers|superseded-by):F-[0-9]{4,}$"},
+          {"type": "string", "pattern": "^(?:supports|contradicts|depends-on|supersedes|duplicates|answers|incoming-supports|incoming-contradicts|incoming-depends-on|incoming-duplicates|incoming-answers|superseded-by|stale-dependent):F-[0-9]{4,}$"},
+          {"type": "string", "pattern": "^stale-path:F-[0-9]{4,}(?:>F-[0-9]{4,})+$"},
           {"type": "string", "pattern": "^spawned:W-[0-9]{4,}$"}
         ]
       },

@@ -27,7 +27,13 @@ class ReportingLanguageTests(unittest.TestCase):
 
     def test_status_views_are_bounded_and_actionable(self):
         text = (PLUGIN / "references" / "reporting.md").read_text()
-        for term in ("focus", "blocked", "due-deferred", "pending returns", "next action"):
+        for term in (
+            "focus",
+            "blocked",
+            "due-or-near deferred",
+            "pending returns",
+            "next action",
+        ):
             self.assertIn(term, text)
         self.assertIn("Expand full evidence only for the next decision", text)
 

@@ -5,8 +5,8 @@ shipped with re-discipline 0.8.0. Claude Code, Codex, direct managers, and
 delegated workers use the same executable, canonical record schemas, finding
 index, retrieval profiles, and context-pack format.
 
-The runtime is navigation infrastructure. It never makes an index, embedding,
-reranker score, benchmark, or memory proposal authoritative. Authority remains
+The runtime is navigation infrastructure. It never makes an index, ranking
+score, benchmark, or memory proposal authoritative. Authority remains
 with canonical records, immutable review receipts, exact evidence, and
 closure-gated projections.
 
@@ -15,20 +15,27 @@ closure-gated projections.
 - Go provides one static executable without a required system Python, Node.js,
   SQLite, model service, or network connection.
 - `modernc.org/sqlite` provides SQLite and FTS5 in process.
-- Exact, FTS5, dependency-graph, local learned-vector, and deterministic
-  integer reranking lanes share one generation database.
+- Identifier-aware exact, FTS5, dependency-graph, and checksum-pinned local
+  dense lanes share one generation database.
 - Explicit allowed-tier filters and source/path denylists run before
   relevance ranking. Drafter role selects narrower packing and budget
   defaults; the manager curates each immutable dispatch pack.
 - Pending memory proposals are excluded from ordinary search and context
   packs.
 
-Model and reranker specifications live under `models/specs/`. The release
-ships one checksum-pinned, deterministically quantized GloVe artifact under
+Model specifications live under `models/specs/`. The release candidate carries
+one checksum-pinned, deterministically quantized GloVe artifact under
 `models/artifacts/`; its provenance, PDDL 1.0 license, format, and reproduction
-recipe are documented beside it. The one shared artifact is not copied into
-initialized projects or any of the six platform directories. Lexical and
-graph retrieval remains the independently benchmarked model-free fallback.
+recipe are documented beside it. The artifact is shared by all packaged
+targets, is not copied into initialized projects, and is never downloaded at
+runtime. An independently benchmarked lexical-graph profile remains available
+if it cannot load. The packaged fixture alone was underpowered for dense
+removal; a frozen pre-removal project-corpus run measured two dense-only
+rescues with no added hard-gate regression. Dense remains in the candidate
+inventory pending a fresh current-runtime two-arm final-corpus run. The
+reranker produced no benefit in the packaged holdout or the separately frozen
+historical project layer and has been removed; it is not recreated as a
+synthetic current-runtime arm.
 
 ## Packaged launchers and platforms
 
@@ -78,7 +85,7 @@ knowledge/bin/re-discipline-knowledge serve --asset-root knowledge
 with the path form required by that host. The server uses newline-delimited
 JSON-RPC over stdio and supports MCP initialization, roots, ping, tool
 discovery, cancellation notifications, and structured tool results. Its
-public surface is exactly eight role-oriented operations:
+public surface is exactly ten role-oriented operations:
 
 | Tool | Effect |
 |---|---|
@@ -90,6 +97,8 @@ public surface is exactly eight role-oriented operations:
 | `manager_apply` | Apply typed campaign, work-item, run, review, finding, and decision transitions. |
 | `curation_submit` | Submit a curator intake batch and complete report-span coverage. |
 | `closure_apply` | Start, advance, verify, reopen, or finalize a resumable closure job. |
+| `normalization_queue` | Inspect durable archive-normalization demand; create an exact path/digest/byte-bound manager request; or claim, acknowledge, and resolve one source-bound item with a verified curator-run, intake-coverage, and complete-review receipt. |
+| `migrate_project` | Preview, review, apply, resume, inspect, verify, and ratify the explicit 0.7-to-0.8 conversion. It is the sole legacy-state reader. |
 
 An explicit `projectRoot` must be a validated re-discipline 0.8 project. When
 the host supplies roots, requests are restricted to those roots. One server
@@ -101,8 +110,9 @@ memory, or retrieval profiles. A first query may reconcile only disposable
 derived index and aggregate-metrics files under the approved cache root;
 deleting those files never deletes project knowledge. Managed recovery happens
 before MCP handling only when the launch configuration or MCP roots grant a
-project. The four mutation operations validate authority, expected revisions,
-idempotency, and path grants in the shared engine before publication.
+project. Every state-changing operation validates its authority, expected
+revisions or source digests, idempotency, and path grants in the shared engine
+before publication.
 
 ## Command-line interface
 
@@ -118,19 +128,32 @@ From this `knowledge/` directory, the same launcher is
 | Command | Purpose |
 |---|---|
 | `serve` | Start the MCP stdio server. |
-| `state`, `query`, `read`, `trace` | Invoke the same typed read operation as MCP from strict JSON supplied with `--input <path-or->`. |
-| `context-pack-materialize`, `manager-apply`, `curation-submit`, `closure-apply` | Invoke the same typed mutation operation as MCP from strict JSON. |
+| `state`, `query`, `read`, `trace` | Invoke the same typed read operation as MCP from strict JSON supplied with `--input <path-or->`. `query --session` accepts a stream of JSON requests in one process. |
+| `context-pack-materialize`, `manager-apply`, `curation-submit`, `closure-apply`, `normalization-queue` | Invoke the same typed project operation as MCP from strict JSON. |
 | `recover`, `ensure` | Restore current managed bootstrap files, or report that a legacy project requires explicit migration. |
-| `migrate-project` | Preview, apply, resume, inspect, verify, gate, and ratify the sole 0.7-to-0.8 conversion path. |
+| `migrate-project` | Preview; export and submit digest-bound non-activating retrieval-profile decisions and truth atomicization reviews; apply, resume, inspect, verify, record strict retrieval/host evidence gates, and ratify the sole 0.7-to-0.8 conversion path. |
 | `status`, `preflight`, `index`, `replay` | Maintainer diagnostics for configuration, derived-index health, and deterministic passage retrieval. These are not MCP aliases. |
 | `verify-pack` | Verify an independently retained pack digest and optional pack ID before dispatch. |
-| `benchmark`, `pin-evals`, `calibrate`, `promote-profile` | Measure retrieval, manage eval pins, create calibration proposals, and apply an explicitly approved profile decision. |
+| `benchmark`, `pin-evals`, `normalized-vs-raw`, `calibrate`, `promote-profile` | Measure retrieval, manage eval pins, emit a generation-pinned non-authoritative 64-case normalized-versus-raw candidate, create calibration proposals, and apply an explicitly approved profile decision. |
 
 Use `--asset-root` to identify this `knowledge/` directory and
-`--project-root` for the initialized project. `--disable-dense` and
-`--disable-rerank` exercise the independently benchmarked fallback profiles.
-Project-facing token and source policy remains in
+`--project-root` for the initialized project. Project-facing token and source policy remains in
 `.re-discipline/knowledge/policy.jsonc`.
+
+Query requests may include a caller-supplied `contextLeaseId`. With the
+default `context.leaseMode` of `memory-only`, the serving process suppresses
+cards already served by that lease and returns a bounded deterministic receipt
+containing current source digests plus cumulative token, source-count, and
+source-set-digest accounting. `resetContextLease: true` clears only that
+process-local lease after real context compaction; it never mutates campaign
+state. A one-shot CLI query intentionally starts a fresh lease ledger. For
+lease-aware fallback without MCP, invoke `query --session --input <path-or->`;
+the input is a whitespace-delimited stream of strict query JSON objects and the
+output is one compact JSON response per line. Every request in that invocation
+shares one in-memory lease ledger. Each response is emitted before the runtime
+waits for the next request; stdin does not need to close first. Session input is
+stream-decoded under a 16 MiB cumulative bound. Leases do not survive the
+session process exit or MCP server restart.
 
 Canonical state changes flow only through typed peer operations or the
 explicit migrator. Recovery, index reconciliation, calibration, and benchmark
@@ -196,8 +219,9 @@ disposable. Deleting the cache never deletes project knowledge.
   warning. It never treats that overlay as accepted.
 - `knowledge.enabled: false` leaves state and CLI status available but prevents indexing and
   retrieval.
-- Missing local models select only a separately benchmarked capability row.
-  The runtime never downloads a model.
+- A missing or invalid local embedding selects only the independently
+  benchmarked lexical-graph capability row. The runtime never downloads a
+  model.
 - A corrupt or identity-mismatched generation is not trusted. Reconciliation
   builds and verifies a replacement; writer contention can serve only the last
   verified complete generation and reports that it may be stale.
@@ -216,15 +240,31 @@ disposable. Deleting the cache never deletes project knowledge.
 ## Evaluation and calibration
 
 The packaged conformance corpus and cases are under `evals/conformance/`.
-Every effective capability row has independent benchmark evidence. Full mode
-checks declared digests, hard gates, authority and citation safety,
-deterministic search and context-pack replay, manager and drafter ceilings,
-the 512/1024/2048/4096 budget matrix, development/holdout separation, and the
-hybrid-versus-lexical holdout comparison. Authority, privacy, freshness,
-citation, replay, and hard-budget gates apply at every tested budget. Quality
-coverage becomes a release gate at each case's declared budget and above;
-lower-budget degradation remains measured rather than being mislabeled as a
-policy failure.
+Both the local-dense and lexical-graph effective profiles have checked-in
+benchmark evidence. Full mode checks their declared digests, hard gates,
+authority and citation safety, deterministic search and context-pack replay,
+manager and drafter ceilings, the 512/1024/2048/4096 budget matrix, and
+development/holdout separation. A separate checked-in ablation decision spans
+two evidence layers. The packaged fixture layer was underpowered and found no
+positive contribution. The project protocol uses a fresh current-runtime
+64-case baseline-versus-dense run for the dense decision and an immutable
+pre-removal three-arm archive for the rerank decision. Those runtime layers
+remain separate; only aggregate sensitivity compares them. Each report is
+bound to its source revision, eval corpus, indexed corpus, runtime, parser,
+chunker, controlled profiles, and exact model revisions and checksums. The
+packager independently recomputes current dense and historical rerank
+contribution totals from the full per-case measurement, verifies the archived
+raw benchmark bytes and manifests by digest, and requires both lane decisions,
+effective profiles, and the model manifest to agree.
+Authority, privacy, freshness, citation, replay, and hard-budget gates apply at
+every tested budget. Quality coverage becomes a release gate at each case's
+declared budget and above; lower-budget degradation remains measured rather
+than being mislabeled as a policy failure.
+
+Finding-card evaluation compares the estimated tokens of the bounded,
+serialized response returned by each arm. Full raw-document expansion cost and
+bounded normalized evidence-handle expansion cost are reported separately as
+diagnostics and never mixed into that release-gate comparison.
 
 Benchmark digests bind the portable source runtime contract: runtime and Go
 versions, SQLite driver and version, a source-contract checksum, numerical
@@ -232,11 +272,12 @@ backend, and tie breaker. Platform-specific executable and SQLite
 compile-option checksums remain visible in runtime/generation provenance but
 do not make the same evidence receipt differ across operating systems.
 
-This small packaged seed suite establishes deterministic conformance and
-fixture non-inferiority. It does not establish general retrieval quality,
-large-corpus latency, or optimal project-specific weights; projects grow that
-evidence through ratified eval cases, read-only benchmarks, and explicit
-calibration.
+This small packaged seed suite has 48 finding cases, including 24 holdout
+cases. It establishes deterministic conformance and fixture non-inferiority.
+It does not represent the 64-case `snaphak-re` project corpus and does not
+establish general retrieval quality, large-corpus latency, or optimal
+project-specific weights; projects grow that evidence through ratified eval
+cases, read-only benchmarks, and explicit calibration.
 
 Run the release gate from this directory:
 
@@ -249,11 +290,166 @@ its report. Supplying an initialized `--project-root` selects that project's
 ratified eval cases and writes the report only under its disposable knowledge
 cache.
 
+The checked-in packaged lane-ablation report binds its source revision, eval
+and fixture corpora, controlled profiles, runtime, and every model input used
+for that measurement. The separate project measurement binds a fresh
+current-runtime two-arm run and the fixed-metadata historical rerank archive;
+reproduction requires those exact inputs. Measure an initialized project
+against an explicit disposable cache and project path:
+
+```powershell
+go run ./cmd/re-discipline-knowledge benchmark `
+  --asset-root . `
+  --project-root C:\path\to\initialized-project `
+  --cache-root C:\path\to\disposable-knowledge-cache `
+  --mode full
+```
+
+The report records the source revision, controlled profile digests, and exact
+corpus/runtime identities required to audit the run. Model-bearing runs also
+record model, specification, and artifact digests. Do not run an historical
+runtime against a project's live cache.
+
+For the release measurement, do not point that command at the source project.
+From a clean plugin revision, stage the current two-arm run in a directory
+outside both repositories. The harness rejects a dirty or mismatched revision,
+clones the project without hardlinks, preserves `active/`, `docs/`, and
+`.re-discipline/` outside the disposable project, applies only the three
+current-runtime control files, projects the 64 final eval cases byte-for-byte,
+and refuses any pre-existing or newly created 0.8 migration roots:
+
+```powershell
+$pluginRevision = git -C C:\path\to\adiaz-claude-plugins rev-parse HEAD
+$projectRevision = git -C C:\path\to\snaphak-re rev-parse HEAD
+
+python tests/re_discipline_project_lane_ablation_stage.py `
+  --plugin-repository C:\path\to\adiaz-claude-plugins `
+  --plugin-revision $pluginRevision `
+  --project-repository C:\path\to\snaphak-re `
+  --project-revision $projectRevision `
+  --output-root C:\path\outside-both-repos\snaphak-re-retrieval-stage
+
+python tests/re_discipline_project_lane_ablation_stage.py `
+  --plugin-repository C:\path\to\adiaz-claude-plugins `
+  --plugin-revision $pluginRevision `
+  --project-repository C:\path\to\snaphak-re `
+  --project-revision $projectRevision `
+  --output-root C:\path\outside-both-repos\snaphak-re-retrieval-stage `
+  --verify
+```
+
+Verification is read-only. It rechecks both clean revisions, every artifact
+size and digest, the final-to-projected eval transform, the cache report and
+leased generation, the SQLite document inventory, and every indexed source
+against the byte-exact preserved checkout. The generated
+`artifacts/harness-receipt.json` is schema validated and binds the semantic Go
+command, tool versions, runtime identity, profile/model catalogs, corpus and
+eval fingerprints, and the complete 2 x 64 budget/context-pack matrix. It
+rejects byte drift among the packaged, project-template, and
+migration-template profile catalogs. It does not create
+`.re-discipline/state`, `.re-discipline/transactions`, or
+`docs/history/campaigns`, and it does not rebuild packaged binaries.
+
+The rerank evidence archive is a byte-preserving record of the pre-removal
+runtime, not a substitute benchmark arm. From the repository root, rebuild and
+then verify it with the exact historical inputs materialized from revision
+`215964342378678eaba3249fe0ae284c3a0622a4`:
+
+```powershell
+python tests/re_discipline_project_lane_ablation_archive.py `
+  --raw-benchmark <pre-removal-raw-benchmark.json> `
+  --projection-manifest <pre-removal-projection.json> `
+  --projected-eval-root <pre-removal-projected-evals> `
+  --profile-catalog <pre-removal-profile-catalog.json> `
+  --model-manifest <pre-removal-model-manifest.json> `
+  --output plugins/re-discipline/knowledge/evals/conformance/evidence/2026-08-03-snaphak-pre-removal-rerank.zip
+
+python tests/re_discipline_project_lane_ablation_archive.py `
+  --raw-benchmark <pre-removal-raw-benchmark.json> `
+  --projection-manifest <pre-removal-projection.json> `
+  --projected-eval-root <pre-removal-projected-evals> `
+  --profile-catalog <pre-removal-profile-catalog.json> `
+  --model-manifest <pre-removal-model-manifest.json> `
+  --output plugins/re-discipline/knowledge/evals/conformance/evidence/2026-08-03-snaphak-pre-removal-rerank.zip `
+  --verify
+```
+
+The canonical archive is 456,281 bytes with SHA-256
+`c20ed97f01a324397eedad89f2c628a28cad94d562595f6f342a8efdae5c9ac6`.
+After the verified staging run, derive and independently verify the full
+project receipt directly from its bound artifacts; both revision arguments
+must name the source trees that actually produced their respective benchmark
+layers:
+
+```powershell
+python tests/re_discipline_project_lane_ablation_build.py `
+  --raw-benchmark C:\path\outside-both-repos\snaphak-re-retrieval-stage\artifacts\current-two-arm-raw.json `
+  --projection-manifest C:\path\outside-both-repos\snaphak-re-retrieval-stage\artifacts\current-projection.json `
+  --final-eval-root C:\path\outside-both-repos\snaphak-re-retrieval-stage\artifacts\final-evals `
+  --projected-eval-root C:\path\outside-both-repos\snaphak-re-retrieval-stage\artifacts\projected-evals `
+  --profile-catalog C:\path\outside-both-repos\snaphak-re-retrieval-stage\artifacts\current-profile-catalog.json `
+  --model-manifest C:\path\outside-both-repos\snaphak-re-retrieval-stage\artifacts\current-model-manifest.json `
+  --harness-receipt C:\path\outside-both-repos\snaphak-re-retrieval-stage\artifacts\harness-receipt.json `
+  --historical-evidence-archive plugins/re-discipline/knowledge/evals/conformance/evidence/2026-08-03-snaphak-pre-removal-rerank.zip `
+  --historical-evidence-path evals/conformance/evidence/2026-08-03-snaphak-pre-removal-rerank.zip `
+  --production-profile plugins/re-discipline/knowledge/profiles/balanced-v1.json `
+  --schema plugins/re-discipline/knowledge/schemas/project-lane-ablation-report.schema.json `
+  --validator tests/re_discipline_project_lane_ablation.py `
+  --runtime-source-revision $pluginRevision `
+  --historical-runtime-source-revision 215964342378678eaba3249fe0ae284c3a0622a4 `
+  --output plugins/re-discipline/knowledge/evals/conformance/project-lane-ablation.json
+
+python tests/re_discipline_project_lane_ablation_build.py <the-same-arguments> --verify
+```
+
+Promote that validated receipt into the packaged aggregate report and
+digest-bound decision, then verify both byte-for-byte:
+
+```powershell
+python tests/re_discipline_project_lane_ablation_promote.py `
+  --measurement plugins/re-discipline/knowledge/evals/conformance/project-lane-ablation.json `
+  --project-schema plugins/re-discipline/knowledge/schemas/project-lane-ablation-report.schema.json `
+  --aggregate-schema plugins/re-discipline/knowledge/schemas/lane-ablation-report.schema.json `
+  --report plugins/re-discipline/knowledge/evals/conformance/lane-ablation-report.json `
+  --finding-cases plugins/re-discipline/knowledge/evals/conformance/finding-cases.json `
+  --decision-output plugins/re-discipline/knowledge/evals/conformance/lane-ablation-decision.json
+
+python tests/re_discipline_project_lane_ablation_promote.py <the-same-arguments> --verify
+```
+
+Promotion preserves the packaged conformance layer, recomputes its holdout
+counts, and derives every project count, rescue row, uncertainty projection,
+lane action, measurement digest, and report digest. It refuses an inconclusive
+measurement or a packaged report from a runtime other than the historical
+archive revision.
+
+`normalized-vs-raw` is a separate Amendment 3 diagnostic. It requires one
+ratified 64-case finding suite, leases one fresh generation, and evaluates the
+normalized and raw arms with identical questions, filters, card limits, and
+token budgets. It writes the full paired report only below the disposable
+cache. Passing every recall, abstention, handle, provenance, durability,
+hard-negative, replay, and lower-token-cost gate makes a later explicit opt-in
+decision eligible; it never changes the default raw-fallback policy or emits
+an authorization receipt itself.
+
+The eligible candidate is applied only through the manager operation
+`knowledge.archive-fallback.opt-in`. Its strict request names the candidate
+run, semantic and content digests, an explicit UTC `ratifiedAt`, and the
+expected current settings digest. The runtime resolves the candidate from its
+derived run path, reloads the bound ratified suite, recomputes every case,
+split, role, contract, and aggregate gate, and refuses stale generation,
+profile, lane, or policy bindings. Success journals three artifacts as one
+compare-and-swap transition: the exact durable report under
+`.re-discipline/knowledge/measurements/normalized-vs-raw/`, the versioned
+receipt under `.re-discipline/knowledge/receipts/`, and the amended policy.
+Identical replay is reconstructed from those durable artifacts even after the
+candidate cache is pruned; altered replay or any tampered artifact is rejected.
+
 Benchmarking is read-only measurement. Calibration sweeps development cases,
 evaluates only finalists on frozen holdout topics, and writes a non-activating
-candidate. This release searches exactly the 81 combinations in the
-3-by-3-by-3-by-3 grid for exact, FTS, graph, and dense reciprocal-rank-fusion
-weights. It does not tune trust filters, candidate counts, reranker depth,
+candidate. This release searches exactly the 27 combinations in the 3-by-3-by-3
+grid for exact, FTS, and graph reciprocal-rank-fusion weights. It does not tune
+trust filters, candidate counts,
 packing rules, or token budgets. An explicit user decision through the
 profile-decision workflow is required before an accepted project profile can
 change.
@@ -278,7 +474,9 @@ atomically replaces `bin/` only after the whole package succeeds. It emits:
 
 - `bin/manifest.json`, with ordered targets, runtime/build identity, sizes,
   modes, SHA-256 values, and every shared runtime asset under `profiles/`,
-  `models/`, `evals/conformance/`, and `schemas/`;
+  `models/`, `evals/conformance/`, and `schemas/`; the model root contains the
+  checksum-pinned embedding manifest, specification, artifact, and provenance
+  documentation selected by the final lane receipt;
 - `bin/SHA256SUMS`, covering every payload, launcher, the notice file, the
   manifest, and all shared runtime assets without copying them;
 - `bin/THIRD_PARTY_NOTICES.md`.
@@ -317,7 +515,9 @@ A release is ready only when all of the following pass:
 2. `gofmt` cleanliness, module checksum verification, `go vet`, Go unit tests
    on all three systems, the race detector, and vulnerability analysis on
    Linux.
-3. Full packaged conformance benchmark and digest gates.
+3. Full packaged conformance benchmark and digest gates, including agreement
+   among the final project lane measurement, explicit lane decisions,
+   effective profiles, and model inventory.
 4. Packager generation and reproducibility verification.
 5. A clean Git diff after regenerating `knowledge/bin/`, including executable
    modes on POSIX runners.

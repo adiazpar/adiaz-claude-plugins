@@ -47,9 +47,9 @@ Treat those rules as hard gates.
 ## Step 3: Sweep Candidate Parameters
 
 Invoke the bundled deterministic calibration operation. In this release it
-explores only the finite 3-by-3-by-3-by-3 grid of exact, FTS, graph, and dense
+explores only the finite 3-by-3-by-3 grid of exact, FTS, and graph
 reciprocal-rank-fusion weights for the active effective capability row. It
-does not tune candidate counts, field boosts, reranker depth, graph expansion,
+does not tune candidate counts, field boosts, graph expansion,
 packing rules, or manager/drafter budgets. Those remain versioned profile or
 project-policy inputs and require their own measured implementation before a
 future calibration release may change them.
@@ -59,8 +59,7 @@ checked and repaired here, at gate time, as part of this skill's own run -
 it is never surfaced during onboarding or session start.
 
 Evaluate development cases first. Evaluate only finalists on the frozen
-holdout. Benchmark every declared effective capability profile independently,
-including no-reranker and model-free fallbacks.
+holdout. Benchmark the declared lexical-graph profile independently.
 
 Do not launch a subagent for every combination. Use subagents only for an
 explicitly authorized finalist trial, failure investigation, paraphrase

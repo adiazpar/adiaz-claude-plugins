@@ -81,6 +81,17 @@ func TestDetectProjectStateVersionSeparatesBootstrapAndCampaignSchemas(t *testin
 	if err != nil || version != "0.8" {
 		t.Fatalf("0.8 detection: %q %v", version, err)
 	}
+	if err := os.Remove(filepath.Join(root, ".re-discipline", "state", "head.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWrite(filepath.Join(root, ".re-discipline", "project-profile.md"),
+		[]byte("# Recoverable project\n\n"+SharedLawsMarker+"\nmanaged\n<!-- re-discipline:shared-laws:end -->\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	version, err = DetectProjectStateVersion(root)
+	if err != nil || version != "0.8" {
+		t.Fatalf("damaged 0.8 marker detection: %q %v", version, err)
+	}
 }
 
 func TestEnsureNeverRunsExpensiveOperations(t *testing.T) {

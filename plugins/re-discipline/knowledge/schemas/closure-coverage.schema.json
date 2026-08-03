@@ -3,7 +3,7 @@
   "$id": "plugin://re-discipline/schemas/closure-coverage.schema.json",
   "title": "Closure Coverage",
   "type": "object",
-  "required": ["schemaVersion", "campaignId", "sourceRunCoverage", "findingCoverage", "workItemCoverage", "fileRetention", "unresolvedConflicts", "missingDecisions", "digest"],
+  "required": ["schemaVersion", "campaignId", "sourceRunCoverage", "findingCoverage", "workItemCoverage", "fileRetention", "activeFileDispositions", "unresolvedConflicts", "missingDecisions", "digest"],
   "properties": {
     "schemaVersion": {"const": 2},
     "campaignId": {"type": "string", "pattern": "^C-[A-Z0-9][A-Z0-9-]{0,62}$"},
@@ -11,6 +11,7 @@
     "findingCoverage": {"type": "object", "additionalProperties": {"enum": ["truth", "history", "backlog", "playbook", "maintained", "archive", "rejected", "manager-decision-required", "destination-required", "truth-gate-failed"]}},
     "workItemCoverage": {"type": "object", "additionalProperties": {"enum": ["done", "cancelled", "superseded", "exported-backlog", "nonterminal"]}},
     "fileRetention": {"type": "object", "additionalProperties": {"anyOf": [{"enum": ["retained-inline", "retained-by-reference", "discarded-approved", "distilled-and-retained", "external-verified", "decision-required"]}, {"type": "string", "pattern": "^maintained:.+$"}]}},
+    "activeFileDispositions": {"type": "object", "propertyNames": {"pattern": "^[^\\\\/][^\\\\]*$"}, "additionalProperties": {"enum": ["retain", "destroy-approved", "ephemeral", "decision-required"]}},
     "unresolvedConflicts": {"type": "array", "items": {"type": "string"}},
     "missingDecisions": {"type": "array", "items": {"type": "string"}},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}

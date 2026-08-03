@@ -3,6 +3,7 @@ package knowledge
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -30,7 +31,7 @@ type ReviewPacketRow struct {
 	Triage          string   `json:"triage"`
 	Conflicted      bool     `json:"conflicted"`
 	Recommendation  string   `json:"recommendation"`
-	EvidenceHandles []string `json:"evidenceHandles,omitempty"`
+	EvidenceHandles []string `json:"evidenceHandles"`
 }
 
 // ReviewPacketEnvelope matches review-packet.schema.json. The digest is over
@@ -101,10 +102,13 @@ func ValidateReviewPacketEnvelope(envelope ReviewPacketEnvelope, packet Curation
 		if len(SortedUnique(row.EvidenceHandles)) != len(row.EvidenceHandles) {
 			return fmt.Errorf("review packet row %s repeats an evidence handle", row.FindingID)
 		}
-		for _, handle := range row.EvidenceHandles {
-			if strings.TrimSpace(handle) == "" {
-				return fmt.Errorf("review packet row %s has an empty evidence handle", row.FindingID)
-			}
+		expectedEvidenceHandles := make([]string, 0, len(candidate.Evidence))
+		for _, evidence := range candidate.Evidence {
+			expectedEvidenceHandles = append(expectedEvidenceHandles, EvidenceHandle(candidate.ID, evidence))
+		}
+		expectedEvidenceHandles = SortedUnique(expectedEvidenceHandles)
+		if !reflect.DeepEqual(SortedUnique(row.EvidenceHandles), expectedEvidenceHandles) {
+			return fmt.Errorf("review packet row %s does not bind the candidate's exact evidence handles", row.FindingID)
 		}
 		seen[row.FindingID] = true
 	}
@@ -131,8 +135,8 @@ func ValidateCurationPacket(role string, packet CurationPacket) error {
 	if packet.Intake.Status != "submitted" {
 		return errors.New("curation packet must be submitted before manager review")
 	}
-	if len(packet.Candidates) < 3 || len(packet.Candidates) > 10 {
-		return errors.New("curation packet must contain 3-10 related findings")
+	if len(packet.Candidates) > 10 {
+		return errors.New("curation packet may contain at most 10 related findings")
 	}
 	declared := map[string]bool{}
 	for _, id := range packet.Intake.CandidateFindingIDs {
@@ -177,11 +181,155 @@ func ValidateCurationPacket(role string, packet CurationPacket) error {
 		return errors.New("intake candidates, finding records, and triage rows must match exactly")
 	}
 	for _, coverage := range packet.Intake.Coverage {
-		if validOne(coverage.Disposition, "candidate-finding", "duplicate") && !declared[coverage.TargetID] {
+		if coverage.Disposition == "candidate-finding" && !declared[coverage.TargetID] {
 			return fmt.Errorf("coverage target %s is not in the packet", coverage.TargetID)
 		}
 	}
+	if err := validateCandidateCoverageEvidence(packet); err != nil {
+		return err
+	}
 	return nil
+}
+
+func coverageEvidenceKey(path, sha256 string, startLine, endLine int, objectKey string) string {
+	return fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%s", path, sha256, startLine, endLine, objectKey)
+}
+
+func coverageEntryEvidenceKey(entry CoverageEntry) string {
+	return coverageEvidenceKey(
+		entry.SourcePath, entry.SourceSHA256, entry.StartLine, entry.EndLine, entry.SourceHandle,
+	)
+}
+
+func evidenceReferenceCoverageKey(evidence EvidenceReference) string {
+	return coverageEvidenceKey(
+		evidence.Path, evidence.SHA256, evidence.StartLine, evidence.EndLine, evidence.ObjectKey,
+	)
+}
+
+func validateCandidateCoverageEvidence(packet CurationPacket) error {
+	expected := map[string]map[string]int{}
+	for _, entry := range packet.Intake.Coverage {
+		if entry.Disposition != "candidate-finding" {
+			continue
+		}
+		if expected[entry.TargetID] == nil {
+			expected[entry.TargetID] = map[string]int{}
+		}
+		expected[entry.TargetID][coverageEntryEvidenceKey(entry)]++
+	}
+	for _, candidate := range packet.Candidates {
+		remaining := map[string]int{}
+		for key, count := range expected[candidate.Record.ID] {
+			remaining[key] = count
+		}
+		if len(remaining) == 0 {
+			return fmt.Errorf("candidate finding %s has no exact coverage evidence", candidate.Record.ID)
+		}
+		for _, evidence := range candidate.Record.Evidence {
+			key := evidenceReferenceCoverageKey(evidence)
+			if remaining[key] == 0 {
+				return fmt.Errorf("candidate finding %s has evidence outside its exact coverage spans", candidate.Record.ID)
+			}
+			remaining[key]--
+		}
+		for _, count := range remaining {
+			if count != 0 {
+				return fmt.Errorf("candidate finding %s does not cite every exact coverage span", candidate.Record.ID)
+			}
+		}
+	}
+	return nil
+}
+
+// validateCurationGraphBindings resolves every intake source to one canonical
+// run report and binds candidate evidence to the exact run that returned it.
+// requireReturned is true at curator submission and false when validating
+// durable state after the source run has advanced to a terminal status.
+func validateCurationGraphBindings(
+	graph CampaignGraph,
+	packet CurationPacket,
+	requireReturned bool,
+) (map[string]string, error) {
+	if graph.Campaign == nil {
+		return nil, errors.New("curation source binding requires a campaign")
+	}
+	if err := validateCandidateCoverageEvidence(packet); err != nil {
+		return nil, err
+	}
+	bindings := map[string]string{}
+	for _, source := range packet.Intake.SourceRuns {
+		key := coverageSourceKey(source.Path, source.SHA256)
+		matches := []RunRecord{}
+		for _, run := range graph.Runs {
+			if run.Report != nil && run.Report.Path == source.Path && run.Report.SHA256 == source.SHA256 {
+				matches = append(matches, run)
+			}
+		}
+		if len(matches) != 1 {
+			return nil, fmt.Errorf("intake source %s must resolve to exactly one canonical run report", source.Path)
+		}
+		run := matches[0]
+		expectedPath := fmt.Sprintf("active/%s/runs/%s/report.md", graph.Campaign.Slug, run.ID)
+		if source.Path != expectedPath {
+			return nil, fmt.Errorf("intake source %s is not canonical report path %s", source.Path, expectedPath)
+		}
+		if requireReturned && run.Status != "returned" {
+			return nil, fmt.Errorf("intake source run %s must be returned before curation", run.ID)
+		}
+		bindings[key] = run.ID
+	}
+
+	declaredCandidates := map[string]FindingRecord{}
+	for _, candidate := range packet.Candidates {
+		declaredCandidates[candidate.Record.ID] = candidate.Record
+	}
+	for _, entry := range packet.Intake.Coverage {
+		if entry.Disposition == "duplicate" {
+			if _, ok := graph.Findings[entry.TargetID]; !ok {
+				return nil, fmt.Errorf("duplicate coverage target %s is not a canonical campaign finding", entry.TargetID)
+			}
+		}
+	}
+	for _, findingID := range packet.Intake.CandidateFindingIDs {
+		candidate, ok := declaredCandidates[findingID]
+		if !ok {
+			return nil, fmt.Errorf("intake candidate %s has no submitted finding", findingID)
+		}
+		expectedRuns := map[string]bool{}
+		for _, entry := range packet.Intake.Coverage {
+			if entry.Disposition != "candidate-finding" || entry.TargetID != findingID {
+				continue
+			}
+			runID := bindings[coverageSourceKey(entry.SourcePath, entry.SourceSHA256)]
+			if runID == "" {
+				return nil, fmt.Errorf("candidate %s coverage does not resolve to a source run", findingID)
+			}
+			expectedRuns[runID] = true
+		}
+		for _, evidence := range candidate.Evidence {
+			matchedRun := ""
+			for _, entry := range packet.Intake.Coverage {
+				if entry.Disposition == "candidate-finding" && entry.TargetID == findingID &&
+					evidenceReferenceCoverageKey(evidence) == coverageEntryEvidenceKey(entry) {
+					matchedRun = bindings[coverageSourceKey(entry.SourcePath, entry.SourceSHA256)]
+					break
+				}
+			}
+			if matchedRun == "" || evidence.SourceRun != matchedRun {
+				return nil, fmt.Errorf("candidate %s evidence is not bound to its canonical source run", findingID)
+			}
+		}
+		if len(candidate.SourceRuns) != len(expectedRuns) {
+			return nil, fmt.Errorf("candidate %s sourceRuns do not match its exact coverage sources", findingID)
+		}
+		for _, runID := range candidate.SourceRuns {
+			if !expectedRuns[runID] {
+				return nil, fmt.Errorf("candidate %s cites unrelated source run %s", findingID, runID)
+			}
+		}
+	}
+	return bindings, nil
 }
 
 // ValidateManagerReview binds an immutable manager receipt to one intake
@@ -189,6 +337,9 @@ func ValidateCurationPacket(role string, packet CurationPacket) error {
 func ValidateManagerReview(role string, packet CurationPacket, review ReviewRecord) error {
 	if role != "manager" || review.Authority != "manager" {
 		return errors.New("finding ratification requires manager authority")
+	}
+	if review.ReviewLoad.MeasurementStatus != "measured" {
+		return errors.New("new manager reviews require contemporaneously measured review load")
 	}
 	if err := ValidateCurationPacket("curator", packet); err != nil {
 		return fmt.Errorf("review packet is invalid: %w", err)
@@ -199,6 +350,12 @@ func ValidateManagerReview(role string, packet CurationPacket, review ReviewReco
 	if review.CampaignID != packet.Intake.CampaignID || review.IntakeID != packet.Intake.ID ||
 		review.IntakeRevision != packet.Intake.Revision {
 		return errors.New("review receipt does not bind the submitted intake revision")
+	}
+	if err := ValidateReviewLoadBinding(review.ReviewLoad, review, packet, ReviewLoadConfig{
+		TargetMinutesPerPacket:  review.ReviewLoad.TargetMinutesPerPacket,
+		TargetPacketsPerSession: review.ReviewLoad.TargetPacketsPerSession,
+	}); err != nil {
+		return err
 	}
 	decisions := map[string]ReviewDecision{}
 	for _, decision := range review.Decisions {
@@ -224,23 +381,19 @@ func ValidateManagerReviewOutcomes(packet CurationPacket, review ReviewRecord, r
 	if err := ValidateManagerReview("manager", packet, review); err != nil {
 		return err
 	}
-	candidates := map[string]FindingRecord{}
+	candidates := map[string]FindingDocument{}
 	for _, candidate := range packet.Candidates {
-		candidates[candidate.Record.ID] = candidate.Record
+		candidates[candidate.Record.ID] = candidate
 	}
-	resulting := make([]FindingRecord, 0, len(outcomes))
-	for _, outcome := range outcomes {
-		resulting = append(resulting, outcome.Record)
-	}
-	return validateManagerReviewRecordOutcomes(packet.Intake, candidates, review, resultingIntake, resulting)
+	return validateManagerReviewDocumentOutcomes(packet.Intake, candidates, review, resultingIntake, outcomes)
 }
 
-func validateManagerReviewRecordOutcomes(
+func validateManagerReviewDocumentOutcomes(
 	intake IntakeRecord,
-	candidates map[string]FindingRecord,
+	candidates map[string]FindingDocument,
 	review ReviewRecord,
 	resultingIntake IntakeRecord,
-	outcomes []FindingRecord,
+	outcomes []FindingDocument,
 ) error {
 	if intake.Status != "submitted" || review.IntakeID != intake.ID || review.IntakeRevision != intake.Revision {
 		return errors.New("review must bind the current submitted intake revision")
@@ -277,10 +430,10 @@ func validateManagerReviewRecordOutcomes(
 	decisions := map[string]ReviewDecision{}
 	for _, decision := range review.Decisions {
 		candidate, ok := candidates[decision.FindingID]
-		if !ok || decision.FindingRevision != candidate.Revision {
+		if !ok || decision.FindingRevision != candidate.Record.Revision {
 			return fmt.Errorf("review decision for %s does not bind the current finding revision", decision.FindingID)
 		}
-		if reviewDecisionRequiresAttention(candidate, decision) && intake.Triage[decision.FindingID] != "attention" {
+		if reviewDecisionRequiresAttention(candidate.Record, decision) && intake.Triage[decision.FindingID] != "attention" {
 			return fmt.Errorf("review decision %s for %s requires individual attention", decision.Action, decision.FindingID)
 		}
 		decisions[decision.FindingID] = decision
@@ -288,12 +441,12 @@ func validateManagerReviewRecordOutcomes(
 	if len(decisions) != len(candidates) {
 		return errors.New("review decisions must match persisted intake candidates exactly")
 	}
-	resulting := map[string]FindingRecord{}
+	resulting := map[string]FindingDocument{}
 	for _, outcome := range outcomes {
-		if _, duplicate := resulting[outcome.ID]; duplicate {
-			return fmt.Errorf("review transaction repeats finding outcome %s", outcome.ID)
+		if _, duplicate := resulting[outcome.Record.ID]; duplicate {
+			return fmt.Errorf("review transaction repeats finding outcome %s", outcome.Record.ID)
 		}
-		resulting[outcome.ID] = outcome
+		resulting[outcome.Record.ID] = outcome
 	}
 	for findingID, candidate := range candidates {
 		decision := decisions[findingID]
@@ -301,7 +454,7 @@ func validateManagerReviewRecordOutcomes(
 		if !present {
 			return fmt.Errorf("review decision %s for %s has no resulting finding revision", decision.Action, findingID)
 		}
-		if outcome.Revision != decision.FindingRevision+1 {
+		if outcome.Record.Revision != decision.FindingRevision+1 {
 			return fmt.Errorf("review outcome %s must advance reviewed revision %d exactly once", findingID, decision.FindingRevision)
 		}
 		if err := validateReviewDecisionOutcome(candidate, decision, outcome, resulting, candidates); err != nil {
@@ -313,7 +466,7 @@ func validateManagerReviewRecordOutcomes(
 			continue
 		}
 		claimed := false
-		for _, sourceID := range resulting[findingID].Relations.Supersedes {
+		for _, sourceID := range resulting[findingID].Record.Relations.Supersedes {
 			decision, ok := decisions[sourceID]
 			if ok && validOne(decision.Action, "merge", "split", "supersede") {
 				claimed = true
@@ -331,32 +484,75 @@ func reviewDecisionRequiresAttention(candidate FindingRecord, decision ReviewDec
 		validOne(decision.Action, "challenge", "merge", "split", "supersede")
 }
 
+func reviewedFindingContentDigest(document FindingDocument) (string, error) {
+	document = normalizeFindingDocument(document)
+	record := document.Record
+	body, path := record.Body, record.Path
+	record.Revision = 0
+	record.UpdatedAt = ""
+	record.UpdatedBy = ""
+	record.Digest = ""
+	record.CorrelationID = ""
+	record.EvidenceGrade = ""
+	record.ReviewState = ""
+	record.Validity = ""
+	record.Projection = ""
+	record.Body = ""
+	record.Path = ""
+	document.Record = record
+	return CanonicalDigest(struct {
+		Document FindingDocument `json:"document"`
+		Body     string          `json:"body"`
+		Path     string          `json:"path"`
+	}{Document: document, Body: body, Path: path})
+}
+
+func validateReviewedFindingContent(candidate, outcome FindingDocument) error {
+	before, err := reviewedFindingContentDigest(candidate)
+	if err != nil {
+		return err
+	}
+	after, err := reviewedFindingContentDigest(outcome)
+	if err != nil {
+		return err
+	}
+	if before != after {
+		return errors.New(
+			"review outcome may not substitute claim, evidence, source, relations, body, or synthetic-query content")
+	}
+	return nil
+}
+
 func validateReviewDecisionOutcome(
-	candidate FindingRecord,
+	candidate FindingDocument,
 	decision ReviewDecision,
-	outcome FindingRecord,
-	allOutcomes map[string]FindingRecord,
-	candidates map[string]FindingRecord,
+	outcome FindingDocument,
+	allOutcomes map[string]FindingDocument,
+	candidates map[string]FindingDocument,
 ) error {
-	if outcome.ID != candidate.ID || outcome.CampaignID != candidate.CampaignID || outcome.Kind != candidate.Kind {
+	candidateRecord, outcomeRecord := candidate.Record, outcome.Record
+	if outcomeRecord.ID != candidateRecord.ID || outcomeRecord.CampaignID != candidateRecord.CampaignID || outcomeRecord.Kind != candidateRecord.Kind {
 		return errors.New("finding identity, campaign, and kind are immutable")
 	}
-	expectedGrade := candidate.EvidenceGrade
+	if err := validateReviewedFindingContent(candidate, outcome); err != nil {
+		return err
+	}
+	expectedGrade := candidateRecord.EvidenceGrade
 	if decision.EvidenceCorrection != "" {
 		expectedGrade = decision.EvidenceCorrection
 	}
 	if decision.Action == "correct-grade" && decision.EvidenceCorrection == "" {
 		return errors.New("correct-grade requires an explicit evidence correction")
 	}
-	if outcome.EvidenceGrade != expectedGrade {
-		return fmt.Errorf("evidence grade %s does not match decision outcome %s", outcome.EvidenceGrade, expectedGrade)
+	if outcomeRecord.EvidenceGrade != expectedGrade {
+		return fmt.Errorf("evidence grade %s does not match decision outcome %s", outcomeRecord.EvidenceGrade, expectedGrade)
 	}
-	expectedProjection := candidate.Projection
+	expectedProjection := candidateRecord.Projection
 	if decision.Projection != "" {
 		expectedProjection = decision.Projection
 	}
-	expectedReviewState := candidate.ReviewState
-	expectedValidity := candidate.Validity
+	expectedReviewState := candidateRecord.ReviewState
+	expectedValidity := candidateRecord.Validity
 	replacementMinimum, replacementMaximum := 0, 0
 	switch decision.Action {
 	case "ratify":
@@ -378,9 +574,9 @@ func validateReviewDecisionOutcome(
 	default:
 		return fmt.Errorf("unsupported decision action %s", decision.Action)
 	}
-	if outcome.ReviewState != expectedReviewState || outcome.Validity != expectedValidity || outcome.Projection != expectedProjection {
+	if outcomeRecord.ReviewState != expectedReviewState || outcomeRecord.Validity != expectedValidity || outcomeRecord.Projection != expectedProjection {
 		return fmt.Errorf("states %s/%s/%s do not match %s decision outcome %s/%s/%s",
-			outcome.ReviewState, outcome.Validity, outcome.Projection, decision.Action,
+			outcomeRecord.ReviewState, outcomeRecord.Validity, outcomeRecord.Projection, decision.Action,
 			expectedReviewState, expectedValidity, expectedProjection)
 	}
 	if replacementMinimum == 0 {
@@ -391,7 +587,7 @@ func validateReviewDecisionOutcome(
 		if _, isCandidate := candidates[id]; isCandidate {
 			continue
 		}
-		if containsString(replacement.Relations.Supersedes, candidate.ID) {
+		if containsString(replacement.Record.Relations.Supersedes, candidateRecord.ID) {
 			replacements++
 		}
 	}
@@ -402,10 +598,16 @@ func validateReviewDecisionOutcome(
 	return nil
 }
 
-func validateAppliedManagerReview(previous CampaignGraph, writes []preparedStateWrite) error {
+func validateAppliedManagerReview(
+	store *StateStore,
+	previous CampaignGraph,
+	writes []preparedStateWrite,
+	submission *ReviewPacketSubmission,
+) error {
 	var review *ReviewRecord
 	var intake *IntakeRecord
-	outcomes := []FindingRecord{}
+	outcomes := []FindingDocument{}
+	workItems := []WorkItemRecord{}
 	for _, write := range writes {
 		switch record := write.Record.(type) {
 		case ReviewRecord:
@@ -421,25 +623,116 @@ func validateAppliedManagerReview(previous CampaignGraph, writes []preparedState
 			copy := record
 			intake = &copy
 		case FindingDocument:
-			outcomes = append(outcomes, record.Record)
+			outcomes = append(outcomes, record)
+		case WorkItemRecord:
+			workItems = append(workItems, record)
 		}
 	}
 	if review == nil || intake == nil {
 		return errors.New("review transaction requires one receipt and one resulting intake")
 	}
+	if store == nil || submission == nil {
+		return errors.New("review transaction requires the exact manager-facing packet at commit")
+	}
 	priorIntake, present := previous.Intakes[review.IntakeID]
 	if !present {
 		return fmt.Errorf("review intake %s is not canonical campaign state", review.IntakeID)
 	}
-	candidates := map[string]FindingRecord{}
+	if !reflect.DeepEqual(submission.Intake, priorIntake) {
+		return errors.New("review packet intake is not the exact canonical submitted intake")
+	}
+	candidates := map[string]FindingDocument{}
 	for _, findingID := range priorIntake.CandidateFindingIDs {
-		candidate, present := previous.Findings[findingID]
+		candidateRecord, present := previous.Findings[findingID]
 		if !present {
 			return fmt.Errorf("review candidate %s is not canonical campaign state", findingID)
 		}
+		path := candidateRecord.Path
+		if path == "" {
+			path = fmt.Sprintf("active/%s/findings/%s.md", previous.Campaign.Slug, findingID)
+		}
+		value, _, exists, err := store.existingRecord(path)
+		if err != nil {
+			return err
+		}
+		candidate, ok := value.(FindingDocument)
+		if !exists || !ok || candidate.Record.Digest != candidateRecord.Digest ||
+			candidate.Record.Revision != candidateRecord.Revision {
+			return fmt.Errorf("review candidate %s could not be reconstructed from canonical state", findingID)
+		}
 		candidates[findingID] = candidate
 	}
-	return validateManagerReviewRecordOutcomes(priorIntake, candidates, *review, *intake, outcomes)
+	provided := map[string]FindingDocument{}
+	for _, candidate := range submission.Candidates {
+		document := candidate.Document()
+		if _, duplicate := provided[document.Record.ID]; duplicate {
+			return fmt.Errorf("review packet repeats candidate %s", document.Record.ID)
+		}
+		provided[document.Record.ID] = document
+	}
+	if len(provided) != len(candidates) {
+		return errors.New("review packet candidates do not match the canonical intake")
+	}
+	for findingID, canonical := range candidates {
+		candidate, ok := provided[findingID]
+		if !ok || candidate.Record.Revision != canonical.Record.Revision ||
+			candidate.Record.Digest != canonical.Record.Digest {
+			return fmt.Errorf("review packet candidate %s is not its exact canonical revision", findingID)
+		}
+		candidateContentDigest, candidateErr := findingDocumentDigest(candidate)
+		canonicalContentDigest, canonicalErr := findingDocumentDigest(canonical)
+		if candidateErr != nil || canonicalErr != nil ||
+			candidateContentDigest != candidate.Record.Digest ||
+			canonicalContentDigest != canonical.Record.Digest ||
+			candidateContentDigest != canonicalContentDigest ||
+			NormalizeProjectPath(candidate.Record.Path) != canonical.Record.Path {
+			return fmt.Errorf("review packet candidate %s is not its exact canonical revision", findingID)
+		}
+	}
+	packet := CurationPacket{Intake: priorIntake}
+	for _, findingID := range priorIntake.CandidateFindingIDs {
+		packet.Candidates = append(packet.Candidates, candidates[findingID])
+	}
+	for _, row := range submission.Envelope.Rows {
+		packet.Rows = append(packet.Rows, CurationRow{FindingID: row.FindingID, Triage: row.Triage})
+	}
+	if err := ValidateReviewPacketEnvelope(submission.Envelope, packet); err != nil {
+		return fmt.Errorf("canonical review packet: %w", err)
+	}
+	if review.PacketDigest != submission.Envelope.Digest {
+		return errors.New("review receipt does not bind the canonical packet digest")
+	}
+	if err := ValidateManagerReview("manager", packet, *review); err != nil {
+		return err
+	}
+	if err := validateReviewWorkItemCreations(previous, priorIntake, *review, workItems); err != nil {
+		return err
+	}
+	return validateManagerReviewDocumentOutcomes(priorIntake, candidates, *review, *intake, outcomes)
+}
+
+func validateReviewWorkItemCreations(
+	previous CampaignGraph,
+	intake IntakeRecord,
+	review ReviewRecord,
+	workItems []WorkItemRecord,
+) error {
+	proposedWork := map[string]bool{}
+	for _, workID := range intake.SpawnedWorkItems {
+		proposedWork[workID] = true
+	}
+	for _, work := range workItems {
+		if !proposedWork[work.ID] {
+			return fmt.Errorf("review work item %s was not proposed by intake %s", work.ID, intake.ID)
+		}
+		if _, exists := previous.WorkItems[work.ID]; exists {
+			return fmt.Errorf("review may create proposed work item %s only once", work.ID)
+		}
+		if !containsString(work.DecisionIDs, review.ID) {
+			return fmt.Errorf("review work item %s must link back to review %s", work.ID, review.ID)
+		}
+	}
+	return nil
 }
 
 func ReviewReceiptDigest(review ReviewRecord) (string, error) {

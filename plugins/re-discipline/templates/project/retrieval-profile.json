@@ -2,54 +2,13 @@
   "$schema": "../schemas/retrieval-profile.schema.json",
   "schemaVersion": 1,
   "profileId": "plugin:balanced-v1",
-  "description": "Offline deterministic hybrid retrieval with independently identified degraded profiles.",
+  "description": "Offline deterministic hybrid retrieval with a packaged local embedding lane and an independently benchmarked model-free fallback.",
   "effectiveProfiles": [
     {
-      "name": "hybrid-local-v1",
-      "description": "Exact, SQLite FTS5, graph, bundled local learned GloVe embedding, and deterministic local reranking.",
-      "requires": {
-        "embedding": "builtin:glove-6b-50d-top50k-q8-v1",
-        "reranker": "builtin:linear-reranker-v1"
-      },
-      "lanes": [
-        "exact",
-        "fts",
-        "graph",
-        "dense",
-        "rerank"
-      ],
-      "weights": {
-        "dense": 4,
-        "exact": 8,
-        "fts": 6,
-        "graph": 2
-      },
-      "rrfK": 60,
-      "rerankDepth": 24,
-      "maxPerDocument": 3,
-      "packing": {
-        "maxPassages": 12,
-        "maxBytes": 32768
-      },
-      "benchmark": {
-        "suite": "packaged-conformance-v1",
-        "digest": "sha256:9f446f7d8000b976e10c36b3b3765264a893c0f3e7ce47c52aa52456217ec47d",
-        "status": "passed",
-        "evaluatedAt": "2026-07-28T17:49:28Z",
-        "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
-        "corpusFingerprint": "sha256:52a14cf9bde6dbd44eea76a28ed316eeabffc706eb6cd4c7d58395c2f0a19d1f",
-        "modelFingerprint": "sha256:3f17d9c1525d5412b21302ac021dbbde2ceae029c49226cfa7bcbf2a7111f700",
-        "runtimeFingerprint": "sha256:802a2941797a58fa4624c49fb725fd29fa3a0166b757863acac16698612dfc27",
-        "chunkerVersion": "section-block-v4",
-        "parserVersion": "markdown-structure-v1"
-      }
-    },
-    {
       "name": "hybrid-no-rerank-v1",
-      "description": "Exact, SQLite FTS5, graph, and bundled local learned GloVe embedding without reranking.",
+      "description": "Identifier-aware exact, SQLite FTS5, relationship graph, and checksum-pinned local GloVe retrieval without reranking.",
       "requires": {
-        "embedding": "builtin:glove-6b-50d-top50k-q8-v1",
-        "reranker": null
+        "embedding": "builtin:glove-6b-50d-top50k-q8-v1"
       },
       "lanes": [
         "exact",
@@ -64,7 +23,6 @@
         "graph": 2
       },
       "rrfK": 60,
-      "rerankDepth": 0,
       "maxPerDocument": 3,
       "packing": {
         "maxPassages": 12,
@@ -72,23 +30,22 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:88fed8aa44ae0f38bf6a69ebfb227f90e77ac67c8c3869e7c1b7512ef5f93e97",
+        "digest": "sha256:83b592ea9d1a39f3c48496b9d29d8113069f2a56ce0ca9f1b6af9e4ee268ad71",
         "status": "passed",
-        "evaluatedAt": "2026-07-28T17:49:28Z",
-        "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
-        "corpusFingerprint": "sha256:52a14cf9bde6dbd44eea76a28ed316eeabffc706eb6cd4c7d58395c2f0a19d1f",
+        "evaluatedAt": "2026-08-03T09:36:53Z",
+        "evalFingerprint": "sha256:ff013336e932a13c1f4a1c10324bc7fe73b65621df668e01852e003a42cef7c2",
+        "corpusFingerprint": "sha256:56073936716c3c1e522c7754895e890f1ae80a57cac8d20a41e1042678e90167",
         "modelFingerprint": "sha256:f8654dc6bc0274fcc627476617fdd445626ca9e17c7d1717669e6deccaecb7be",
-        "runtimeFingerprint": "sha256:802a2941797a58fa4624c49fb725fd29fa3a0166b757863acac16698612dfc27",
-        "chunkerVersion": "section-block-v4",
-        "parserVersion": "markdown-structure-v1"
+        "runtimeFingerprint": "sha256:09a0a5e3723bc26e772a22720e40896d1218077210f8b62ca1299a10c6d9c8c1",
+        "chunkerVersion": "section-block-v6-finding-freshness",
+        "parserVersion": "markdown-finding-v2-identifier-v1"
       }
     },
     {
       "name": "lexical-graph-v1",
-      "description": "Model-free exact, SQLite FTS5, and relationship-graph fallback.",
+      "description": "Identifier-aware exact, SQLite FTS5, and relationship-graph retrieval.",
       "requires": {
-        "embedding": null,
-        "reranker": null
+        "embedding": null
       },
       "lanes": [
         "exact",
@@ -102,7 +59,6 @@
         "graph": 2
       },
       "rrfK": 60,
-      "rerankDepth": 0,
       "maxPerDocument": 3,
       "packing": {
         "maxPassages": 12,
@@ -110,15 +66,15 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:0c291f19d07b0bd39e1521a3bb2c5d74c241d1714c34c0a553b5eb3de51302c2",
+        "digest": "sha256:9b9738a9bb3c7a03e35a70bd208cbe56d9204ce3ceaad8e4dfb9f10e131479c3",
         "status": "passed",
-        "evaluatedAt": "2026-07-28T17:49:28Z",
-        "evalFingerprint": "sha256:e02fac1bb911fca64e09116de51c9125f257e4574ae9faf743d790d461abf690",
-        "corpusFingerprint": "sha256:52a14cf9bde6dbd44eea76a28ed316eeabffc706eb6cd4c7d58395c2f0a19d1f",
+        "evaluatedAt": "2026-08-03T09:36:53Z",
+        "evalFingerprint": "sha256:ff013336e932a13c1f4a1c10324bc7fe73b65621df668e01852e003a42cef7c2",
+        "corpusFingerprint": "sha256:56073936716c3c1e522c7754895e890f1ae80a57cac8d20a41e1042678e90167",
         "modelFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "runtimeFingerprint": "sha256:802a2941797a58fa4624c49fb725fd29fa3a0166b757863acac16698612dfc27",
-        "chunkerVersion": "section-block-v4",
-        "parserVersion": "markdown-structure-v1"
+        "runtimeFingerprint": "sha256:09a0a5e3723bc26e772a22720e40896d1218077210f8b62ca1299a10c6d9c8c1",
+        "chunkerVersion": "section-block-v6-finding-freshness",
+        "parserVersion": "markdown-finding-v2-identifier-v1"
       }
     }
   ]

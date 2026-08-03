@@ -28,11 +28,19 @@ PowerShell and POSIX implement the same semantic decisions for SessionStart,
 PreToolUse, PreCompact, PostCompact, SubagentStart, SubagentStop, and Stop.
 Compare normalized JSON decisions, not incidental wording or path separators.
 
-PreToolUse denies accidental direct Write/Edit access to canonical campaign
+`PreToolUse` applies one write-class decision to Claude Code `Write`/`Edit` and
+Codex `apply_patch`. It denies accidental direct access to canonical campaign
 and truth paths. A registered run may write its `report.md` and lazy
-`payload/`; ordinary project files are writable only within the explicit run
-grant. Hosts without reliable hook delivery still remain safe because engine
-mutations validate roles, revisions, paths, invariants, and event heads.
+`payload/`; ordinary project files are writable only within its immutable
+exact-path or bounded-directory grants. Adapters should expose the current run
+through `runId` or `RE_DISCIPLINE_RUN_ID`; no registered grants means no
+ordinary project writes. `SubagentStart` and `SubagentStop` emit no context for
+ordinary host subagents. They inject assignment context or a return check only
+when explicit dispatch metadata resolves one unique registered run and matches
+its immutable context-pack identity. This reduces accidental scope and does
+not attest the caller. Hosts without reliable hook delivery still remain safe
+because engine mutations validate roles, revisions, paths, invariants, and
+event heads.
 
 ## Curator Dispatch
 

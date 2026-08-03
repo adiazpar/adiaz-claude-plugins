@@ -252,6 +252,7 @@ jobs:
             "TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration"
             "TestAdversarialMeasurementLeaseSurvivesConcurrentPublication"
             "TestStateTransactionConcurrentStaleWriters"
+            "TestContextLeaseConcurrentSameLeaseServesCardOnce"
           )
           $available = @(go test -list '^Test' ./internal/knowledge)
           if ($LASTEXITCODE -ne 0) {

@@ -162,6 +162,11 @@ func IsForbiddenSource(relative string) bool {
 	}
 	for _, prefix := range []string{
 		".git/", ".re-discipline/cache/", ".re-discipline/memory/proposals/",
+		// Measurements are receipts about retrieval, never retrieval input.
+		// Keeping the root forbidden also prevents a broad additional source
+		// class rooted at .re-discipline/knowledge from indexing a Markdown
+		// measurement and making the act of measuring change the corpus.
+		".re-discipline/knowledge/measurements/",
 	} {
 		if strings.HasPrefix(clean, prefix) {
 			return true

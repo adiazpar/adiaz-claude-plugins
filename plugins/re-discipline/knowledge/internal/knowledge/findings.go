@@ -34,6 +34,18 @@ type FindingDocument struct {
 // keys, block scalars, and unknown keys is deliberate: two hosts must never
 // digest the same finding differently.
 func ParseFindingDocument(body []byte, path string) (FindingDocument, error) {
+	return parseFindingDocument(body, path, false)
+}
+
+// parseMigrationCompatibleFindingDocument accepts the additive 0.7 finding
+// format whose sourceRuns/sourceRun values can still name a legacy
+// subagents/<workspace> path. It keeps every other canonical syntax, digest,
+// and epistemic validation rule. Only the explicit migrator may call it.
+func parseMigrationCompatibleFindingDocument(body []byte, path string) (FindingDocument, error) {
+	return parseFindingDocument(body, path, true)
+}
+
+func parseFindingDocument(body []byte, path string, allowLegacySourceRuns bool) (FindingDocument, error) {
 	normalized := string(normalizeNewlines(body))
 	if !strings.HasPrefix(normalized, "---\n") {
 		return FindingDocument{}, errors.New("finding must begin with YAML frontmatter")
@@ -145,7 +157,15 @@ func ParseFindingDocument(body []byte, path string) (FindingDocument, error) {
 	document := normalizeFindingDocument(FindingDocument{
 		Record: record, SyntheticQuestions: questions, QuestionsReviewed: reviewed,
 	})
-	if err := ValidateFindingDocument(document, true); err != nil {
+	validationDocument := document
+	if allowLegacySourceRuns {
+		var err error
+		validationDocument, err = migrationCompatibleFindingForValidation(document)
+		if err != nil {
+			return FindingDocument{}, err
+		}
+	}
+	if err := ValidateFindingDocument(validationDocument, true); err != nil {
 		return FindingDocument{}, err
 	}
 	expected, err := findingDocumentDigest(document)
@@ -163,6 +183,55 @@ func ParseFindingDocument(body []byte, path string) (FindingDocument, error) {
 		return FindingDocument{}, errors.New("finding is valid but not in canonical rendered form")
 	}
 	return document, nil
+}
+
+func migrationCompatibleFindingForValidation(document FindingDocument) (FindingDocument, error) {
+	record := document.Record
+	record.SourceRuns = append([]string(nil), document.Record.SourceRuns...)
+	record.Evidence = append([]EvidenceReference(nil), document.Record.Evidence...)
+	legacyRuns := map[string]string{}
+	for index, sourceRun := range record.SourceRuns {
+		if runIDRE.MatchString(sourceRun) {
+			continue
+		}
+		if !validLegacySourceRunReference(sourceRun) {
+			return FindingDocument{}, fmt.Errorf("finding source run %q is neither a canonical run ID nor a legacy subagent reference", sourceRun)
+		}
+		mapped := fmt.Sprintf("R-19700101-%08d", 90000000+index)
+		legacyRuns[sourceRun] = mapped
+		record.SourceRuns[index] = mapped
+	}
+	for index := range record.Evidence {
+		sourceRun := record.Evidence[index].SourceRun
+		if sourceRun == "" || runIDRE.MatchString(sourceRun) {
+			continue
+		}
+		if !validLegacySourceRunReference(sourceRun) {
+			return FindingDocument{}, fmt.Errorf("finding evidence source run %q is neither a canonical run ID nor a legacy subagent reference", sourceRun)
+		}
+		mapped := legacyRuns[sourceRun]
+		if mapped == "" {
+			return FindingDocument{}, fmt.Errorf("finding evidence source run %q is absent from sourceRuns", sourceRun)
+		}
+		record.Evidence[index].SourceRun = mapped
+	}
+	document.Record = record
+	return document, nil
+}
+
+func validLegacySourceRunReference(value string) bool {
+	clean := NormalizeProjectPath(value)
+	if filepath.IsAbs(value) || clean == "" || clean == "." || clean == ".." ||
+		strings.HasPrefix(clean, "../") || clean != filepath.ToSlash(value) {
+		return false
+	}
+	parts := strings.Split(clean, "/")
+	for index, part := range parts {
+		if part == "subagents" && index+1 < len(parts) && strings.TrimSpace(parts[index+1]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 var findingScalarKeys = map[string]bool{
@@ -613,8 +682,18 @@ func ValidateFindingDocument(document FindingDocument, requireDigest bool) error
 			return errors.New("synthetic questions must be single-line questions")
 		}
 	}
+	if err := validateFindingBodySections(record.Body); err != nil {
+		return err
+	}
+	if base := strings.TrimSuffix(filepath.Base(record.Path), filepath.Ext(record.Path)); record.Path != "" && base != record.ID {
+		return fmt.Errorf("finding id %s does not match path %s", record.ID, record.Path)
+	}
+	return nil
+}
+
+func validateFindingBodySections(body string) error {
 	requiredHeadings := []string{"# Claim", "## Applies when", "## Does not establish", "## Evidence", "## Reproduction", "## Relations"}
-	bodyLines := strings.Split(record.Body, "\n")
+	bodyLines := strings.Split(body, "\n")
 	position := -1
 	for _, heading := range requiredHeadings {
 		next := -1
@@ -628,9 +707,6 @@ func ValidateFindingDocument(document FindingDocument, requireDigest bool) error
 			return fmt.Errorf("finding body is missing stable section %q", heading)
 		}
 		position = next
-	}
-	if base := strings.TrimSuffix(filepath.Base(record.Path), filepath.Ext(record.Path)); record.Path != "" && base != record.ID {
-		return fmt.Errorf("finding id %s does not match path %s", record.ID, record.Path)
 	}
 	return nil
 }

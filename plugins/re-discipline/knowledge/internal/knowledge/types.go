@@ -24,7 +24,7 @@ const (
 	// marker, which is the exact failure the change exists to close. A stale
 	// index that is merely less useful can be tolerated; one that is less safe
 	// cannot.
-	ChunkerVersion = "section-block-v5-1400-byte-safe"
+	ChunkerVersion = "section-block-v6-finding-freshness"
 	// BootstrapSchemaVersion is the .re-discipline/config.json contract. The
 	// 0.8 hard cutover adds campaign state, authority, bounded-context,
 	// payload, closure, and explicit-migration policy to the former knowledge
@@ -67,16 +67,17 @@ func CitationDurability(tier string) string {
 }
 
 type BootstrapConfig struct {
-	SchemaVersion         int             `json:"schemaVersion"`
-	CampaignSchemaVersion int             `json:"campaignSchemaVersion"`
-	State                 StateConfig     `json:"state"`
-	Authority             AuthorityConfig `json:"authority"`
-	Context               ContextConfig   `json:"context"`
-	Payload               PayloadConfig   `json:"payload"`
-	Closure               ClosureConfig   `json:"closure"`
-	Memory                MemoryConfig    `json:"memory"`
-	Knowledge             KnowledgeConfig `json:"knowledge"`
-	Migration             MigrationConfig `json:"migration"`
+	SchemaVersion         int              `json:"schemaVersion"`
+	CampaignSchemaVersion int              `json:"campaignSchemaVersion"`
+	State                 StateConfig      `json:"state"`
+	Authority             AuthorityConfig  `json:"authority"`
+	Context               ContextConfig    `json:"context"`
+	Payload               PayloadConfig    `json:"payload"`
+	ReviewLoad            ReviewLoadConfig `json:"reviewLoad"`
+	Closure               ClosureConfig    `json:"closure"`
+	Memory                MemoryConfig     `json:"memory"`
+	Knowledge             KnowledgeConfig  `json:"knowledge"`
+	Migration             MigrationConfig  `json:"migration"`
 }
 
 type StateConfig struct {
@@ -106,6 +107,14 @@ type PayloadConfig struct {
 	CreateLazily        bool `json:"createLazily"`
 	MaxInlineBytes      int  `json:"maxInlineBytes"`
 	RequireRegistration bool `json:"requireRegistration"`
+}
+
+// ReviewLoadConfig makes manager attention an explicit, measurable budget.
+// Receipts copy these values and bind their canonical digest so a later config
+// edit cannot silently reinterpret an earlier pilot measurement.
+type ReviewLoadConfig struct {
+	TargetMinutesPerPacket  int `json:"targetMinutesPerPacket"`
+	TargetPacketsPerSession int `json:"targetPacketsPerSession"`
 }
 
 type ClosureConfig struct {
@@ -208,15 +217,16 @@ type EffectiveProfile struct {
 	Lanes          []string          `json:"lanes"`
 	Weights        map[string]int    `json:"weights"`
 	RRFK           int               `json:"rrfK"`
-	RerankDepth    int               `json:"rerankDepth"`
 	MaxPerDocument int               `json:"maxPerDocument"`
 	Packing        PackingPolicy     `json:"packing"`
 	Benchmark      BenchmarkEvidence `json:"benchmark"`
 }
 
+// ModelRequirements binds an executable profile row to the exact local
+// embedding declared by the model manifest. Reranking is intentionally absent:
+// the controlled project benchmark measured no rerank benefit in 64 cases.
 type ModelRequirements struct {
 	Embedding *string `json:"embedding"`
-	Reranker  *string `json:"reranker"`
 }
 
 type PackingPolicy struct {
@@ -555,12 +565,11 @@ type Citation struct {
 
 type SearchResult struct {
 	ChunkID string `json:"chunkId"`
-	// Score, Rerank and LaneRanks are ranking diagnostics. Nothing outside the
+	// Score and LaneRanks are ranking diagnostics. Nothing outside the
 	// retriever reads them, and no caller can act on them, so compact responses
 	// drop them. A packed result always carries a positive fusion score, so
 	// omitempty never hides a real value in a verbose response.
 	Score     int64          `json:"score,omitempty"`
-	Rerank    int64          `json:"rerankScore,omitempty"`
 	LaneRanks map[string]int `json:"laneRanks,omitempty"`
 	Passage   string         `json:"passage"`
 	// DocumentContext is the epistemic header of the document this passage
@@ -634,11 +643,12 @@ type SearchResponse struct {
 	// serialized, and the budget stays a hard ceiling - but a caller that wants
 	// to know what epistemic safety costs it can now read that separately
 	// instead of inferring it.
-	ContextTokens   int               `json:"contextTokens,omitempty"`
-	Results         []SearchResult    `json:"results"`
-	Omitted         int               `json:"omitted"`
-	OmittedByReason map[string]int    `json:"omittedByReason"`
-	Metadata        RetrievalMetadata `json:"metadata"`
+	ContextTokens     int                `json:"contextTokens,omitempty"`
+	Results           []SearchResult     `json:"results"`
+	TierDisagreements []TierDisagreement `json:"tierDisagreements,omitempty"`
+	Omitted           int                `json:"omitted"`
+	OmittedByReason   map[string]int     `json:"omittedByReason"`
+	Metadata          RetrievalMetadata  `json:"metadata"`
 }
 
 // ContextPackTarget identifies the authority boundary a pack is compiled
@@ -694,6 +704,7 @@ type ContextPack struct {
 	Scope               ContextPackScope          `json:"scope"`
 	Generation          ContextGenerationIdentity `json:"generation"`
 	Role                string                    `json:"role"`
+	WriteGrants         []WriteGrant              `json:"writeGrants,omitempty"`
 	AllowedTiers        []string                  `json:"allowedTiers"`
 	RequestedProfile    string                    `json:"requestedProfile"`
 	EffectiveProfile    string                    `json:"effectiveProfile"`
@@ -744,6 +755,7 @@ type EvalCase struct {
 	Split                string         `json:"split"`
 	Query                string         `json:"query"`
 	QueryClass           string         `json:"queryClass"`
+	VocabularyPolicy     string         `json:"vocabularyPolicy,omitempty"`
 	AllowedTiers         []string       `json:"allowedTiers"`
 	CorpusSnapshot       string         `json:"corpusSnapshot"`
 	ExpectedPaths        []string       `json:"expectedPaths"`

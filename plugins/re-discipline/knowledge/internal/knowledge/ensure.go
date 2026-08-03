@@ -2,9 +2,11 @@ package knowledge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -32,6 +34,24 @@ func EnsureProject(
 	if versionErr != nil {
 		return nil, versionErr
 	}
+	if migration, exists, migrationErr := projectMigrationState(projectRoot); migrationErr != nil {
+		return nil, migrationErr
+	} else if exists && migration.State != "migrated" {
+		system := map[string]any{
+			"status": "attention", "projectStateVersion": projectVersion,
+			"attention":            "migration transaction is incomplete; use migrate-project status or resume; ordinary recovery, indexing, reads, and writes are disabled",
+			"migrationState":       migration.State,
+			"migrationTransaction": migration.TransactionID,
+		}
+		payload := map[string]any{"user": BuildUserStatus(system), "system": system}
+		payload["ensure"] = map[string]any{
+			"migrated": false, "repairs": []string{}, "budgetExhausted": false,
+			"projectStateVersion": projectVersion, "attention": system["attention"],
+		}
+		return payload, nil
+	} else if exists && projectVersion != "0.8" {
+		return nil, errors.New("ratified migration state exists without a valid 0.8 project state")
+	}
 	// Migration is never a session-start side effect. A 0.7 (or older)
 	// project remains completely unchanged until the manager previews a stable
 	// plan and applies its exact digest through migrate-project.
@@ -49,7 +69,6 @@ func EnsureProject(
 		}
 		return payload, nil
 	}
-
 	if recovery, recoverErr := RecoverProject(projectRoot, pluginRoot); recoverErr != nil {
 		repairs = append(repairs, "recovery unavailable: "+recoverErr.Error())
 	} else {
@@ -91,8 +110,9 @@ func EnsureProject(
 }
 
 // DetectProjectStateVersion is a read-only campaign-schema check. Bootstrap
-// configuration and campaign-state schemas are independent; only the
-// canonical state head or canonical campaign records identify a 0.8 project.
+// configuration and campaign-state schemas are independent. A valid state
+// head or campaign record identifies 0.8 directly; the exact shared-laws
+// handshake also identifies a damaged but recoverable 0.8 control plane.
 func DetectProjectStateVersion(projectRoot string) (string, error) {
 	boundary, err := NewBoundary(projectRoot)
 	if err != nil {
@@ -111,6 +131,27 @@ func DetectProjectStateVersion(projectRoot string) (string, error) {
 	} else if !os.IsNotExist(statErr) {
 		return "", statErr
 	}
+	// Any surviving 0.8-only control-plane shape makes the project 0.8 (or a
+	// damaged/mixed 0.8 project), even when its head is missing. The explicit
+	// 0.7 migrator must never reinterpret a partial 0.8 tree as legacy prose.
+	stateRoot := filepath.Join(boundary.Root, ".re-discipline", "state")
+	if info, statErr := os.Lstat(stateRoot); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("0.8 state root is a symbolic link")
+		}
+		return "0.8", nil
+	} else if !os.IsNotExist(statErr) {
+		return "", statErr
+	}
+	archiveRoot := filepath.Join(boundary.Root, "docs", "history", "campaigns")
+	if info, statErr := os.Lstat(archiveRoot); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("0.8 campaign archive root is a symbolic link")
+		}
+		return "0.8", nil
+	} else if !os.IsNotExist(statErr) {
+		return "", statErr
+	}
 	active := filepath.Join(boundary.Root, "active")
 	entries, readErr := os.ReadDir(active)
 	if readErr != nil && !os.IsNotExist(readErr) {
@@ -120,10 +161,33 @@ func DetectProjectStateVersion(projectRoot string) (string, error) {
 		if !entry.IsDir() || !managedSlugRE.MatchString(entry.Name()) {
 			continue
 		}
-		path := filepath.Join(active, entry.Name(), "campaign.json")
-		if info, statErr := os.Lstat(path); statErr == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+		campaignRoot := filepath.Join(active, entry.Name())
+		for _, name := range []string{"campaign.json", "STATE.md", "work-items", "runs", "events", "closure"} {
+			path := filepath.Join(campaignRoot, name)
+			if info, statErr := os.Lstat(path); statErr == nil {
+				if info.Mode()&os.ModeSymlink != 0 {
+					return "", fmt.Errorf("0.8 campaign path %s is a symbolic link", filepath.ToSlash(filepath.Join("active", entry.Name(), name)))
+				}
+				return "0.8", nil
+			} else if !os.IsNotExist(statErr) {
+				return "", statErr
+			}
+		}
+	}
+	profile := filepath.Join(boundary.Root, ".re-discipline", "project-profile.md")
+	if info, statErr := os.Lstat(profile); statErr == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("project profile is not a regular file")
+		}
+		body, readErr := os.ReadFile(profile)
+		if readErr != nil {
+			return "", readErr
+		}
+		if strings.Contains(string(body), SharedLawsMarker) {
 			return "0.8", nil
 		}
+	} else if !os.IsNotExist(statErr) {
+		return "", statErr
 	}
 	return "0.7", nil
 }

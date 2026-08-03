@@ -23,6 +23,7 @@ type ContextPackRequest struct {
 	Tiers         []string          `json:"tiers,omitempty"`
 	TokenBudget   int               `json:"tokenBudget,omitempty"`
 	RequiredPaths []string          `json:"requiredPaths,omitempty"`
+	WriteGrants   []WriteGrant      `json:"writeGrants,omitempty"`
 }
 
 type compiledContextScope struct {
@@ -121,6 +122,13 @@ func (service *Service) compileContextPack(
 	if err != nil {
 		return ContextPack{}, err
 	}
+	writeGrants, err := NormalizeWriteGrants(request.WriteGrants)
+	if err != nil {
+		return ContextPack{}, err
+	}
+	if request.Target.Kind != "active-run" && len(writeGrants) != 0 {
+		return ContextPack{}, errors.New("project write grants are valid only for active-run context packs")
+	}
 	settings := service.effectiveSettings()
 	roleBudget := settings.Budgets.ManagerContextTokens
 	if request.Role == "drafter" {
@@ -197,6 +205,7 @@ func (service *Service) compileContextPack(
 		SchemaVersion: CampaignSchemaVersion,
 		Task:          request.Task, Scope: state.scope,
 		Generation: CompactContextGeneration(generation), Role: request.Role,
+		WriteGrants:  writeGrants,
 		AllowedTiers: tiers, RequestedProfile: selected.RequestedIdentity,
 		EffectiveProfile: selected.EffectiveIdentity,
 		ActiveLanes:      append([]string(nil), selected.ActiveLanes...),
@@ -483,7 +492,7 @@ func (service *Service) compileContextCandidates(
 			AllowedValidities:   []string{"provisional", "current", "challenged", "historical"},
 			Limit:               5, TokenBudget: queryBudget,
 			IncludeRaw:  contains(tiers, "archive"),
-			suppressRaw: !contains(tiers, "archive"),
+			suppressRaw: !contains(tiers, "archive"), suppressProvenance: true,
 		}
 		if graph != nil {
 			options.CampaignID = graph.Campaign.ID

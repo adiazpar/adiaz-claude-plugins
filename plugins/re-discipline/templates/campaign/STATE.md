@@ -10,7 +10,7 @@
 
 <active work-item cards>
 
-## Blocked And Due-Deferred Work
+## Blocked And Due-Or-Near Deferred Work
 
 <bounded work-item cards>
 
@@ -22,6 +22,6 @@
 
 <decision handles and last event>
 
-## Next Valid Transitions
+## Recommended Transitions
 
 <engine-generated actions>

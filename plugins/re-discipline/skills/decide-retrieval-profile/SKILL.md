@@ -40,7 +40,8 @@ For `promote`, require:
 - a frozen-holdout full benchmark;
 - passing authority, privacy, citation, freshness, abstention, exact-target,
   deterministic-replay, and token-budget gates;
-- independent evidence for every declared effective fallback profile;
+- benchmark evidence for the sole declared effective profile, plus positive
+  holdout evidence before any removed lane can return;
 - no unreported regression against the accepted lexical baseline;
 - a recorded benchmark digest and approval target.
 
@@ -48,9 +49,9 @@ Reject stale or manually edited candidates. Re-run the explicit benchmark
 instead of waiving a failed gate.
 
 For `rollback`, require a previously accepted, content-hashed profile whose
-model requirements remain available and whose benchmark evidence remains
-valid for the current runtime. Treat an invalid rollback as a new candidate,
-not a shortcut.
+runtime identity remains compatible and whose benchmark evidence remains valid
+for the current runtime. Treat an invalid rollback as a new candidate, not a
+shortcut.
 
 ## Step 3: Apply The Explicit Action
 

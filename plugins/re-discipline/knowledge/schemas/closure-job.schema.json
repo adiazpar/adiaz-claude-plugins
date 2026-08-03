@@ -22,6 +22,7 @@
     "archiveDestination": {"type": "string"},
     "truthDigests": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}},
     "projectionDigests": {"type": "object", "propertyNames": {"type": "string", "minLength": 1}, "additionalProperties": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}},
+    "stagingDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "coverage": {"$ref": "closure-coverage.schema.json"},
     "archiveDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "blockers": {"type": "array", "items": {"type": "string"}}

@@ -89,6 +89,10 @@ type ContextPackOutcome struct {
 	QualityPassed           bool     `json:"qualityPassed"`
 	Passed                  bool     `json:"passed"`
 	Error                   string   `json:"error,omitempty"`
+	// Pack retains the exact compiled context artifact. Migration
+	// certification decodes and verifies these bytes, then recompiles the same
+	// request twice against the bound generation and compares the full value.
+	Pack json.RawMessage `json:"pack"`
 }
 
 // A v2 pack carries a generation identity, state-head scope, exact handles,
@@ -194,16 +198,29 @@ func ValidateEvalCorpus(cases []EvalCase) error {
 	if len(cases) == 0 || len(cases) > 10000 {
 		return errors.New("evaluation case set is empty")
 	}
-	seen := map[string]bool{}
+	seenIDs := map[string]bool{}
+	seenQueries := map[string]string{}
 	topicSplits := map[string]string{}
+	type splitOwner struct {
+		split  string
+		caseID string
+		label  string
+	}
+	judgmentPathSplits := map[string]splitOwner{}
 	for index := range cases {
 		eval := &cases[index]
-		if !managedSlugRE.MatchString(eval.ID) || seen[eval.ID] ||
+		queryIdentity := evaluationQueryIdentity(eval.Query)
+		if !managedSlugRE.MatchString(eval.ID) || seenIDs[eval.ID] ||
 			strings.TrimSpace(eval.Query) == "" ||
 			len([]byte(eval.Query)) > 1000 {
 			return errors.New("evaluation case IDs and queries must be unique and nonempty")
 		}
-		seen[eval.ID] = true
+		if prior := seenQueries[queryIdentity]; prior != "" {
+			return fmt.Errorf(
+				"evaluation query is repeated by cases %s and %s", prior, eval.ID)
+		}
+		seenIDs[eval.ID] = true
+		seenQueries[queryIdentity] = eval.ID
 		if eval.Role != "manager" && eval.Role != "drafter" {
 			return fmt.Errorf("case %s has invalid role", eval.ID)
 		}
@@ -222,6 +239,9 @@ func ValidateEvalCorpus(cases []EvalCase) error {
 			"provenance", "dependency", "contradiction":
 		default:
 			return fmt.Errorf("case %s has invalid query class", eval.ID)
+		}
+		if eval.VocabularyPolicy != "" && eval.VocabularyPolicy != "target-disjoint-v1" {
+			return fmt.Errorf("case %s has invalid vocabulary policy", eval.ID)
 		}
 		normalizedTiers, err := ValidateTierList(eval.AllowedTiers)
 		if err != nil {
@@ -279,12 +299,62 @@ func ValidateEvalCorpus(cases []EvalCase) error {
 		eval.MinimumEvidencePaths = SortedUnique(eval.MinimumEvidencePaths)
 		eval.HardNegativePaths = SortedUnique(eval.HardNegativePaths)
 		eval.ExpectedCitations = SortedUnique(eval.ExpectedCitations)
+		judgments := []struct {
+			label string
+			paths []string
+		}{
+			{"expected", eval.ExpectedPaths},
+			{"minimum-evidence", eval.MinimumEvidencePaths},
+			{"hard-negative", eval.HardNegativePaths},
+			{"citation", eval.ExpectedCitations},
+		}
+		for _, judgment := range judgments {
+			for _, path := range judgment.paths {
+				if previous, exists := judgmentPathSplits[path]; exists && previous.split != eval.Split {
+					return fmt.Errorf(
+						"evaluation path %q leaks across %s case %s (%s) and %s case %s (%s)",
+						path, previous.split, previous.caseID, previous.label,
+						eval.Split, eval.ID, judgment.label)
+				}
+				if _, exists := judgmentPathSplits[path]; !exists {
+					judgmentPathSplits[path] = splitOwner{
+						split: eval.Split, caseID: eval.ID, label: judgment.label,
+					}
+				}
+			}
+		}
 		if *eval.Answerable && len(eval.ExpectedPaths) == 0 {
 			return fmt.Errorf("answerable case %s has no relevant paths", eval.ID)
+		}
+		if eval.VocabularyPolicy != "" {
+			if !*eval.Answerable || eval.QueryClass == "exact" {
+				return fmt.Errorf(
+					"case %s may apply target-disjoint vocabulary policy only to an answerable semantic query",
+					eval.ID,
+				)
+			}
+			if len(evaluationVocabularyTerms(eval.Query)) < 3 {
+				return fmt.Errorf(
+					"case %s target-disjoint query has fewer than three measured terms",
+					eval.ID,
+				)
+			}
 		}
 		if !*eval.Answerable && (len(eval.ExpectedPaths) != 0 ||
 			len(eval.MinimumEvidencePaths) != 0 || len(eval.ExpectedCitations) != 0) {
 			return fmt.Errorf("unanswerable case %s declares expected evidence", eval.ID)
+		}
+		// An authority-wall abstention names the forbidden evidence explicitly as
+		// a hard negative. A corpus-absence abstention has no such evidence, so it
+		// must use one analyzer-atomic exact token. Otherwise a synthetic-looking
+		// raw string such as "absent_layout_123" is split into ordinary terms and
+		// can retrieve eligible documents even though the raw string is absent.
+		if !*eval.Answerable && len(eval.HardNegativePaths) == 0 &&
+			(eval.QueryClass != "exact" || !isAnalyzerAtomicEvalToken(eval.Query)) {
+			return fmt.Errorf(
+				"corpus-absence case %s must use one analyzer-atomic exact token",
+				eval.ID,
+			)
 		}
 		for _, path := range append(
 			append([]string(nil), eval.MinimumEvidencePaths...),
@@ -306,6 +376,18 @@ func ValidateEvalCorpus(cases []EvalCase) error {
 		}
 	}
 	return nil
+}
+
+func evaluationQueryIdentity(query string) string {
+	return strings.ToLower(strings.Join(strings.Fields(query), " "))
+}
+
+func isAnalyzerAtomicEvalToken(query string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	identifierTerms := IdentifierTerms(query)
+	lexicalTerms := modelTokens(query)
+	return len(identifierTerms) == 1 && identifierTerms[0] == normalized &&
+		len(lexicalTerms) == 1 && lexicalTerms[0] == normalized
 }
 
 func validateEvalPath(value string) error {
@@ -385,7 +467,7 @@ func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (Benchmar
 	if mode == "quick" {
 		rows = nil
 		for _, row := range profile.EffectiveProfiles {
-			if row.Requires.Embedding == nil && row.Requires.Reranker == nil {
+			if row.Requires.Embedding == nil {
 				rows = []EffectiveProfile{row}
 				break
 			}
@@ -439,7 +521,7 @@ func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (Benchmar
 	if mode == "full" && len(report.Profiles) > 1 {
 		baselineIndex := -1
 		for index, row := range rows {
-			if row.Requires.Embedding == nil && row.Requires.Reranker == nil {
+			if row.Requires.Embedding == nil {
 				baselineIndex = index
 				break
 			}
@@ -749,9 +831,10 @@ func (service *Service) EvidencePinCensus() EvidencePinHealth {
 	return health
 }
 
-// classifyEvidencePin decides one pinned document's state. A pin's claim digest
-// is the gate and its content digest is advisory, so an unreadable document and
-// a rewritten claim are the same kind of news and a reworded paragraph is not.
+// classifyEvidencePin decides one pinned document's state. Typed documents with
+// an extractable claim use that claim as the semantic gate and treat other byte
+// changes as advisory drift. Documents without an extractable claim have no
+// smaller trustworthy semantic identity, so their content digest is the gate.
 func classifyEvidencePin(root string, pin EvidencePin) string {
 	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(pin.Path)))
 	if err != nil {
@@ -760,11 +843,19 @@ func classifyEvidencePin(root string, pin EvidencePin) string {
 	if ClaimDigest(string(body), pin.Path) != pin.ClaimSha256 {
 		return "broken"
 	}
+	if evidencePinRequiresContentIdentity(string(body), pin.Path) &&
+		(pin.ContentSha256 == "" || pin.ContentSha256 != "sha256:"+SHA256Bytes(body)) {
+		return "broken"
+	}
 	if pin.ContentSha256 != "" &&
 		pin.ContentSha256 != "sha256:"+SHA256Bytes(body) {
 		return "drifted"
 	}
 	return "intact"
+}
+
+func evidencePinRequiresContentIdentity(body, path string) bool {
+	return strings.TrimSpace(ExtractDocumentPrelude(body, path).Claim) == ""
 }
 
 // HardNegativeCoverage reports how much of an evaluation set actually exercises
@@ -779,6 +870,99 @@ type HardNegativeCoverage struct {
 	CasesWithNegatives int `json:"casesWithNegatives"`
 	TotalCases         int `json:"totalCases"`
 	DeclaredPaths      int `json:"declaredPaths"`
+}
+
+type EvalVocabularyFailure struct {
+	CaseID           string   `json:"caseId"`
+	ExpectedPaths    []string `json:"expectedPaths"`
+	OverlappingTerms []string `json:"overlappingTerms"`
+}
+
+// EvalVocabularyReport measures cases that explicitly declare a target-doc
+// disjointness policy. It is both an authoring receipt and a benchmark gate:
+// a declared semantic paraphrase may not share any measured content term with
+// the full text of any expected document.
+type EvalVocabularyReport struct {
+	SchemaVersion int                     `json:"schemaVersion"`
+	Policy        string                  `json:"policy"`
+	DeclaredCases int                     `json:"declaredCases"`
+	PassedCases   int                     `json:"passedCases"`
+	FailedCases   int                     `json:"failedCases"`
+	Failures      []EvalVocabularyFailure `json:"failures,omitempty"`
+}
+
+var evaluationVocabularyStopWords = map[string]bool{
+	"about": true, "across": true, "after": true, "again": true,
+	"against": true, "already": true, "alone": true, "also": true,
+	"among": true, "another": true, "around": true, "because": true,
+	"before": true, "being": true, "between": true, "both": true,
+	"campaign": true, "closed": true, "completed": true, "could": true,
+	"current": true, "delivered": true, "document": true, "does": true,
+	"drafter": true, "during": true, "each": true, "effort": true,
+	"either": true, "file": true, "find": true, "following": true,
+	"found": true, "from": true, "game": true, "have": true,
+	"here": true, "historical": true, "into": true, "investigation": true,
+	"instead": true, "live": true, "maintained": true, "manager": true, "more": true,
+	"most": true, "must": true, "needs": true, "only": true,
+	"open": true, "other": true, "over": true, "owns": true,
+	"plus": true, "produced": true, "project": true, "rather": true,
+	"ready": true, "record": true, "retrospective": true, "should": true,
+	"source": true, "still": true, "than": true, "that": true,
+	"their": true, "them": true, "then": true, "there": true,
+	"these": true, "they": true, "this": true, "those": true,
+	"through": true, "tool": true, "under": true, "until": true,
+	"using": true, "wait": true, "were": true, "what": true,
+	"when": true, "where": true, "which": true, "while": true,
+	"with": true, "without": true, "would": true, "your": true,
+}
+
+func evaluationVocabularyTerms(value string) []string {
+	terms := []string{}
+	for _, term := range IdentifierTerms(value) {
+		if len(term) >= 4 && !evaluationVocabularyStopWords[term] {
+			terms = append(terms, term)
+		}
+	}
+	return SortedUnique(terms)
+}
+
+func MeasureEvalVocabularyDisjoint(root string, cases []EvalCase) (EvalVocabularyReport, error) {
+	report := EvalVocabularyReport{
+		SchemaVersion: 1, Policy: "target-disjoint-v1",
+	}
+	for _, eval := range cases {
+		if eval.VocabularyPolicy != report.Policy {
+			continue
+		}
+		report.DeclaredCases++
+		targetTerms := map[string]bool{}
+		for _, path := range eval.ExpectedPaths {
+			body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+			if err != nil {
+				return EvalVocabularyReport{}, fmt.Errorf(
+					"case %s vocabulary target %s: %w", eval.ID, path, err)
+			}
+			for _, term := range evaluationVocabularyTerms(string(body)) {
+				targetTerms[term] = true
+			}
+		}
+		overlap := []string{}
+		for _, term := range evaluationVocabularyTerms(eval.Query) {
+			if targetTerms[term] {
+				overlap = append(overlap, term)
+			}
+		}
+		if len(overlap) == 0 {
+			report.PassedCases++
+			continue
+		}
+		report.FailedCases++
+		report.Failures = append(report.Failures, EvalVocabularyFailure{
+			CaseID: eval.ID, ExpectedPaths: append([]string(nil), eval.ExpectedPaths...),
+			OverlappingTerms: overlap,
+		})
+	}
+	return report, nil
 }
 
 func MeasureHardNegativeCoverage(cases []EvalCase) HardNegativeCoverage {
@@ -806,42 +990,53 @@ type EvalPinChange struct {
 
 // EvalPinReport is the outcome of recomputing evidence pins.
 type EvalPinReport struct {
-	SchemaVersion int             `json:"schemaVersion"`
-	Cases         int             `json:"cases"`
-	Pinned        int             `json:"pinned"`
-	Added         []EvalPinChange `json:"added"`
-	ClaimChanged  []EvalPinChange `json:"claimChanged"`
-	ContentDrift  []EvalPinChange `json:"contentDrift"`
-	Applied       bool            `json:"applied"`
+	SchemaVersion int                  `json:"schemaVersion"`
+	Cases         int                  `json:"cases"`
+	Pinned        int                  `json:"pinned"`
+	Added         []EvalPinChange      `json:"added"`
+	ClaimChanged  []EvalPinChange      `json:"claimChanged"`
+	ContentDrift  []EvalPinChange      `json:"contentDrift"`
+	Vocabulary    EvalVocabularyReport `json:"vocabulary"`
+	Applied       bool                 `json:"applied"`
 }
 
 // PinEvalCases recomputes evidence pins for every project evaluation case.
 //
-// A pin whose document changed only its prose is refreshed silently. A pin
-// whose CLAIM changed is reported and, unless force is set, not written: the
-// case's ground truth may no longer hold, and re-stamping without re-answering
-// would make the evaluator assert that a rewritten document still supports the
-// original query. That is measurement capture, and it is worse than a stale
-// pin because it looks like a passing test.
+// A typed pin whose document changed only outside its extractable claim is
+// refreshed silently. A changed claim, or any byte change to a document that
+// has no extractable claim, is reported and, unless force is set, not written:
+// the case's ground truth may no longer hold, and re-stamping without
+// re-answering would make the evaluator assert that a rewritten document still
+// supports the original query. That is measurement capture, and it is worse
+// than a stale pin because it looks like a passing test.
 func (service *Service) PinEvalCases(apply, force bool) (EvalPinReport, error) {
 	report := EvalPinReport{SchemaVersion: 1}
+	allCases := []EvalCase{}
 	root := filepath.Join(service.Boundary.Root, ".re-discipline", "knowledge", "evals")
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return EvalPinReport{}, err
 	}
-	digestFor := map[string][2]string{}
-	resolve := func(path string) ([2]string, bool) {
+	type pinDigestPair struct {
+		claim           string
+		content         string
+		contentIdentity bool
+	}
+	digestFor := map[string]pinDigestPair{}
+	resolve := func(path string) (pinDigestPair, bool) {
 		if cached, ok := digestFor[path]; ok {
-			return cached, cached[0] != ""
+			return cached, cached.claim != ""
 		}
 		body, readErr := os.ReadFile(
 			filepath.Join(service.Boundary.Root, filepath.FromSlash(path)))
 		if readErr != nil {
-			digestFor[path] = [2]string{}
-			return [2]string{}, false
+			digestFor[path] = pinDigestPair{}
+			return pinDigestPair{}, false
 		}
-		pair := [2]string{ClaimDigest(string(body), path), "sha256:" + SHA256Bytes(body)}
+		pair := pinDigestPair{
+			claim: ClaimDigest(string(body), path), content: "sha256:" + SHA256Bytes(body),
+			contentIdentity: evidencePinRequiresContentIdentity(string(body), path),
+		}
 		digestFor[path] = pair
 		return pair, true
 	}
@@ -855,6 +1050,7 @@ func (service *Service) PinEvalCases(apply, force bool) (EvalPinReport, error) {
 		if loadErr != nil {
 			return EvalPinReport{}, loadErr
 		}
+		allCases = append(allCases, cases...)
 		changed := false
 		for index := range cases {
 			eval := &cases[index]
@@ -882,7 +1078,7 @@ func (service *Service) PinEvalCases(apply, force bool) (EvalPinReport, error) {
 					continue
 				}
 				fresh := EvidencePin{
-					Path: path, ClaimSha256: pair[0], ContentSha256: pair[1],
+					Path: path, ClaimSha256: pair.claim, ContentSha256: pair.content,
 				}
 				old, had := previous[path]
 				switch {
@@ -901,6 +1097,15 @@ func (service *Service) PinEvalCases(apply, force bool) (EvalPinReport, error) {
 						// Keep the ratified pin so the case reports stale
 						// rather than silently re-anchoring to a claim nobody
 						// has re-answered the query against.
+						fresh = old
+					}
+				case pair.contentIdentity && old.ContentSha256 != fresh.ContentSha256:
+					report.ClaimChanged = append(report.ClaimChanged, EvalPinChange{
+						CaseID: eval.ID, Path: path, Kind: "content-identity-changed",
+						OldDigest: old.ContentSha256, NewDigest: fresh.ContentSha256,
+						CaseQuery: eval.Query,
+					})
+					if !force {
 						fresh = old
 					}
 				case old.ContentSha256 != fresh.ContentSha256:
@@ -924,6 +1129,14 @@ func (service *Service) PinEvalCases(apply, force bool) (EvalPinReport, error) {
 			report.Applied = true
 		}
 	}
+	if err := ValidateEvalCorpus(allCases); err != nil {
+		return EvalPinReport{}, fmt.Errorf("combined project evaluation corpus: %w", err)
+	}
+	vocabulary, err := MeasureEvalVocabularyDisjoint(service.Boundary.Root, allCases)
+	if err != nil {
+		return EvalPinReport{}, err
+	}
+	report.Vocabulary = vocabulary
 	return report, nil
 }
 
@@ -940,8 +1153,9 @@ func equalPins(left, right []EvidencePin) bool {
 }
 
 // evidencePinsIntact reports whether every document a case depends on still
-// asserts what it asserted when the case was ratified. Returns false if any
-// pinned document is unreadable or its claim has changed.
+// asserts what it asserted when the case was ratified. A document without an
+// extractable typed claim is content-addressed because its prose is the only
+// available semantic identity.
 func evidencePinsIntact(root string, pins []EvidencePin) bool {
 	if root == "" {
 		return false
@@ -952,6 +1166,10 @@ func evidencePinsIntact(root string, pins []EvidencePin) bool {
 			return false
 		}
 		if ClaimDigest(string(body), pin.Path) != pin.ClaimSha256 {
+			return false
+		}
+		if evidencePinRequiresContentIdentity(string(body), pin.Path) &&
+			(pin.ContentSha256 == "" || pin.ContentSha256 != "sha256:"+SHA256Bytes(body)) {
 			return false
 		}
 	}
@@ -1193,6 +1411,7 @@ func runContextPackCase(
 	outcome.CardCount = len(first.Cards)
 	outcome.SerializedBytes = len(body)
 	outcome.EstimatedTokens = first.EstimatedTokens
+	outcome.Pack = append(json.RawMessage(nil), body...)
 	outcome.ReplayIdentical = stableJSON(first) == stableJSON(second)
 	outcome.RoleCeilingSafe =
 		first.TokenBudget == effectiveBudget &&
@@ -1316,6 +1535,13 @@ func contextPackOutcomesForDigest(
 		normalized[index].PackID = ""
 		normalized[index].Digest = ""
 		normalized[index].Generation = ""
+		// The retained pack bytes embed the build's nonce generation id,
+		// worktree hash, and creation timestamp, so they can never reproduce
+		// across environments. Their semantic content is already digested
+		// through the outcome's paths, tiers, counts, and budget fields, and
+		// migration certification revalidates retained packs byte-for-byte
+		// against a rebound live recompilation.
+		normalized[index].Pack = nil
 	}
 	return normalized
 }
@@ -1659,6 +1885,12 @@ func validateContextPackSemantics(pack ContextPack) error {
 	if pack.Role != "manager" && pack.Role != "drafter" {
 		return errors.New("context pack role is invalid")
 	}
+	if err := ValidateCanonicalWriteGrants(pack.WriteGrants); err != nil {
+		return fmt.Errorf("context pack write grants: %w", err)
+	}
+	if pack.Scope.Kind != "active-run" && len(pack.WriteGrants) != 0 {
+		return errors.New("only active-run context packs may carry project write grants")
+	}
 	maximumBudget := 8192
 	if pack.Role == "drafter" {
 		maximumBudget = 4096
@@ -1678,7 +1910,7 @@ func validateContextPackSemantics(pack ContextPack) error {
 	laneSet := map[string]bool{}
 	for _, lane := range pack.ActiveLanes {
 		switch lane {
-		case "exact", "fts", "graph", "dense", "rerank":
+		case "exact", "fts", "graph", "dense":
 		default:
 			return fmt.Errorf("context pack has invalid active lane %q", lane)
 		}
@@ -1687,14 +1919,11 @@ func validateContextPackSemantics(pack ContextPack) error {
 		}
 		laneSet[lane] = true
 	}
-	if !laneSet["exact"] || !laneSet["fts"] || !laneSet["graph"] ||
-		laneSet["rerank"] && !laneSet["dense"] {
+	if !laneSet["exact"] || !laneSet["fts"] || !laneSet["graph"] {
 		return errors.New("context pack active-lane shape is invalid")
 	}
-	if laneSet["dense"] && len(pack.Models) == 0 ||
-		laneSet["rerank"] && len(pack.Models) < 2 ||
-		!laneSet["dense"] && len(pack.Models) != 0 {
-		return errors.New("context pack model set disagrees with active lanes")
+	if laneSet["dense"] != (len(pack.Models) == 1) {
+		return errors.New("context pack dense lane and embedding identity disagree")
 	}
 	modelIDs := map[string]bool{}
 	for _, identity := range pack.Models {
@@ -1862,38 +2091,46 @@ func validateContextPackScope(scope ContextPackScope) error {
 }
 
 type CalibrationCandidate struct {
-	Identity              string                    `json:"identity"`
-	Weights               map[string]int            `json:"weights"`
-	DevelopmentHit        int                       `json:"developmentHits"`
-	HoldoutHit            int                       `json:"holdoutHits"`
-	DevelopmentMetrics    QualityMetrics            `json:"developmentMetrics"`
-	HoldoutMetrics        QualityMetrics            `json:"holdoutMetrics"`
-	FindingDevelopment    *FindingEvaluationMetrics `json:"findingDevelopment,omitempty"`
-	FindingHoldout        *FindingEvaluationMetrics `json:"findingHoldout,omitempty"`
-	Violations            int                       `json:"violations"`
-	HardGatesPassed       bool                      `json:"hardGatesPassed"`
-	NonInferiorToBaseline bool                      `json:"nonInferiorToBaseline"`
-	Pareto                bool                      `json:"pareto"`
-	BenchmarkDigest       string                    `json:"benchmarkDigest,omitempty"`
+	Identity                string                    `json:"identity"`
+	Weights                 map[string]int            `json:"weights"`
+	DevelopmentCases        []CaseOutcome             `json:"developmentCases"`
+	HoldoutCases            []CaseOutcome             `json:"holdoutCases,omitempty"`
+	FindingDevelopmentCases []FindingCaseOutcome      `json:"findingDevelopmentCases,omitempty"`
+	FindingHoldoutCases     []FindingCaseOutcome      `json:"findingHoldoutCases,omitempty"`
+	DevelopmentHit          int                       `json:"developmentHits"`
+	HoldoutHit              int                       `json:"holdoutHits"`
+	DevelopmentMetrics      QualityMetrics            `json:"developmentMetrics"`
+	HoldoutMetrics          QualityMetrics            `json:"holdoutMetrics"`
+	FindingDevelopment      *FindingEvaluationMetrics `json:"findingDevelopment,omitempty"`
+	FindingHoldout          *FindingEvaluationMetrics `json:"findingHoldout,omitempty"`
+	Violations              int                       `json:"violations"`
+	HardGatesPassed         bool                      `json:"hardGatesPassed"`
+	NonInferiorToBaseline   bool                      `json:"nonInferiorToBaseline"`
+	Pareto                  bool                      `json:"pareto"`
+	BenchmarkDigest         string                    `json:"benchmarkDigest,omitempty"`
 }
 
 type CalibrationReport struct {
-	SchemaVersion       int                     `json:"schemaVersion"`
-	RunID               string                  `json:"runId"`
-	BaseProfile         string                  `json:"baseProfile"`
-	ActiveBefore        string                  `json:"activeBefore"`
-	ActiveAfter         string                  `json:"activeAfter"`
-	EvalDigest          string                  `json:"evalDigest"`
-	FindingSuiteDigests []string                `json:"findingSuiteDigests,omitempty"`
-	CorpusFingerprint   string                  `json:"corpusFingerprint"`
-	ModelFingerprint    string                  `json:"modelFingerprint"`
-	RuntimeContract     RuntimeContractIdentity `json:"runtimeContract"`
-	Candidates          []CalibrationCandidate  `json:"candidates"`
-	ParetoFrontier      []CalibrationCandidate  `json:"paretoFrontier"`
-	Recommended         CalibrationCandidate    `json:"recommended"`
-	CandidatePath       string                  `json:"candidatePath"`
-	CandidateDigest     string                  `json:"candidateDigest"`
-	Activated           bool                    `json:"activated"`
+	SchemaVersion               int                       `json:"schemaVersion"`
+	RunID                       string                    `json:"runId"`
+	BaseProfile                 string                    `json:"baseProfile"`
+	ActiveBefore                string                    `json:"activeBefore"`
+	ActiveAfter                 string                    `json:"activeAfter"`
+	EvalDigest                  string                    `json:"evalDigest"`
+	FindingSuiteDigests         []string                  `json:"findingSuiteDigests,omitempty"`
+	CorpusFingerprint           string                    `json:"corpusFingerprint"`
+	ModelFingerprint            string                    `json:"modelFingerprint"`
+	RuntimeContract             RuntimeContractIdentity   `json:"runtimeContract"`
+	BaselineHoldoutCases        []CaseOutcome             `json:"baselineHoldoutCases"`
+	BaselineHoldoutMetrics      QualityMetrics            `json:"baselineHoldoutMetrics"`
+	BaselineFindingHoldoutCases []FindingCaseOutcome      `json:"baselineFindingHoldoutCases,omitempty"`
+	BaselineFindingHoldout      *FindingEvaluationMetrics `json:"baselineFindingHoldout,omitempty"`
+	Candidates                  []CalibrationCandidate    `json:"candidates"`
+	ParetoFrontier              []CalibrationCandidate    `json:"paretoFrontier"`
+	Recommended                 CalibrationCandidate      `json:"recommended"`
+	CandidatePath               string                    `json:"candidatePath"`
+	CandidateDigest             string                    `json:"candidateDigest"`
+	Activated                   bool                      `json:"activated"`
 	// FailureReason is set when a sweep produced no promotable candidate. The
 	// report is still written so the measurements survive and the operator can
 	// see which gate blocked which candidate.
@@ -1981,7 +2218,7 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	baselineRetriever := Retriever{
 		Boundary: service.Boundary, Generation: generation, Profile: selected,
 	}
-	_, baselineHoldoutMetrics, err := evaluateRetrieverCases(
+	baselineHoldoutCases, baselineHoldoutMetrics, err := evaluateRetrieverCases(
 		ctx, baselineRetriever, holdoutCases)
 	if err != nil {
 		return CalibrationReport{}, fmt.Errorf(
@@ -1990,6 +2227,7 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	baselineHoldoutMetrics = ratchetBaseline(
 		selected.Effective.Benchmark, baselineHoldoutMetrics)
 	var baselineFindingHoldout *FindingEvaluationMetrics
+	var baselineFindingHoldoutCases []FindingCaseOutcome
 	if len(findingHoldoutCases) > 0 {
 		findingReport, err := EvaluateFindingRetriever(
 			ctx, baselineRetriever, findingHoldoutCases)
@@ -1999,60 +2237,76 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 		}
 		metrics := findingReport.MetricsBySplit["holdout"]
 		baselineFindingHoldout = &metrics
+		baselineFindingHoldoutCases = append(
+			[]FindingCaseOutcome(nil), findingReport.Cases...)
 	}
 	candidates := []CalibrationCandidate{}
 	rowsByIdentity := map[string]EffectiveProfile{}
-	findingDevelopmentCache := map[string]FindingEvaluationMetrics{}
+	type calibrationFindingMeasurement struct {
+		Metrics FindingEvaluationMetrics
+		Cases   []FindingCaseOutcome
+	}
+	findingDevelopmentCache := map[string]calibrationFindingMeasurement{}
+	denseWeight := selected.Effective.Weights["dense"]
+	if denseWeight <= 0 {
+		return CalibrationReport{}, errors.New(
+			"calibration requires the selected dense-lane weight")
+	}
 	for _, exact := range []int{6, 8, 10} {
 		for _, fts := range []int{4, 6, 8} {
 			for _, graph := range []int{1, 2, 3} {
-				for _, dense := range []int{2, 4, 6} {
-					row := cloneEffectiveProfile(selected.Effective)
-					row.Weights = map[string]int{
-						"exact": exact, "fts": fts, "graph": graph, "dense": dense,
-					}
-					candidateProfile, err := selectedForRow(
-						service.ProfileCatalog.ProfileID, row, selected.Runtime, selected.Models,
-					)
-					if err != nil {
-						return CalibrationReport{}, err
-					}
-					retriever := Retriever{
-						Boundary: service.Boundary, Generation: generation, Profile: candidateProfile,
-					}
-					outcomes, metrics, err := evaluateRetrieverCases(ctx, retriever, developmentCases)
-					if err != nil {
-						return CalibrationReport{}, err
-					}
-					hits := relevantPathHits(outcomes)
-					candidate := CalibrationCandidate{
-						Identity: candidateProfile.EffectiveIdentity,
-						Weights:  cloneWeights(row.Weights), DevelopmentHit: hits,
-						DevelopmentMetrics: metrics,
-						Violations: metrics.AuthorityViolations + metrics.CitationViolations +
-							metrics.HardNegativeHits,
-						HardGatesPassed: hardMetricsPassed(metrics),
-					}
-					if len(findingDevelopmentCases) > 0 {
-						cacheKey := findingCalibrationWeightKey(row.Weights)
-						findingMetrics, cached := findingDevelopmentCache[cacheKey]
-						if !cached {
-							findingReport, findingErr := EvaluateFindingRetriever(
-								ctx, retriever, findingDevelopmentCases)
-							if findingErr != nil {
-								return CalibrationReport{}, findingErr
-							}
-							findingMetrics = findingReport.MetricsBySplit["development"]
-							findingDevelopmentCache[cacheKey] = findingMetrics
-						}
-						candidate.FindingDevelopment = &findingMetrics
-						candidate.Violations += findingMetrics.HardNegativeHits
-						candidate.HardGatesPassed = candidate.HardGatesPassed &&
-							findingCalibrationMetricsPassed(findingMetrics)
-					}
-					candidates = append(candidates, candidate)
-					rowsByIdentity[candidate.Identity] = row
+				row := cloneEffectiveProfile(selected.Effective)
+				row.Weights = map[string]int{
+					"exact": exact, "fts": fts, "graph": graph, "dense": denseWeight,
 				}
+				candidateProfile, err := selectedForRow(
+					service.ProfileCatalog.ProfileID, row, selected.Runtime, selected.Models,
+				)
+				if err != nil {
+					return CalibrationReport{}, err
+				}
+				retriever := Retriever{
+					Boundary: service.Boundary, Generation: generation, Profile: candidateProfile,
+				}
+				outcomes, metrics, err := evaluateRetrieverCases(ctx, retriever, developmentCases)
+				if err != nil {
+					return CalibrationReport{}, err
+				}
+				hits := relevantPathHits(outcomes)
+				candidate := CalibrationCandidate{
+					Identity: candidateProfile.EffectiveIdentity,
+					Weights:  cloneWeights(row.Weights), DevelopmentHit: hits,
+					DevelopmentCases:   append([]CaseOutcome(nil), outcomes...),
+					DevelopmentMetrics: metrics,
+					Violations: metrics.AuthorityViolations + metrics.CitationViolations +
+						metrics.HardNegativeHits,
+					HardGatesPassed: hardMetricsPassed(metrics),
+				}
+				if len(findingDevelopmentCases) > 0 {
+					cacheKey := findingCalibrationWeightKey(row.Weights)
+					measurement, cached := findingDevelopmentCache[cacheKey]
+					if !cached {
+						findingReport, findingErr := EvaluateFindingRetriever(
+							ctx, retriever, findingDevelopmentCases)
+						if findingErr != nil {
+							return CalibrationReport{}, findingErr
+						}
+						measurement = calibrationFindingMeasurement{
+							Metrics: findingReport.MetricsBySplit["development"],
+							Cases:   append([]FindingCaseOutcome(nil), findingReport.Cases...),
+						}
+						findingDevelopmentCache[cacheKey] = measurement
+					}
+					findingMetrics := measurement.Metrics
+					candidate.FindingDevelopment = &findingMetrics
+					candidate.FindingDevelopmentCases = append(
+						[]FindingCaseOutcome(nil), measurement.Cases...)
+					candidate.Violations += findingMetrics.HardNegativeHits
+					candidate.HardGatesPassed = candidate.HardGatesPassed &&
+						findingCalibrationMetricsPassed(findingMetrics)
+				}
+				candidates = append(candidates, candidate)
+				rowsByIdentity[candidate.Identity] = row
 			}
 		}
 	}
@@ -2068,7 +2322,7 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 		}
 		return CalibrationReport{}, errors.New(reason)
 	}
-	findingHoldoutCache := map[string]FindingEvaluationMetrics{}
+	findingHoldoutCache := map[string]calibrationFindingMeasurement{}
 	for _, index := range frontierIndexes {
 		row := rowsByIdentity[candidates[index].Identity]
 		candidateProfile, err := selectedForRow(
@@ -2085,6 +2339,7 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 			return CalibrationReport{}, err
 		}
 		candidates[index].HoldoutHit = relevantPathHits(outcomes)
+		candidates[index].HoldoutCases = append([]CaseOutcome(nil), outcomes...)
 		candidates[index].HoldoutMetrics = metrics
 		candidates[index].Pareto = true
 		candidates[index].HardGatesPassed =
@@ -2093,17 +2348,23 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 			calibrationNonInferior(metrics, baselineHoldoutMetrics)
 		if len(findingHoldoutCases) > 0 {
 			cacheKey := findingCalibrationWeightKey(row.Weights)
-			findingMetrics, cached := findingHoldoutCache[cacheKey]
+			measurement, cached := findingHoldoutCache[cacheKey]
 			if !cached {
 				findingReport, findingErr := EvaluateFindingRetriever(
 					ctx, retriever, findingHoldoutCases)
 				if findingErr != nil {
 					return CalibrationReport{}, findingErr
 				}
-				findingMetrics = findingReport.MetricsBySplit["holdout"]
-				findingHoldoutCache[cacheKey] = findingMetrics
+				measurement = calibrationFindingMeasurement{
+					Metrics: findingReport.MetricsBySplit["holdout"],
+					Cases:   append([]FindingCaseOutcome(nil), findingReport.Cases...),
+				}
+				findingHoldoutCache[cacheKey] = measurement
 			}
+			findingMetrics := measurement.Metrics
 			candidates[index].FindingHoldout = &findingMetrics
+			candidates[index].FindingHoldoutCases = append(
+				[]FindingCaseOutcome(nil), measurement.Cases...)
 			candidates[index].Violations += findingMetrics.HardNegativeHits
 			candidates[index].HardGatesPassed = candidates[index].HardGatesPassed &&
 				findingCalibrationMetricsPassed(findingMetrics)
@@ -2214,11 +2475,16 @@ func (service *Service) Calibrate(ctx context.Context) (CalibrationReport, error
 	report := CalibrationReport{
 		SchemaVersion: 1, RunID: runID, BaseProfile: service.ProfileCatalog.ProfileID,
 		ActiveBefore: before, ActiveAfter: before, EvalDigest: evalDigest,
-		FindingSuiteDigests: findingSuiteDigests,
-		CorpusFingerprint:   generation.CorpusFingerprint,
-		ModelFingerprint:    mustDigest(service.ModelManifest.Models),
-		RuntimeContract:     RuntimeContract(selected.Runtime),
-		Candidates:          candidates, ParetoFrontier: frontier, Recommended: recommended,
+		FindingSuiteDigests:    findingSuiteDigests,
+		CorpusFingerprint:      generation.CorpusFingerprint,
+		ModelFingerprint:       mustDigest(service.ModelManifest.Models),
+		RuntimeContract:        RuntimeContract(selected.Runtime),
+		BaselineHoldoutCases:   append([]CaseOutcome(nil), baselineHoldoutCases...),
+		BaselineHoldoutMetrics: baselineHoldoutMetrics,
+		BaselineFindingHoldoutCases: append(
+			[]FindingCaseOutcome(nil), baselineFindingHoldoutCases...),
+		BaselineFindingHoldout: baselineFindingHoldout,
+		Candidates:             candidates, ParetoFrontier: frontier, Recommended: recommended,
 		CandidatePath: filepath.ToSlash(candidatePath), CandidateDigest: candidateDigest,
 		Activated: false,
 	}
@@ -2457,17 +2723,13 @@ func cloneEffectiveProfile(input EffectiveProfile) EffectiveProfile {
 	output := input
 	output.Lanes = append([]string(nil), input.Lanes...)
 	output.Weights = cloneWeights(input.Weights)
-	if input.Benchmark.RatifiedHardNegativeHits != nil {
-		hits := *input.Benchmark.RatifiedHardNegativeHits
-		output.Benchmark.RatifiedHardNegativeHits = &hits
-	}
 	if input.Requires.Embedding != nil {
 		value := *input.Requires.Embedding
 		output.Requires.Embedding = &value
 	}
-	if input.Requires.Reranker != nil {
-		value := *input.Requires.Reranker
-		output.Requires.Reranker = &value
+	if input.Benchmark.RatifiedHardNegativeHits != nil {
+		hits := *input.Benchmark.RatifiedHardNegativeHits
+		output.Benchmark.RatifiedHardNegativeHits = &hits
 	}
 	return output
 }
@@ -2505,6 +2767,10 @@ func selectedForRow(
 }
 
 func (service *Service) loadProjectEvalCases() ([]EvalCase, error) {
+	// Evaluation cases have one canonical root. The sibling measurements/
+	// directory contains output receipts and is deliberately never walked or
+	// decoded here, so a benchmark report cannot become a future benchmark
+	// input merely by being persisted.
 	root := filepath.Join(service.Boundary.Root, ".re-discipline", "knowledge", "evals")
 	canonicalRoot, err := canonicalExistingPath(root)
 	if err != nil {
@@ -2559,6 +2825,16 @@ func (service *Service) loadProjectEvalCases() ([]EvalCase, error) {
 	if err := ValidateEvalCorpus(cases); err != nil {
 		return nil, fmt.Errorf("combined project evaluation corpus: %w", err)
 	}
+	vocabulary, err := MeasureEvalVocabularyDisjoint(service.Boundary.Root, cases)
+	if err != nil {
+		return nil, err
+	}
+	if vocabulary.FailedCases != 0 {
+		return nil, fmt.Errorf(
+			"project evaluation corpus has %d target-vocabulary overlap failure(s)",
+			vocabulary.FailedCases,
+		)
+	}
 	return cases, nil
 }
 
@@ -2589,284 +2865,87 @@ type FindingEvalCase struct {
 }
 
 type FindingCaseOutcome struct {
-	CaseID                       string         `json:"caseId"`
-	Role                         string         `json:"role"`
-	Topic                        string         `json:"topic"`
-	Split                        string         `json:"split"`
-	QueryClass                   string         `json:"queryClass"`
-	Status                       string         `json:"status"`
-	CardIDs                      []string       `json:"cardIds"`
-	FindingIDs                   []string       `json:"findingIds"`
-	RawPaths                     []string       `json:"rawPaths"`
-	RelevantFindingRanks         []int          `json:"relevantFindingRanks"`
-	EvidenceHandlesFound         []string       `json:"evidenceHandlesFound"`
-	HardNegativeHits             []string       `json:"hardNegativeHits"`
-	LaneRelevantHits             map[string]int `json:"laneRelevantHits"`
-	UniqueRelevantFirstHits      map[string]int `json:"uniqueRelevantFirstHits"`
-	RerankDelta                  int            `json:"rerankDelta"`
-	NormalizedTokens             int            `json:"normalizedTokens"`
-	RawTokens                    int            `json:"rawTokens"`
-	AbstentionCorrect            bool           `json:"abstentionCorrect"`
-	EvidenceHandlesComplete      bool           `json:"evidenceHandlesComplete"`
-	FindingHandlesComplete       bool           `json:"findingHandlesComplete"`
-	SourceClassesAccurate        bool           `json:"sourceClassesAccurate"`
-	ReviewStatesAccurate         bool           `json:"reviewStatesAccurate"`
-	ValiditiesAccurate           bool           `json:"validitiesAccurate"`
-	VocabularyDisjointApplicable bool           `json:"vocabularyDisjointApplicable"`
-	ClaimVocabularyDisjoint      bool           `json:"claimVocabularyDisjoint"`
-	DurabilityLabelsAccurate     bool           `json:"durabilityLabelsAccurate"`
-	ReplayIdentical              bool           `json:"replayIdentical"`
+	CaseID                            string         `json:"caseId"`
+	Role                              string         `json:"role"`
+	Topic                             string         `json:"topic"`
+	Split                             string         `json:"split"`
+	QueryClass                        string         `json:"queryClass"`
+	Status                            string         `json:"status"`
+	CardIDs                           []string       `json:"cardIds"`
+	FindingIDs                        []string       `json:"findingIds"`
+	RawPaths                          []string       `json:"rawPaths"`
+	RelevantFindingRanks              []int          `json:"relevantFindingRanks"`
+	EvidenceHandlesFound              []string       `json:"evidenceHandlesFound"`
+	HardNegativeHits                  []string       `json:"hardNegativeHits"`
+	LaneRelevantHits                  map[string]int `json:"laneRelevantHits"`
+	UniqueRelevantFirstHits           map[string]int `json:"uniqueRelevantFirstHits"`
+	NormalizedTokens                  int            `json:"normalizedTokens"`
+	RawTokens                         int            `json:"rawTokens"`
+	NormalizedEvidenceExpansionTokens int            `json:"normalizedEvidenceExpansionTokens"`
+	RawDocumentExpansionTokens        int            `json:"rawDocumentExpansionTokens"`
+	AbstentionCorrect                 bool           `json:"abstentionCorrect"`
+	EvidenceHandlesComplete           bool           `json:"evidenceHandlesComplete"`
+	FindingHandlesComplete            bool           `json:"findingHandlesComplete"`
+	SourceClassesAccurate             bool           `json:"sourceClassesAccurate"`
+	ReviewStatesAccurate              bool           `json:"reviewStatesAccurate"`
+	ValiditiesAccurate                bool           `json:"validitiesAccurate"`
+	VocabularyDisjointApplicable      bool           `json:"vocabularyDisjointApplicable"`
+	ClaimVocabularyDisjoint           bool           `json:"claimVocabularyDisjoint"`
+	DurabilityLabelsAccurate          bool           `json:"durabilityLabelsAccurate"`
+	ReplayIdentical                   bool           `json:"replayIdentical"`
 }
 
 type FindingEvaluationMetrics struct {
-	CaseCount               int     `json:"caseCount"`
-	FindingRecall           float64 `json:"findingRecall"`
-	MeanReciprocalRank      float64 `json:"meanReciprocalRank"`
-	RawPathRecall           float64 `json:"rawPathRecall"`
-	AbstentionAccuracy      float64 `json:"abstentionAccuracy"`
-	FindingHandleAccuracy   float64 `json:"findingHandleAccuracy"`
-	EvidenceHandleAccuracy  float64 `json:"evidenceHandleAccuracy"`
-	SourceClassAccuracy     float64 `json:"sourceClassAccuracy"`
-	ReviewStateAccuracy     float64 `json:"reviewStateAccuracy"`
-	ValidityAccuracy        float64 `json:"validityAccuracy"`
-	VocabularyDisjointRate  float64 `json:"vocabularyDisjointRate"`
-	HardNegativeHits        int     `json:"hardNegativeHits"`
-	DeterministicReplayRate float64 `json:"deterministicReplayRate"`
-	NormalizedMedianTokens  int     `json:"normalizedMedianTokens"`
-	RawMedianTokens         int     `json:"rawMedianTokens"`
+	CaseCount                               int     `json:"caseCount"`
+	FindingRecall                           float64 `json:"findingRecall"`
+	MeanReciprocalRank                      float64 `json:"meanReciprocalRank"`
+	RawPathRecall                           float64 `json:"rawPathRecall"`
+	AbstentionAccuracy                      float64 `json:"abstentionAccuracy"`
+	FindingHandleAccuracy                   float64 `json:"findingHandleAccuracy"`
+	EvidenceHandleAccuracy                  float64 `json:"evidenceHandleAccuracy"`
+	SourceClassAccuracy                     float64 `json:"sourceClassAccuracy"`
+	ReviewStateAccuracy                     float64 `json:"reviewStateAccuracy"`
+	ValidityAccuracy                        float64 `json:"validityAccuracy"`
+	VocabularyDisjointRate                  float64 `json:"vocabularyDisjointRate"`
+	HardNegativeHits                        int     `json:"hardNegativeHits"`
+	DeterministicReplayRate                 float64 `json:"deterministicReplayRate"`
+	NormalizedMedianTokens                  int     `json:"normalizedMedianTokens"`
+	RawMedianTokens                         int     `json:"rawMedianTokens"`
+	NormalizedMedianEvidenceExpansionTokens int     `json:"normalizedMedianEvidenceExpansionTokens"`
+	RawMedianDocumentExpansionTokens        int     `json:"rawMedianDocumentExpansionTokens"`
 }
 
 type FindingAblationReport struct {
-	SchemaVersion             int                                 `json:"schemaVersion"`
-	SuiteID                   string                              `json:"suiteId,omitempty"`
-	SuiteDigest               string                              `json:"suiteDigest,omitempty"`
-	CorpusSnapshot            string                              `json:"corpusSnapshot,omitempty"`
-	Cases                     []FindingCaseOutcome                `json:"cases"`
-	FindingRecall             float64                             `json:"findingRecall"`
-	MeanReciprocalRank        float64                             `json:"meanReciprocalRank"`
-	RawPathRecall             float64                             `json:"rawPathRecall"`
-	AbstentionAccuracy        float64                             `json:"abstentionAccuracy"`
-	EvidenceHandleAccuracy    float64                             `json:"evidenceHandleAccuracy"`
-	FindingHandleAccuracy     float64                             `json:"findingHandleAccuracy"`
-	SourceClassAccuracy       float64                             `json:"sourceClassAccuracy"`
-	ReviewStateAccuracy       float64                             `json:"reviewStateAccuracy"`
-	ValidityAccuracy          float64                             `json:"validityAccuracy"`
-	VocabularyDisjointRate    float64                             `json:"vocabularyDisjointRate"`
-	DurabilityLabelAccuracy   float64                             `json:"durabilityLabelAccuracy"`
-	MetricsBySplit            map[string]FindingEvaluationMetrics `json:"metricsBySplit"`
-	MetricsByRole             map[string]FindingEvaluationMetrics `json:"metricsByRole"`
-	LaneRelevantHits          map[string]int                      `json:"laneRelevantHits"`
-	UniqueRelevantFirstHits   map[string]int                      `json:"uniqueRelevantFirstHits"`
-	RerankImproved            int                                 `json:"rerankImproved"`
-	RerankDegraded            int                                 `json:"rerankDegraded"`
-	NormalizedTokens          int                                 `json:"normalizedTokens"`
-	RawTokens                 int                                 `json:"rawTokens"`
-	NormalizedMedianTokens    int                                 `json:"normalizedMedianTokens"`
-	RawMedianTokens           int                                 `json:"rawMedianTokens"`
-	HardNegativeHits          int                                 `json:"hardNegativeHits"`
-	DeterministicReplayRate   float64                             `json:"deterministicReplayRate"`
-	ArchiveGateDiagnosticOnly bool                                `json:"archiveGateDiagnosticOnly"`
-	Digest                    string                              `json:"digest"`
-}
-
-// EvaluateFindingRetriever records per-lane contribution before packing and
-// rerank movement separately. It never deletes or promotes a lane and never
-// creates an archive-policy receipt; maintainer ratification remains distinct.
-func evaluateFindingRetrieverLegacy(ctx context.Context, retriever Retriever, cases []FindingEvalCase) (FindingAblationReport, error) {
-	report := FindingAblationReport{
-		SchemaVersion: 1, LaneRelevantHits: map[string]int{},
-		UniqueRelevantFirstHits: map[string]int{}, ArchiveGateDiagnosticOnly: true,
-	}
-	var expectedFindings, foundFindings, expectedRaw, foundRaw int
-	var reciprocal float64
-	abstentionCorrect, evidenceComplete, evidenceCases, durabilityCorrect, replay := 0, 0, 0, 0, 0
-	for _, eval := range cases {
-		if strings.TrimSpace(eval.ID) == "" || strings.TrimSpace(eval.Query) == "" {
-			return FindingAblationReport{}, errors.New("finding evaluation cases require id and query")
-		}
-		options := eval.Options
-		options.Query = eval.Query
-		if options.TokenBudget == 0 {
-			options.TokenBudget = 4096
-		}
-		if options.Limit == 0 {
-			options.Limit = 5
-		}
-		first, err := retriever.QueryFindingCards(ctx, options)
-		if err != nil {
-			return FindingAblationReport{}, fmt.Errorf("case %s: %w", eval.ID, err)
-		}
-		second, err := retriever.QueryFindingCards(ctx, options)
-		if err != nil {
-			return FindingAblationReport{}, fmt.Errorf("case %s replay: %w", eval.ID, err)
-		}
-		outcome := FindingCaseOutcome{
-			CaseID: eval.ID, LaneRelevantHits: map[string]int{}, UniqueRelevantFirstHits: map[string]int{},
-			DurabilityLabelsAccurate: true, ReplayIdentical: first.Digest == second.Digest,
-		}
-		if outcome.ReplayIdentical {
-			replay++
-		}
-		findingRanks := map[string]int{}
-		evidenceSeen := map[string]bool{}
-		rawSeen := map[string]bool{}
-		hardNegativeSet := map[string]bool{}
-		for _, id := range eval.HardNegativeFindingIDs {
-			hardNegativeSet[id] = true
-		}
-		for rank, card := range first.Cards {
-			outcome.CardIDs = append(outcome.CardIDs, card.ID)
-			switch card.CardType {
-			case "finding":
-				outcome.FindingIDs = append(outcome.FindingIDs, card.ID)
-				findingRanks[card.ID] = rank + 1
-				outcome.NormalizedTokens += EstimateTokens(stableJSON(card))
-				if card.SourceClass == "archive" || card.SourceClass == "intake" {
-					outcome.DurabilityLabelsAccurate = false
-				}
-				if hardNegativeSet[card.ID] {
-					outcome.HardNegativeHits = append(outcome.HardNegativeHits, card.ID)
-				}
-			case "raw-report":
-				path := card.Metadata["path"]
-				outcome.RawPaths = append(outcome.RawPaths, path)
-				rawSeen[path] = true
-				outcome.RawTokens += EstimateTokens(stableJSON(card))
-				if card.SourceClass != "archive" {
-					outcome.DurabilityLabelsAccurate = false
-				}
-			}
-			if card.EvidenceHandle != "" {
-				evidenceSeen[card.EvidenceHandle] = true
-			}
-		}
-		fusionOrder := append([]FindingCandidateTrace(nil), first.Trace.Candidates...)
-		sort.Slice(fusionOrder, func(i, j int) bool {
-			if fusionOrder[i].FusionScore != fusionOrder[j].FusionScore {
-				return fusionOrder[i].FusionScore > fusionOrder[j].FusionScore
-			}
-			return fusionOrder[i].FindingID < fusionOrder[j].FindingID
-		})
-		fusionRanks := map[string]int{}
-		traces := map[string]FindingCandidateTrace{}
-		for index, candidate := range fusionOrder {
-			fusionRanks[candidate.FindingID] = index + 1
-			traces[candidate.FindingID] = candidate
-		}
-		rerankOrder := append([]FindingCandidateTrace(nil), fusionOrder...)
-		rerankDepth := retriever.Profile.Effective.RerankDepth
-		if rerankDepth < 1 || rerankDepth > len(rerankOrder) {
-			rerankDepth = len(rerankOrder)
-		}
-		sort.SliceStable(rerankOrder[:rerankDepth], func(i, j int) bool {
-			if rerankOrder[i].RerankScore != rerankOrder[j].RerankScore {
-				return rerankOrder[i].RerankScore > rerankOrder[j].RerankScore
-			}
-			if rerankOrder[i].FusionScore != rerankOrder[j].FusionScore {
-				return rerankOrder[i].FusionScore > rerankOrder[j].FusionScore
-			}
-			return rerankOrder[i].FindingID < rerankOrder[j].FindingID
-		})
-		rerankRanks := map[string]int{}
-		for index, candidate := range rerankOrder {
-			rerankRanks[candidate.FindingID] = index + 1
-		}
-		retrievingLanes := map[string]bool{}
-		firstLanes := map[string]bool{}
-		for _, expected := range eval.ExpectedFindingIDs {
-			expectedFindings++
-			if rank := findingRanks[expected]; rank > 0 {
-				foundFindings++
-				outcome.RelevantFindingRanks = append(outcome.RelevantFindingRanks, rank)
-				if len(outcome.RelevantFindingRanks) == 1 {
-					reciprocal += 1 / float64(rank)
-				}
-			}
-			if fusionRanks[expected] > 0 && rerankRanks[expected] > 0 {
-				outcome.RerankDelta += fusionRanks[expected] - rerankRanks[expected]
-			}
-			trace := traces[expected]
-			for lane, rank := range trace.LaneRanks {
-				if rank > 0 {
-					retrievingLanes[lane] = true
-					outcome.LaneRelevantHits[lane]++
-					report.LaneRelevantHits[lane]++
-					if rank == 1 {
-						firstLanes[lane] = true
-					}
-				}
-			}
-		}
-		if len(retrievingLanes) == 1 && len(firstLanes) == 1 {
-			for lane := range firstLanes {
-				outcome.UniqueRelevantFirstHits[lane]++
-				report.UniqueRelevantFirstHits[lane]++
-			}
-		}
-		for _, path := range eval.ExpectedRawPaths {
-			expectedRaw++
-			if rawSeen[path] {
-				foundRaw++
-			}
-		}
-		outcome.EvidenceHandlesComplete = true
-		if len(eval.ExpectedEvidenceHandles) > 0 {
-			evidenceCases++
-		}
-		for _, handle := range eval.ExpectedEvidenceHandles {
-			if evidenceSeen[handle] {
-				outcome.EvidenceHandlesFound = append(outcome.EvidenceHandlesFound, handle)
-			} else {
-				outcome.EvidenceHandlesComplete = false
-			}
-		}
-		if len(eval.ExpectedEvidenceHandles) > 0 && outcome.EvidenceHandlesComplete {
-			evidenceComplete++
-		}
-		if outcome.DurabilityLabelsAccurate {
-			durabilityCorrect++
-		}
-		if eval.Answerable {
-			outcome.AbstentionCorrect = len(first.Cards) > 0
-		} else {
-			outcome.AbstentionCorrect = len(first.Cards) == 0
-		}
-		if outcome.AbstentionCorrect {
-			abstentionCorrect++
-		}
-		if outcome.RerankDelta > 0 {
-			report.RerankImproved++
-		} else if outcome.RerankDelta < 0 {
-			report.RerankDegraded++
-		}
-		report.NormalizedTokens += outcome.NormalizedTokens
-		report.RawTokens += outcome.RawTokens
-		report.HardNegativeHits += len(outcome.HardNegativeHits)
-		report.Cases = append(report.Cases, outcome)
-	}
-	if expectedFindings > 0 {
-		report.FindingRecall = float64(foundFindings) / float64(expectedFindings)
-		report.MeanReciprocalRank = reciprocal / float64(expectedFindings)
-	}
-	if expectedRaw > 0 {
-		report.RawPathRecall = float64(foundRaw) / float64(expectedRaw)
-	}
-	if len(cases) > 0 {
-		report.AbstentionAccuracy = float64(abstentionCorrect) / float64(len(cases))
-		if evidenceCases > 0 {
-			report.EvidenceHandleAccuracy = float64(evidenceComplete) / float64(evidenceCases)
-		} else {
-			report.EvidenceHandleAccuracy = 1
-		}
-		report.DurabilityLabelAccuracy = float64(durabilityCorrect) / float64(len(cases))
-		report.DeterministicReplayRate = float64(replay) / float64(len(cases))
-	}
-	digestInput := report
-	digestInput.Digest = ""
-	digest, err := CanonicalDigest(digestInput)
-	if err != nil {
-		return FindingAblationReport{}, err
-	}
-	report.Digest = digest
-	return report, nil
+	SchemaVersion                           int                                 `json:"schemaVersion"`
+	SuiteID                                 string                              `json:"suiteId,omitempty"`
+	SuiteDigest                             string                              `json:"suiteDigest,omitempty"`
+	CorpusSnapshot                          string                              `json:"corpusSnapshot,omitempty"`
+	Cases                                   []FindingCaseOutcome                `json:"cases"`
+	FindingRecall                           float64                             `json:"findingRecall"`
+	MeanReciprocalRank                      float64                             `json:"meanReciprocalRank"`
+	RawPathRecall                           float64                             `json:"rawPathRecall"`
+	AbstentionAccuracy                      float64                             `json:"abstentionAccuracy"`
+	EvidenceHandleAccuracy                  float64                             `json:"evidenceHandleAccuracy"`
+	FindingHandleAccuracy                   float64                             `json:"findingHandleAccuracy"`
+	SourceClassAccuracy                     float64                             `json:"sourceClassAccuracy"`
+	ReviewStateAccuracy                     float64                             `json:"reviewStateAccuracy"`
+	ValidityAccuracy                        float64                             `json:"validityAccuracy"`
+	VocabularyDisjointRate                  float64                             `json:"vocabularyDisjointRate"`
+	DurabilityLabelAccuracy                 float64                             `json:"durabilityLabelAccuracy"`
+	MetricsBySplit                          map[string]FindingEvaluationMetrics `json:"metricsBySplit"`
+	MetricsByRole                           map[string]FindingEvaluationMetrics `json:"metricsByRole"`
+	LaneRelevantHits                        map[string]int                      `json:"laneRelevantHits"`
+	UniqueRelevantFirstHits                 map[string]int                      `json:"uniqueRelevantFirstHits"`
+	NormalizedTokens                        int                                 `json:"normalizedTokens"`
+	RawTokens                               int                                 `json:"rawTokens"`
+	NormalizedEvidenceExpansionTokens       int                                 `json:"normalizedEvidenceExpansionTokens"`
+	RawDocumentExpansionTokens              int                                 `json:"rawDocumentExpansionTokens"`
+	NormalizedMedianTokens                  int                                 `json:"normalizedMedianTokens"`
+	RawMedianTokens                         int                                 `json:"rawMedianTokens"`
+	NormalizedMedianEvidenceExpansionTokens int                                 `json:"normalizedMedianEvidenceExpansionTokens"`
+	RawMedianDocumentExpansionTokens        int                                 `json:"rawMedianDocumentExpansionTokens"`
+	HardNegativeHits                        int                                 `json:"hardNegativeHits"`
+	DeterministicReplayRate                 float64                             `json:"deterministicReplayRate"`
+	ArchiveGateDiagnosticOnly               bool                                `json:"archiveGateDiagnosticOnly"`
+	Digest                                  string                              `json:"digest"`
 }

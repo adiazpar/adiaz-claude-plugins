@@ -26,6 +26,7 @@ func TestStateStoreRecoversEveryPublicationSeam(t *testing.T) {
 		FailAfterJournal,
 		FailAfterRecordPublish,
 		FailAfterEventPublish,
+		FailAfterInventoryPublish,
 		FailAfterReceiptPublish,
 		FailBeforeHeadPublish,
 		FailAfterHeadPublish,

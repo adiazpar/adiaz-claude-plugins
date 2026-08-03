@@ -39,8 +39,7 @@
     "defaultPrompt": [
       "Initialize this project with re-discipline.",
       "Orient me with the bounded project state view.",
-      "Search atomic findings and trace their evidence.",
-      "Open a campaign with explicit work and closure criteria."
+      "Search atomic findings and trace their evidence."
     ]
   }
 }

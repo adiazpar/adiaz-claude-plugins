@@ -27,6 +27,7 @@ SKILLS = {
 CAMPAIGN_TEMPLATES = {
     "campaign.json",
     "work-item.json",
+    "deferred-work-item.json",
     "run.json",
     "brief.md",
     "report.md",
@@ -42,8 +43,10 @@ CORE_SCHEMAS = {
     "work-item.schema.json",
     "run.schema.json",
     "finding-frontmatter.schema.json",
+    "finding-evidence.schema.json",
     "intake.schema.json",
     "review.schema.json",
+    "review-decision.schema.json",
     "event.schema.json",
     "closure-job.schema.json",
     "closure-coverage.schema.json",
@@ -53,14 +56,16 @@ CORE_SCHEMAS = {
 }
 
 MIGRATION_SCHEMAS = {
-    "evidence-relation.schema.json",
     "review-packet.schema.json",
-    "decision-receipt.schema.json",
     "closure-plan.schema.json",
     "closure-receipt.schema.json",
     "migration-plan.schema.json",
     "migration-operation.schema.json",
     "migration-receipt.schema.json",
+    "migration-gate-artifact.schema.json",
+    "migration-retrieval-gate-evidence.schema.json",
+    "migration-blinded-agent-evaluation.schema.json",
+    "migration-host-conformance.schema.json",
     "benchmark-result.schema.json",
 }
 
@@ -120,7 +125,7 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
     def test_campaign_template_family_is_complete_and_json_parses(self):
         root = PLUGIN / "templates" / "campaign"
         self.assertEqual({path.name for path in root.iterdir() if path.is_file()}, CAMPAIGN_TEMPLATES)
-        for name in ("campaign.json", "work-item.json", "run.json", "intake.json", "review.json"):
+        for name in ("campaign.json", "work-item.json", "deferred-work-item.json", "run.json", "intake.json", "review.json"):
             data = json.loads((root / name).read_text(encoding="utf-8"))
             self.assertEqual(data["schemaVersion"], 2)
         self.assertIn("Derived view. Do not edit", (root / "STATE.md").read_text())

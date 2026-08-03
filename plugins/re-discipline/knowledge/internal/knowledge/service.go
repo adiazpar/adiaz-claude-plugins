@@ -15,14 +15,13 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type ServiceOptions struct {
 	ProjectRoot          string
 	AssetRoot            string
 	CacheRoot            string
-	DisableDense         bool
-	DisableRerank        bool
 	EffectiveProfileName string
 }
 
@@ -33,14 +32,14 @@ type Service struct {
 	ProfileCatalog       RetrievalProfile
 	ModelManifest        ModelManifest
 	Index                IndexManager
-	DisableDense         bool
-	DisableRerank        bool
 	EffectiveProfileName string
 	Warnings             []string
 	pinnedGeneration     *Generation
 	telemetryMu          sync.Mutex
 	telemetryBuffer      []telemetryObservation
 	archiveTracker       *ArchiveFallbackTracker
+	contextLeaseMu       sync.Mutex
+	contextLeases        map[string]*contextLeaseState
 }
 
 // PinGeneration freezes this service on one immutable generation. A
@@ -64,6 +63,9 @@ func (service *Service) effectiveSettings() KnowledgeSettings {
 func NewService(options ServiceOptions) (*Service, error) {
 	boundary, err := NewBoundary(options.ProjectRoot)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireCompletedMigration(boundary.Root); err != nil {
 		return nil, err
 	}
 	assetRoot, err := filepath.Abs(options.AssetRoot)
@@ -114,12 +116,17 @@ func NewService(options ServiceOptions) (*Service, error) {
 	service := &Service{
 		Boundary: boundary, AssetRoot: assetRoot, Configuration: configuration,
 		ProfileCatalog: profile, ModelManifest: manifest,
-		DisableDense: options.DisableDense, DisableRerank: options.DisableRerank,
 		EffectiveProfileName: options.EffectiveProfileName, Warnings: warnings,
+		contextLeases: map[string]*contextLeaseState{},
+	}
+	normalizationQueuePath, queuePathErr := containedOutputPath(
+		boundary.Root, ".re-discipline/knowledge/normalization-queue.json",
+	)
+	if queuePathErr != nil {
+		return nil, fmt.Errorf("resolve canonical archive normalization queue: %w", queuePathErr)
 	}
 	service.archiveTracker, err = OpenArchiveFallbackTracker(
-		settings.Archive.NormalizationTriggerHits,
-		filepath.Join(cacheRoot, "normalization-queue.json"),
+		settings.Archive.NormalizationTriggerHits, normalizationQueuePath,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("open archive normalization queue: %w", err)
@@ -198,7 +205,6 @@ func (service *Service) selectProfile(runtime RuntimeIdentity) (SelectedProfile,
 	if service.EffectiveProfileName == "" {
 		selected, err = SelectEffectiveProfile(
 			service.ProfileCatalog, service.ModelManifest, runtime,
-			service.DisableDense, service.DisableRerank,
 		)
 	} else {
 		catalog := service.ProfileCatalog
@@ -214,7 +220,7 @@ func (service *Service) selectProfile(runtime RuntimeIdentity) (SelectedProfile,
 			return SelectedProfile{}, fmt.Errorf("unknown effective profile %q", service.EffectiveProfileName)
 		}
 		catalog.EffectiveProfiles = []EffectiveProfile{*rowSelection}
-		selected, err = SelectEffectiveProfile(catalog, service.ModelManifest, runtime, false, false)
+		selected, err = SelectEffectiveProfile(catalog, service.ModelManifest, runtime)
 	}
 	if err != nil {
 		return SelectedProfile{}, err
@@ -255,7 +261,7 @@ func (service *Service) selectProfileRow(
 	catalog := service.ProfileCatalog
 	catalog.EffectiveProfiles = []EffectiveProfile{row}
 	selected, err := SelectEffectiveProfile(
-		catalog, service.ModelManifest, runtime, false, false)
+		catalog, service.ModelManifest, runtime)
 	if err != nil {
 		return SelectedProfile{}, err
 	}
@@ -292,6 +298,11 @@ func (service *Service) systemStatus(ctx context.Context) (map[string]any, error
 				"enabled": false, "indexBuilt": false,
 			},
 			"memoryProposalsPending": pendingProposals,
+			"normalizationQueue":     service.archiveTracker.QueueStatus(20),
+			"canonicalState":         service.canonicalStateIntegrityStatus(),
+			"tierDisagreements": TierDisagreementStatus{
+				Signals: []TierDisagreement{}, AuthorityRule: "truth-remains-authoritative-until-closure",
+			},
 		}, nil
 	}
 	runtimeIdentity, err := ProbeRuntimeIdentity(service.ModelManifest)
@@ -351,6 +362,24 @@ func (service *Service) systemStatus(ctx context.Context) (map[string]any, error
 		"campaigns":              service.campaignStatus(),
 		"telemetry":              service.telemetryStatus(),
 		"memoryProposalsPending": pendingProposals,
+		"normalizationQueue":     service.archiveTracker.QueueStatus(20),
+		"canonicalState":         service.canonicalStateIntegrityStatus(),
+	}
+	if currentErr == nil && indexIntegrity {
+		db, openErr := sql.Open("sqlite", sqliteReadOnlyDSN(generation.Database))
+		if openErr != nil {
+			return nil, openErr
+		}
+		disagreements, disagreementErr := loadTierDisagreements(ctx, db, nil, 20)
+		_ = db.Close()
+		if disagreementErr != nil {
+			return nil, disagreementErr
+		}
+		status["tierDisagreements"] = disagreements
+	} else {
+		status["tierDisagreements"] = TierDisagreementStatus{
+			Signals: []TierDisagreement{}, AuthorityRule: "truth-remains-authoritative-until-closure",
+		}
 	}
 	return status, nil
 }
@@ -571,6 +600,9 @@ type ReadOptions struct {
 	URI       string
 	StartLine int
 	EndLine   int
+	ByteRange bool
+	StartByte int
+	EndByte   int
 }
 
 var errSourceChangedAfterIndex = errors.New("source changed after indexing")
@@ -611,6 +643,13 @@ func (service *Service) readPinned(
 	if identifiers != 1 {
 		return nil, errors.New("exactly one of path, chunkId, or uri is required")
 	}
+	if options.StartLine < 0 || options.EndLine < 0 ||
+		(options.EndLine > 0 && options.EndLine < options.StartLine) ||
+		(options.ByteRange && (options.StartByte < 0 || options.EndByte <= options.StartByte)) ||
+		(options.ByteRange && (options.StartLine != 0 || options.EndLine != 0)) ||
+		(!options.ByteRange && (options.StartByte != 0 || options.EndByte != 0)) {
+		return nil, errors.New("exact read line or byte range is invalid")
+	}
 	chunkID := options.ChunkID
 	if options.URI != "" {
 		chunkPrefix := "re-discipline://" + generation.ID + "/chunks/"
@@ -637,13 +676,15 @@ func (service *Service) readPinned(
 	}
 	defer db.Close()
 	var path, tier, heading, expectedHash, expectedDocumentHash string
-	var startLine, endLine int
+	var startLine, endLine, startByte, endByte int
+	byteRange := false
 	if chunkID != "" {
 		err = db.QueryRowContext(ctx, `SELECT c.path,c.tier,c.heading,c.start_line,
-			c.end_line,c.content_hash,d.content_hash
+			c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content_hash,d.content_hash
 			FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.id=?`,
 			chunkID).Scan(
 			&path, &tier, &heading, &startLine, &endLine,
+			&byteRange, &startByte, &endByte,
 			&expectedHash, &expectedDocumentHash)
 		if err != nil {
 			return nil, errors.New("unknown chunk or generation handle")
@@ -657,6 +698,7 @@ func (service *Service) readPinned(
 		}
 		expectedDocumentHash = expectedHash
 		startLine, endLine = options.StartLine, options.EndLine
+		byteRange, startByte, endByte = options.ByteRange, options.StartByte, options.EndByte
 	}
 	body, fileHash, err := ReadProjectFile(service.Boundary, path)
 	if err != nil {
@@ -665,9 +707,27 @@ func (service *Service) readPinned(
 	if fileHash != expectedDocumentHash {
 		return nil, fmt.Errorf("%w; retry after reconciliation", errSourceChangedAfterIndex)
 	}
-	content, err := lineRangeBody(body, startLine, endLine)
-	if err != nil {
-		return nil, err
+	content := ""
+	if byteRange {
+		normalized := normalizeNewlines(body)
+		if !utf8.Valid(normalized) || startByte < 0 || endByte <= startByte || endByte > len(normalized) ||
+			!utf8ByteBoundary(normalized, startByte) || !utf8ByteBoundary(normalized, endByte) {
+			return nil, errors.New("invalid UTF-8 byte range for indexed source")
+		}
+		content = string(normalized[startByte:endByte])
+		startLine = bytes.Count(normalized[:startByte], []byte("\n")) + 1
+		endLine = bytes.Count(normalized[:endByte-1], []byte("\n")) + 1
+	} else if chunkID == "" && startLine == 0 && endLine == 0 {
+		normalized := normalizeNewlines(body)
+		if !utf8.Valid(normalized) {
+			return nil, errors.New("indexed source is not valid UTF-8")
+		}
+		content = string(normalized)
+	} else {
+		content, err = lineRangeBody(body, startLine, endLine)
+		if err != nil {
+			return nil, err
+		}
 	}
 	maxReadBytes := selected.Effective.Packing.MaxBytes
 	if maxReadBytes < 1 {
@@ -685,6 +745,7 @@ func (service *Service) readPinned(
 	}
 	citation := Citation{
 		Path: path, Heading: heading, StartLine: startLine, EndLine: endLine,
+		ByteRange: byteRange, StartByte: startByte, EndByte: endByte,
 		ContentHash: SHA256String(content), SourceHash: fileHash,
 		PassageHash: SHA256String(content), Tier: tier,
 		URI: "re-discipline://" + generation.ID + "/chunks/" + url.PathEscape(chunkID),
@@ -703,11 +764,15 @@ func (service *Service) readPinned(
 		citation.URI = "re-discipline://" + generation.ID + "/sources/" + url.PathEscape(path)
 	}
 	replay, _ := CanonicalDigest(struct {
-		Generation string
-		Path       string
-		Start      int
-		End        int
-	}{generation.ID, path, citation.StartLine, citation.EndLine})
+		Generation string `json:"generation"`
+		Path       string `json:"path"`
+		StartLine  int    `json:"startLine"`
+		EndLine    int    `json:"endLine"`
+		ByteRange  bool   `json:"byteRange"`
+		StartByte  int    `json:"startByte"`
+		EndByte    int    `json:"endByte"`
+	}{generation.ID, path, citation.StartLine, citation.EndLine,
+		citation.ByteRange, citation.StartByte, citation.EndByte})
 	replay = compactReplayHandle(replay)
 	return map[string]any{
 		"passage":  content,
@@ -716,6 +781,10 @@ func (service *Service) readPinned(
 			Boundary: service.Boundary, Generation: generation, Profile: selected,
 		}).metadata(replay),
 	}, nil
+}
+
+func utf8ByteBoundary(value []byte, index int) bool {
+	return index == 0 || index == len(value) || utf8.RuneStart(value[index])
 }
 
 func (service *Service) RecallPropose(

@@ -43,13 +43,40 @@
     "outcome": {"type": "string"},
     "deferment": {
       "type": "object",
-      "required": ["reason", "revisitWhen", "owner", "blocksClosure"],
+      "required": ["reason", "revisitWhen", "owner", "blocksClosure", "closureDisposition"],
       "properties": {
         "reason": {"type": "string", "minLength": 1},
-        "revisitWhen": {"type": "string", "minLength": 1},
+        "revisitWhen": {
+          "oneOf": [
+            {"$ref": "#/$defs/dateDefermentTrigger"},
+            {"$ref": "#/$defs/workItemStateDefermentTrigger"},
+            {"$ref": "#/$defs/eventDefermentTrigger"}
+          ]
+        },
         "owner": {"type": "string", "minLength": 1},
-        "blocksClosure": {"type": "boolean"}
+        "blocksClosure": {"type": "boolean"},
+        "closureDisposition": {"enum": ["resolve-before-closure", "export-backlog"]},
+        "closureDestination": {
+          "type": "string",
+          "allOf": [
+            {"pattern": "^docs/backlog/.+\\.md$"},
+            {"not": {"const": "docs/backlog/INDEX.md"}}
+          ]
+        }
       },
+      "allOf": [
+        {
+          "if": {"properties": {"blocksClosure": {"const": true}}, "required": ["blocksClosure"]},
+          "then": {
+            "properties": {"closureDisposition": {"const": "resolve-before-closure"}},
+            "not": {"required": ["closureDestination"]}
+          },
+          "else": {
+            "properties": {"closureDisposition": {"const": "export-backlog"}},
+            "required": ["closureDestination"]
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "supersededBy": {"type": "string", "pattern": "^W-[0-9]{4,}$"}
@@ -62,7 +89,36 @@
   ],
   "$defs": {
     "workIds": {"type": "array", "items": {"type": "string", "pattern": "^W-[0-9]{4,}$"}, "uniqueItems": true},
-    "runIds": {"type": "array", "items": {"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4,}$"}, "uniqueItems": true}
+    "runIds": {"type": "array", "items": {"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4,}$"}, "uniqueItems": true},
+    "dateDefermentTrigger": {
+      "type": "object",
+      "required": ["type", "at"],
+      "properties": {
+        "type": {"const": "date"},
+        "at": {"type": "string", "format": "date-time", "pattern": "Z$"}
+      },
+      "additionalProperties": false
+    },
+    "workItemStateDefermentTrigger": {
+      "type": "object",
+      "required": ["type", "workItemId", "state"],
+      "properties": {
+        "type": {"const": "work-item-state"},
+        "workItemId": {"type": "string", "pattern": "^W-[0-9]{4,}$"},
+        "state": {"enum": ["proposed", "ready", "active", "blocked", "deferred", "done", "cancelled", "superseded"]}
+      },
+      "additionalProperties": false
+    },
+    "eventDefermentTrigger": {
+      "type": "object",
+      "required": ["type", "action"],
+      "properties": {
+        "type": {"const": "event"},
+        "action": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+        "affectedId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

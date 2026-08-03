@@ -58,7 +58,6 @@ var managedRecoveryDirectories = []string{
 	".re-discipline/memory/topics",
 	".re-discipline/knowledge/evals",
 	".re-discipline/cache/knowledge/generations",
-	".re-discipline/cache/knowledge/vectors",
 	".re-discipline/cache/calibration",
 	".re-discipline/agents/providers",
 	".re-discipline/agents/recruiting",

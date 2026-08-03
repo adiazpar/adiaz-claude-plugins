@@ -52,29 +52,51 @@ func buildFindingIndexFixture(t *testing.T) findingIndexFixture {
 	root := t.TempDir()
 	writeFindingFixtureFile(t, root, ".re-discipline/project-profile.md", []byte("---\nname: \"fixture\"\n---\n# Fixture\n"))
 	writeFindingFixtureFile(t, root, "docs/INDEX.md", []byte("# Index\n"))
+	reportPath := "active/resource-registration/runs/R-20260802-0001/report.md"
+	reportBody := []byte(
+		"# VERDICT\nResource registration uses table Alpha. RareFallbackOnlyTerm appears only in this raw report.\n\n" +
+			"# CLAIMS\nRaw provenance for the registration probe.\n")
+	render := func(id, path, review, validity, claim string, questions []string, relations FindingRelations) []byte {
+		t.Helper()
+		body := renderedFixtureFinding(t, id, path, review, validity, claim, questions, relations)
+		document, err := ParseFindingDocument(body, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		document.Record.Evidence = []EvidenceReference{{
+			Path: reportPath, SHA256: "sha256:" + SHA256Bytes(reportBody),
+			StartLine: 1, EndLine: 5, SourceRun: "R-20260802-0001",
+		}}
+		document.Record.SourceRuns = []string{"R-20260802-0001"}
+		body, err = RenderFindingDocument(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
 	f42Path := "active/resource-registration/findings/F-0042.md"
 	f43Path := "active/resource-registration/findings/F-0043.md"
 	f44Path := "active/resource-registration/findings/F-0044.md"
-	writeFindingFixtureFile(t, root, f42Path, renderedFixtureFinding(t,
+	writeFindingFixtureFile(t, root, f42Path, render(
 		"F-0042", f42Path, "manager-ratified", "current",
 		"Resource registration uses table Alpha under the recorded build scope.",
 		[]string{"Which table drives resource registration?", "Where is table Alpha selected?", "How does this build register resources?"},
 		FindingRelations{},
 	))
-	writeFindingFixtureFile(t, root, f43Path, renderedFixtureFinding(t,
-		"F-0043", f43Path, "manager-ratified", "current",
+	writeFindingFixtureFile(t, root, f43Path, render(
+		"F-0043", f43Path, "manager-ratified", "challenged",
 		"A competing observation says table Beta drives resource registration.",
 		[]string{"Does table Beta drive registration?", "What conflicts with table Alpha?", "Which registration observation is contested?"},
 		FindingRelations{Contradicts: []string{"F-0042"}},
 	))
-	writeFindingFixtureFile(t, root, f44Path, renderedFixtureFinding(t,
+	writeFindingFixtureFile(t, root, f44Path, render(
 		"F-0044", f44Path, "curator-checked", "provisional",
 		"Provisional identifier FUN_141A08E80 is associated with the registration probe.",
 		[]string{"Which provisional function is associated with the probe?", "What is FUN_141A08E80 used for?", "Which address appears in the provisional result?"},
 		FindingRelations{},
 	))
 	invalidPath := "active/resource-registration/findings/F-0099.md"
-	invalid := renderedFixtureFinding(t,
+	invalid := render(
 		"F-0099", invalidPath, "curator-checked", "provisional",
 		"This record is deliberately tampered after rendering.",
 		[]string{"Why is this record invalid?", "Was this finding tampered?", "Should this finding be indexed?"},
@@ -82,9 +104,7 @@ func buildFindingIndexFixture(t *testing.T) findingIndexFixture {
 	)
 	invalid = []byte(strings.Replace(string(invalid), "deliberately tampered", "silently tampered", 1))
 	writeFindingFixtureFile(t, root, invalidPath, invalid)
-	writeFindingFixtureFile(t, root, "active/resource-registration/runs/R-20260802-0001/report.md", []byte(
-		"# VERDICT\nResource registration uses table Alpha. RareFallbackOnlyTerm appears only in this raw report.\n\n"+
-			"# CLAIMS\nRaw provenance for the registration probe.\n"))
+	writeFindingFixtureFile(t, root, reportPath, reportBody)
 
 	boundary, err := NewBoundary(root)
 	if err != nil {
@@ -106,7 +126,8 @@ func buildFindingIndexFixture(t *testing.T) findingIndexFixture {
 	}
 	generation := Generation{
 		ID: "generation-finding-test", Database: database, CorpusFingerprint: inventory.Fingerprint,
-		Project: "fixture", ParserVersion: ParserVersion, ChunkerVersion: ChunkerVersion,
+		ModelFingerprint: stateTestDigest("f"), Project: "fixture",
+		ParserVersion: ParserVersion, ChunkerVersion: ChunkerVersion,
 		CreatedAt: "2026-08-02T20:00:00Z", DocumentCount: len(inventory.Documents),
 		ChunkCount: len(inventory.Chunks),
 	}
@@ -127,9 +148,10 @@ func buildFindingIndexFixture(t *testing.T) findingIndexFixture {
 	retriever := Retriever{
 		Boundary: boundary, Generation: generation, ArchiveTracker: tracker,
 		Profile: SelectedProfile{
-			EffectiveIdentity: "fixture:finding-card-v1", ActiveLanes: []string{"exact", "fts", "rerank"},
+			EffectiveIdentity: "fixture:finding-card-v1", ActiveLanes: []string{"exact", "fts", "graph"},
 			Effective: EffectiveProfile{
-				Weights: map[string]int{"exact": 8, "fts": 6}, RRFK: 60, RerankDepth: 10,
+				Weights: map[string]int{"exact": 8, "fts": 6, "graph": 2}, RRFK: 60,
+				MaxPerDocument: 3, Packing: PackingPolicy{MaxPassages: 12, MaxBytes: 32768},
 			},
 		},
 	}
@@ -191,7 +213,8 @@ func TestFindingCardQueryFiltersThenRanksAndExpandsRelations(t *testing.T) {
 	if len(response.Cards) < 2 || response.Cards[0].ID != "F-0042" {
 		t.Fatalf("normalized finding did not rank first: %#v", response.Cards)
 	}
-	if response.Cards[1].ID != "F-0043" || !contains(response.Cards[0].RelationAlerts, "incoming-contradicts:F-0043") {
+	if response.Cards[1].ID != "F-0043" || response.Cards[1].Validity != "challenged" ||
+		!contains(response.Cards[0].RelationAlerts, "incoming-contradicts:F-0043") {
 		t.Fatalf("typed contradiction was not expanded and labeled: %#v", response.Cards)
 	}
 	if len(response.Cards) == 3 && response.Cards[2].CardType != "raw-report" {
@@ -231,6 +254,58 @@ func TestFindingCardQueryFiltersThenRanksAndExpandsRelations(t *testing.T) {
 	}
 }
 
+func TestPassageExactQueryNormalizesEquivalentIdentifierForms(t *testing.T) {
+	fixture := buildFindingIndexFixture(t)
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(fixture.generation.Database))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const path = "active/resource-registration/findings/F-0044.md"
+	for _, query := range []string{"0x141A08E80", "registrationProbe", "registration_probe"} {
+		rows, err := rankExact(
+			context.Background(), db, query, []string{"provisional"}, nil, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, row := range rows {
+			found = found || row.Chunk.Path == path
+		}
+		if !found {
+			t.Fatalf("normalized identifier query %q did not match %s: %#v", query, path, rows)
+		}
+	}
+
+	response, err := fixture.retriever.Search(context.Background(), SearchOptions{
+		Query: "0x141A08E80", QueryClass: "exact", AllowedTiers: []string{"provisional"},
+		Limit: 5, TokenBudget: 8192,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, result := range response.Results {
+		found = found || result.Citation.Path == path
+	}
+	if !found {
+		t.Fatalf("public passage retrieval lost normalized identifier match: %#v", response.Results)
+	}
+	filtered, err := fixture.retriever.Search(context.Background(), SearchOptions{
+		Query: "0x141A08E80", QueryClass: "exact", AllowedTiers: []string{"truth"},
+		Limit: 5, TokenBudget: 8192,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range filtered.Results {
+		if result.Citation.Path == path {
+			t.Fatal("normalized identifier match bypassed passage tier filters")
+		}
+	}
+}
+
 func TestFindingRelationExpansionReservesPairBeforeRankPrefixFills(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -238,6 +313,12 @@ func TestFindingRelationExpansionReservesPairBeforeRankPrefixFills(t *testing.T)
 	}
 	defer db.Close()
 	if _, err := db.Exec(`CREATE TABLE finding_relations(source_id TEXT,target_id TEXT,kind TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE findings(id TEXT PRIMARY KEY,verified_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO findings(id,verified_at) VALUES('F-0042',''),('F-0045','')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO finding_relations(source_id,target_id,kind) VALUES('F-0042','F-0045','contradicts')`); err != nil {
@@ -305,13 +386,12 @@ func TestFindingCardRawFallbackGateAndServeAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := testArchiveReceipt(t)
-	receipt.Binding = binding
-	receipt.Digest, err = ArchiveReceiptDigest(receipt)
-	if err != nil {
-		t.Fatal(err)
+	receipt, report, _ := testArchiveEvidence(
+		t, &fixture.retriever.Generation, &fixture.retriever.Profile)
+	if receipt.Binding != binding {
+		t.Fatalf("test archive evidence did not bind retriever: %#v != %#v", receipt.Binding, binding)
 	}
-	options.ArchivePolicy = ArchiveFallbackPolicy{Mode: "opt-in", Receipt: &receipt}
+	options.ArchivePolicy = ArchiveFallbackPolicy{Mode: "opt-in", Receipt: &receipt, Report: &report}
 	options.IncludeRaw = false
 	options.RequestID = "raw-gated"
 	gated, err := fixture.retriever.QueryFindingCards(context.Background(), options)

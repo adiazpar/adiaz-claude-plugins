@@ -51,9 +51,9 @@ under test.
 - **quick:** Run integrity, exact-identifier, tier-policy, citation,
   deterministic replay, and token-budget conformance. Use this default when
   the user requests an unspecified check.
-- **full:** Run lexical, dense, hybrid, reranking, graph, context-pack, and
-  project evaluation against every supported effective profile, including
-  model-free fallbacks. Exercise both manager and drafter context ceilings at
+- **full:** Run exact-identifier, lexical, doc2query, graph, context-pack, and
+  project evaluation against the shipped lexical-graph profile. Exercise both
+  manager and drafter context ceilings at
   512, 1024, 2048, and 4096 tokens.
 - **end-to-end:** Run selected manager and drafter trials only after the user
   explicitly authorizes the additional model tokens, time, and dispatch

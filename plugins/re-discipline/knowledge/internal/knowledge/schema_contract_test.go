@@ -24,6 +24,7 @@ func TestCanonicalJSONTemplatesDecodeAndValidate(t *testing.T) {
 	}{
 		{"campaign.json", &CampaignRecord{}, nil},
 		{"work-item.json", &WorkItemRecord{}, nil},
+		{"deferred-work-item.json", &WorkItemRecord{}, nil},
 		{"run.json", &RunRecord{}, nil},
 		{"intake.json", &IntakeRecord{}, nil},
 		{"review.json", &ReviewRecord{}, nil},
@@ -67,20 +68,39 @@ func TestPackagedStateSchemasMatchRuntimeJSONShapes(t *testing.T) {
 		{"run.schema.json", RunRecord{}},
 		{"intake.schema.json", IntakeRecord{}},
 		{"review.schema.json", ReviewRecord{}},
+		{"review-decision.schema.json", ReviewDecision{}},
+		{"review-load-receipt.schema.json", ReviewLoadReceipt{}},
 		{"review-packet.schema.json", ReviewPacketEnvelope{}},
 		{"event.schema.json", StateEvent{}},
 		{"closure-job.schema.json", ClosureJob{}},
 		{"closure-coverage.schema.json", ClosureCoverage{}},
 		{"archive-manifest.schema.json", ArchiveManifest{}},
 		{"context-card.schema.json", ContextCard{}},
+		{"finding-evidence.schema.json", EvidenceReference{}},
 		{"context-pack.schema.json", ContextPack{}},
 		{"transaction.schema.json", StateTransactionDescriptor{}},
+		{"state-inventory.schema.json", StateInventory{}},
 		{"closure-plan.schema.json", ClosurePlan{}},
 		{"closure-receipt.schema.json", ClosureReceipt{}},
 		{"finding-eval-suite.schema.json", FindingEvalSuite{}},
 		{"benchmark-result.schema.json", BenchmarkReport{}},
 		{"normalized-beats-raw-receipt.schema.json", NormalizedBeatsRawReceipt{}},
+		{"normalized-vs-raw-candidate.schema.json", NormalizedRawGateReport{}},
 		{"normalization-queue.schema.json", archiveFallbackTrackerState{}},
+		{"migration-plan.schema.json", MigrationPlan{}},
+		{"migration-operation.schema.json", MigrationOperation{}},
+		{"migration-receipt.schema.json", MigrationCertification{}},
+		{"migration-gate-artifact.schema.json", MigrationGateArtifact{}},
+		{"migration-retrieval-gate-evidence.schema.json", MigrationRetrievalGateEvidence{}},
+		{"migration-blinded-agent-evaluation.schema.json", MigrationBlindedAgentEvaluation{}},
+		{"migration-host-conformance.schema.json", MigrationHostConformanceEvidence{}},
+		{"migration-profile-conflict-packet.schema.json", MigrationProfileConflictPacket{}},
+		{"migration-profile-decision-submission.schema.json", MigrationProfileDecisionSubmission{}},
+		{"migration-profile-conversion-decision.schema.json", MigrationProfileConversionDecision{}},
+		{"migration-truth-conflict-packet.schema.json", MigrationTruthConflictPacket{}},
+		{"migration-truth-review-submission.schema.json", MigrationTruthReviewSubmission{}},
+		{"migration-truth-atomicization-review.schema.json", MigrationTruthAtomicizationReview{}},
+		{"truth-compatibility-receipt.schema.json", MigrationTruthCompatibilityReceipt{}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -104,6 +124,36 @@ func TestPackagedStateSchemasMatchRuntimeJSONShapes(t *testing.T) {
 			}
 			if strings.Join(schema.Required, "\x00") != strings.Join(required, "\x00") {
 				t.Fatalf("schema/runtime required fields differ\nschema:  %v\nruntime: %v", schema.Required, required)
+			}
+		})
+	}
+}
+
+func TestEmbeddedSubrecordSchemasHaveCanonicalRecordConsumers(t *testing.T) {
+	tests := []struct {
+		parent string
+		field  string
+		child  string
+	}{
+		{"review.schema.json", "decisions", "review-decision.schema.json"},
+		{"finding-frontmatter.schema.json", "evidence", "finding-evidence.schema.json"},
+	}
+	for _, test := range tests {
+		t.Run(test.child, func(t *testing.T) {
+			body, err := os.ReadFile(adversarialAssetRoot(t) + "/schemas/" + test.parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var schema struct {
+				Properties map[string]struct {
+					Items map[string]any `json:"items"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(body, &schema); err != nil {
+				t.Fatal(err)
+			}
+			if reference, _ := schema.Properties[test.field].Items["$ref"].(string); reference != test.child {
+				t.Fatalf("%s.%s does not consume %s: %q", test.parent, test.field, test.child, reference)
 			}
 		})
 	}

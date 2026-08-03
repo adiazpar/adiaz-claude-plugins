@@ -59,6 +59,42 @@ class ReDisciplineKnowledgeContractTests(unittest.TestCase):
         self.assertIn("exact approved preview digest", text)
         self.assertIn("never writes a 0.7 record", text)
         self.assertIn("Ordinary state commands must refuse", text)
+        for phrase in (
+            "--profile-conflict",
+            "--profile-decision DECISION.json",
+            "retain-packaged-baseline",
+            "projectProfileActivation` `false",
+            "never accept generic check names plus caller-made hashes",
+            "paired case-level blinded evaluation",
+            "real MCP, CLI, Claude Code, and Codex captures",
+            "self-authored semantic hashes",
+        ):
+            self.assertIn(phrase, " ".join(text.split()))
+        decision_schema = json.loads(
+            (PLUGIN / "knowledge" / "schemas" / "migration-profile-decision-submission.schema.json").read_text()
+        )
+        self.assertIs(decision_schema["properties"]["explicitManagerApproval"]["const"], True)
+        self.assertIs(decision_schema["properties"]["projectProfileActivation"]["const"], False)
+        self.assertEqual(decision_schema["properties"]["authority"]["const"], "manager")
+        self.assertEqual(decision_schema["properties"]["decidedAt"]["pattern"], "Z$")
+        self.assertIn("replacesDecisionDigest", decision_schema["required"])
+        retrieval_schema = json.loads(
+            (PLUGIN / "knowledge" / "schemas" / "migration-retrieval-gate-evidence.schema.json").read_text()
+        )
+        self.assertEqual(
+            retrieval_schema["properties"]["suite"]["const"],
+            "migration-retrieval-certification-v1",
+        )
+        self.assertIn("candidateProfile", retrieval_schema["required"])
+        blinded_schema = json.loads(
+            (PLUGIN / "knowledge" / "schemas" / "migration-blinded-agent-evaluation.schema.json").read_text()
+        )
+        self.assertEqual(blinded_schema["properties"]["cases"]["minItems"], 2)
+        host_schema = json.loads(
+            (PLUGIN / "knowledge" / "schemas" / "migration-host-conformance.schema.json").read_text()
+        )
+        self.assertEqual(host_schema["properties"]["trials"]["minItems"], 25)
+        self.assertIn("role-boundary", host_schema["$defs"]["trial"]["properties"]["scenario"]["enum"])
         init = self.skill("init-project")
         self.assertIn("does not perform project state migration", " ".join(init.split()))
         self.assertIn("Never inspect or convert older", init)

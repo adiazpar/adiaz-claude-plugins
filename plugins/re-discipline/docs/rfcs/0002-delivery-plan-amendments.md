@@ -1,8 +1,7 @@
 # RFC 0002: Delivery amendments to the 0.8 campaign state engine
 
-**Status:** Draft amendment set. Reviewed against RFC 0001, the 0.7-to-0.8
-migration plan, the measured 0.7 failure record, and a full survey of the
-0.7.1 implementation (2026-07-31).
+**Status:** Accepted and implemented for re-discipline 0.8.0. Project
+conversion remains an explicit, separately approved migration operation.
 
 **Relationship to RFC 0001:** RFC 0001's architecture is ratified as written:
 the three-plane model, the work-item/run/finding vocabulary, independent
@@ -11,6 +10,13 @@ epistemic axes, closure-as-coverage, filesystem-canonical state, and the hard
 document amends **delivery sequencing, migration scope, enforcement scope,
 and the retrieval roadmap**. Where an amendment conflicts with RFC 0001 or
 the migration plan, the amendment governs.
+
+**Delivery record:** no separate public 0.7.x knowledge-plane release was cut
+after this amendment. The knowledge-plane increments and immediate fixes were
+implemented and validated before the control-plane cutover inside the 0.8
+development cycle, then shipped in the same 0.8 artifact. This preserves the
+amendment's dependency order and all runtime gates without inventing a release
+that did not occur.
 
 **Review evidence base.** These amendments were written against fresh
 measurements of the origin project (`snaphak-re`, 2026-07-31):
@@ -137,7 +143,18 @@ RFC assumes.
   "normalized-beats-raw" test is promoted from a test to a **release gate**
   for making archive opt-in.
 - After the gate passes, §12.8's opt-in archive class takes effect as
-  written.
+  written, but measurement does not authorize the cutover by itself. A manager
+  must submit `knowledge.archive-fallback.opt-in` against an active campaign.
+  The request binds the exact candidate run, semantic and byte digests,
+  explicit UTC ratification time, and expected current policy digest. The
+  engine then reloads the retained 64-case suite and candidate, recomputes all
+  paired outcomes and aggregate gates, and rejects stale generations,
+  profiles, lane contracts, or policy state.
+- A successful opt-in is one journaled compare-and-swap transaction publishing
+  the exact durable report, a versioned authorization receipt, and the amended
+  policy. Replay is idempotent from those durable artifacts; cache pruning,
+  self-attestation, aggregate-only evidence, and a resealed but altered case
+  transcript cannot authorize or preserve the cutover.
 
 ## Amendment 4: Enforcement scope — hook-gated writes now, capabilities later
 
@@ -152,11 +169,17 @@ authority.
 
 **Amended scope for 0.8:**
 
-- Enforce the write boundary with what hosts actually provide: PreToolUse
-  hooks deny direct `Write`/`Edit` on canonical state paths (campaign
+- Enforce the write boundary with what hosts actually provide: `PreToolUse`
+  applies the same write-class guard to Claude Code `Write`/`Edit` and Codex
+  `apply_patch`. It denies direct writes to canonical state paths (campaign
   records, work items, runs, findings, reviews, events, truth), forcing
   mutations through the engine adapters; the engine's reconciliation flags
   out-of-band edits as dirty, exactly as RFC 0001 §12.2 specifies.
+- Keep `SubagentStart` and `SubagentStop` silent for ordinary host subagents.
+  They inject registered-run context or a return check only when explicit
+  dispatch metadata resolves one unique run and matches its immutable
+  context-pack identity; generic host subagent lifecycle events are not a
+  re-discipline dispatch signal.
 - Role separation (curator cannot ratify) is enforced by the engine on the
   **declared** role of the mutation plus the structural invariants (a
   ratification without a review receipt is refused regardless of caller).
@@ -253,6 +276,26 @@ these items compound on top of that.
    Instead of a smarter server-side reranker, return more, smaller cards
    and let the calling model choose what to expand — which is exactly the
    card design. Delete the rerank lane if the ablation agrees.
+
+**Implemented result:** the packaged holdout recorded no dense or reranker
+improvement, but was underpowered for removing a lane. A frozen pre-removal
+three-arm run over the expanded 64-case project corpus recorded two dense-only
+rescues, no added hard-gate regression, and no reranker contribution. The
+current runtime no longer contains a reranker, so the release measurement does
+not manufacture a third current arm. It runs a fresh, clean, generation-pinned
+two-arm baseline-versus-dense matrix and binds the rerank decision separately
+to the immutable pre-removal archive. Cross-runtime arms are never spliced.
+The 0.8 release candidate retains the checksum-pinned local GloVe dense lane
+and its independently benchmarked lexical-graph fallback pending that fresh
+two-arm result. Reranking was removed on the separately bound historical
+dense-versus-rerank evidence plus the packaged holdout. The checked-in
+ablation report, full project measurement, and historical archive are package
+inputs; the packager recomputes current dense and historical rerank
+contribution totals from their per-case rows and requires both decisions,
+profile inventories, and model inventories to agree. Calibration remains the
+27 exact/FTS/graph combinations; dense inventory is decided by ablation rather
+than weight tuning. Context leases ship in the minimal Amendment 5 form and
+are enabled by default for caller-supplied lease IDs.
 
 Calibration scope (RFC 0001 §12.6.2) is unchanged: these are indexing and
 lane-inventory changes, versioned in the chunker/parser/profile contracts,

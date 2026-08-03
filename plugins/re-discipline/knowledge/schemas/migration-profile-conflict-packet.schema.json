@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/migration-profile-conflict-packet.schema.json",
+  "title": "Migration Retrieval Profile Conflict Packet",
+  "type": "object",
+  "required": ["schemaVersion", "project", "projectIdentity", "sourceFingerprint", "conflict", "baseline", "digest"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "project": {"type": "string", "minLength": 1},
+    "projectIdentity": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"const": "missing"}
+      ]
+    },
+    "sourceFingerprint": {"$ref": "#/$defs/digest"},
+    "conflict": {"$ref": "#/$defs/conflict"},
+    "baseline": {"$ref": "#/$defs/baseline"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "conflict": {
+      "type": "object",
+      "required": ["code", "sourcePath", "sourceDigest", "compatibilityStatus", "reason", "legacyProfile", "requiredDecision", "digest"],
+      "properties": {
+        "code": {"const": "unsupported-retrieval-profile"},
+        "sourcePath": {"const": ".re-discipline/knowledge/retrieval-profile.json"},
+        "sourceDigest": {"$ref": "#/$defs/digest"},
+        "compatibilityStatus": {"const": "unsupported"},
+        "reason": {"type": "string", "minLength": 1},
+        "legacyProfile": {"type": "string", "minLength": 1},
+        "requiredDecision": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "#/$defs/digest"}
+      },
+      "additionalProperties": false
+    },
+    "baseline": {
+      "type": "object",
+      "required": ["profile", "profileDigest", "effectiveProfileName", "effectiveProfileDigest", "measurementEvidence", "measurementEvidenceDigest", "runtimeVersion", "activationState"],
+      "properties": {
+        "profile": {"$ref": "retrieval-profile.schema.json"},
+        "profileDigest": {"$ref": "#/$defs/digest"},
+        "effectiveProfileName": {"const": "hybrid-no-rerank-v1"},
+        "effectiveProfileDigest": {"$ref": "#/$defs/digest"},
+        "measurementEvidence": {"$ref": "#/$defs/measurementEvidence"},
+        "measurementEvidenceDigest": {"$ref": "#/$defs/digest"},
+        "runtimeVersion": {"type": "string", "minLength": 1},
+        "activationState": {"const": "packaged-baseline-only-no-project-profile-activation"}
+      },
+      "additionalProperties": false
+    },
+    "measurementEvidence": {
+      "type": "object",
+      "required": ["suite", "digest", "status"],
+      "properties": {
+        "suite": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "#/$defs/digest"},
+        "status": {"const": "passed"},
+        "evaluatedAt": {"type": "string", "format": "date-time"},
+        "evalFingerprint": {"$ref": "#/$defs/digest"},
+        "corpusFingerprint": {"$ref": "#/$defs/digest"},
+        "modelFingerprint": {"$ref": "#/$defs/digest"},
+        "runtimeFingerprint": {"$ref": "#/$defs/digest"},
+        "chunkerVersion": {"type": "string", "minLength": 1},
+        "parserVersion": {"type": "string", "minLength": 1},
+        "ratifiedHardNegativeHits": {"type": "integer", "minimum": 0},
+        "ratifiedAbstentionAccuracy": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

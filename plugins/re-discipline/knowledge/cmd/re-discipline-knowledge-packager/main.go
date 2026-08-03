@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"crypto/sha256"
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -27,6 +30,7 @@ const (
 	runtimeVersion             = "0.8.0"
 	runtimeBuildIDPath         = "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
 	windowsLauncherBuildIDPath = "main.CompiledBuildID"
+	projectLaneMeasurementPath = "evals/conformance/project-lane-ablation.json"
 	windowsArtifactMode        = 0o644
 )
 
@@ -91,11 +95,480 @@ type manifestFile struct {
 type packagedModelManifest struct {
 	Models []struct {
 		ID             string `json:"id"`
+		Role           string `json:"role"`
+		Revision       string `json:"revision"`
 		Implementation string `json:"implementation"`
+		SpecFile       string `json:"specFile"`
+		SpecSHA256     string `json:"specSha256"`
 		ArtifactFile   string `json:"artifactFile"`
 		ArtifactSHA256 string `json:"artifactSha256"`
 		License        string `json:"license"`
 	} `json:"models"`
+}
+
+type packagedRetrievalProfile struct {
+	EffectiveProfiles []struct {
+		Name      string   `json:"name"`
+		Lanes     []string `json:"lanes"`
+		Benchmark struct {
+			Suite              string `json:"suite"`
+			Digest             string `json:"digest"`
+			Status             string `json:"status"`
+			EvalFingerprint    string `json:"evalFingerprint"`
+			CorpusFingerprint  string `json:"corpusFingerprint"`
+			ModelFingerprint   string `json:"modelFingerprint"`
+			RuntimeFingerprint string `json:"runtimeFingerprint"`
+		} `json:"benchmark"`
+	} `json:"effectiveProfiles"`
+}
+
+type laneAblationDecision struct {
+	SchemaVersion      int                                `json:"schemaVersion"`
+	Suite              string                             `json:"suite"`
+	EvaluatedAt        string                             `json:"evaluatedAt"`
+	EvalFingerprint    string                             `json:"evalFingerprint"`
+	CorpusFingerprint  string                             `json:"corpusFingerprint"`
+	RuntimeFingerprint string                             `json:"runtimeFingerprint"`
+	ReportDigest       string                             `json:"reportDigest"`
+	EvidenceLayers     laneAblationDecisionLayers         `json:"evidenceLayers"`
+	Lanes              map[string]laneAblationFinalChoice `json:"lanes"`
+	Conclusion         string                             `json:"conclusion"`
+}
+
+type laneAblationDecisionLayers struct {
+	PackagedConformance laneAblationPackagedDecisionLayer `json:"packagedConformance"`
+	ProjectCorpus       laneAblationProjectDecisionLayer  `json:"projectCorpus"`
+}
+
+type laneAblationPackagedDecisionLayer struct {
+	Status       string                                `json:"status"`
+	HoldoutCases int                                   `json:"holdoutCases"`
+	Lanes        map[string]laneAblationPackagedCounts `json:"lanes"`
+}
+
+type laneAblationPackagedCounts struct {
+	UniqueFirst int `json:"uniqueFirst"`
+	Improved    int `json:"improved"`
+	Degraded    int `json:"degraded"`
+}
+
+type laneAblationProjectDecisionLayer struct {
+	Status                   string                               `json:"status"`
+	CasesPerArm              int                                  `json:"casesPerArm"`
+	RawBenchmarkSHA256       string                               `json:"rawBenchmarkSha256"`
+	ProjectMeasurementPath   string                               `json:"projectMeasurementPath"`
+	ProjectMeasurementSHA256 string                               `json:"projectMeasurementSha256"`
+	Lanes                    map[string]laneAblationProjectCounts `json:"lanes"`
+}
+
+type laneAblationProjectCounts struct {
+	Rescues                  int `json:"rescues"`
+	Losses                   int `json:"losses"`
+	RankImprovements         int `json:"rankImprovements"`
+	RankDegradations         int `json:"rankDegradations"`
+	AddedHardGateRegressions int `json:"addedHardGateRegressions"`
+}
+
+type laneAblationFinalChoice struct {
+	Decision string `json:"decision"`
+	Basis    string `json:"basis"`
+}
+
+type laneAblationReport struct {
+	SchemaVersion      int                         `json:"schemaVersion"`
+	Suite              string                      `json:"suite"`
+	EvaluatedAt        string                      `json:"evaluatedAt"`
+	SourceRevision     string                      `json:"sourceRevision"`
+	EvalFingerprint    string                      `json:"evalFingerprint"`
+	CorpusFingerprint  string                      `json:"corpusFingerprint"`
+	RuntimeFingerprint string                      `json:"runtimeFingerprint"`
+	ParserVersion      string                      `json:"parserVersion"`
+	ChunkerVersion     string                      `json:"chunkerVersion"`
+	Profiles           []laneAblationProfile       `json:"profiles"`
+	Models             []laneAblationModel         `json:"models"`
+	Cases              []laneAblationCaseOutcome   `json:"cases"`
+	ProjectEvidence    laneAblationProjectEvidence `json:"projectEvidence"`
+}
+
+type laneAblationProjectEvidence struct {
+	Suite                          string                         `json:"suite"`
+	Project                        string                         `json:"project"`
+	Status                         string                         `json:"status"`
+	EvaluatedAt                    string                         `json:"evaluatedAt"`
+	FrozenSourceRevision           string                         `json:"frozenSourceRevision"`
+	RawBenchmarkSHA256             string                         `json:"rawBenchmarkSha256"`
+	RawBenchmarkRunID              string                         `json:"rawBenchmarkRunId"`
+	Complete                       bool                           `json:"complete"`
+	ArmCount                       int                            `json:"armCount"`
+	CasesPerArm                    int                            `json:"casesPerArm"`
+	CorpusFingerprint              string                         `json:"corpusFingerprint"`
+	EvalFingerprint                string                         `json:"evalFingerprint"`
+	ProjectionTransformDigest      string                         `json:"projectionTransformDigest"`
+	ProjectMeasurementPath         string                         `json:"projectMeasurementPath"`
+	ProjectMeasurementSHA256       string                         `json:"projectMeasurementSha256"`
+	IndexedSourceBytesUnchanged    bool                           `json:"indexedSourceBytesUnchanged"`
+	SharedHardGateFailures         int                            `json:"sharedHardGateFailures"`
+	DenseAddedHardGateRegressions  int                            `json:"denseAddedHardGateRegressions"`
+	RerankAddedHardGateRegressions int                            `json:"rerankAddedHardGateRegressions"`
+	Dense                          laneAblationProjectLaneMetric  `json:"dense"`
+	Rerank                         laneAblationProjectLaneMetric  `json:"rerank"`
+	RescueCases                    []laneAblationProjectRescue    `json:"rescueCases"`
+	Uncertainty                    laneAblationProjectUncertainty `json:"uncertainty"`
+}
+
+type laneAblationProjectLaneMetric struct {
+	Rescues                      int     `json:"rescues"`
+	Losses                       int     `json:"losses"`
+	RankImprovements             int     `json:"rankImprovements"`
+	RankDegradations             int     `json:"rankDegradations"`
+	PathsChanged                 int     `json:"pathsChanged,omitempty"`
+	OverallRecallDelta           float64 `json:"overallRecallDelta,omitempty"`
+	HoldoutRecallDelta           float64 `json:"holdoutRecallDelta,omitempty"`
+	OverallCompleteEvidenceDelta float64 `json:"overallCompleteEvidenceDelta,omitempty"`
+	HoldoutCompleteEvidenceDelta float64 `json:"holdoutCompleteEvidenceDelta,omitempty"`
+}
+
+type laneAblationProjectRescue struct {
+	CaseID                   string `json:"caseId"`
+	Split                    string `json:"split"`
+	Topic                    string `json:"topic"`
+	TargetPath               string `json:"targetPath"`
+	BaselineRelevantRank     int    `json:"baselineRelevantRank"`
+	DenseRelevantRank        int    `json:"denseRelevantRank"`
+	TargetDisjoint           bool   `json:"targetDisjoint"`
+	SourceClass              string `json:"sourceClass"`
+	AddedHardGateRegressions int    `json:"addedHardGateRegressions"`
+}
+
+type laneAblationProjectUncertainty struct {
+	WilsonIntervals                  []laneAblationWilsonInterval `json:"wilsonIntervals"`
+	TopicBootstrap                   laneAblationTopicBootstrap   `json:"topicBootstrap"`
+	LeaveOneTopicOutZeroWhenOmitting []string                     `json:"leaveOneTopicOutZeroWhenOmitting"`
+	ClusterFragile                   bool                         `json:"clusterFragile"`
+	FinalCorpusRerunRequired         bool                         `json:"finalCorpusRerunRequired"`
+}
+
+type laneAblationWilsonInterval struct {
+	Slice     string  `json:"slice"`
+	Successes int     `json:"successes"`
+	Trials    int     `json:"trials"`
+	Estimate  float64 `json:"estimate"`
+	Lower     float64 `json:"lower"`
+	Upper     float64 `json:"upper"`
+}
+
+type laneAblationTopicBootstrap struct {
+	Replicates          int     `json:"replicates"`
+	PointEstimate       float64 `json:"pointEstimate"`
+	Lower               float64 `json:"lower"`
+	Upper               float64 `json:"upper"`
+	ZeroOrLowerFraction float64 `json:"zeroOrLowerFraction"`
+}
+
+type laneAblationProfile struct {
+	Role             string   `json:"role"`
+	Name             string   `json:"name"`
+	Lanes            []string `json:"lanes"`
+	BenchmarkDigest  string   `json:"benchmarkDigest"`
+	ModelFingerprint string   `json:"modelFingerprint"`
+}
+
+type laneAblationModel struct {
+	ID             string `json:"id"`
+	Role           string `json:"role"`
+	Revision       string `json:"revision"`
+	Implementation string `json:"implementation"`
+	SpecSHA256     string `json:"specSha256"`
+	ArtifactSHA256 string `json:"artifactSha256,omitempty"`
+}
+
+type laneAblationCaseOutcome struct {
+	CaseID   string                   `json:"caseId"`
+	Baseline laneAblationQueryOutcome `json:"baseline"`
+	Dense    laneAblationQueryOutcome `json:"dense"`
+	Rerank   laneAblationQueryOutcome `json:"rerank"`
+}
+
+type laneAblationQueryOutcome struct {
+	RelevantHit  bool     `json:"relevantHit"`
+	UniqueFirst  bool     `json:"uniqueFirst"`
+	RelevantRank int      `json:"relevantRank"`
+	FindingIDs   []string `json:"findingIds"`
+}
+
+type laneAblationCounts struct {
+	UniqueFirst int
+	Improved    int
+	Degraded    int
+}
+
+type projectLaneMeasurement struct {
+	Schema           string                         `json:"$schema"`
+	SchemaVersion    int                            `json:"schemaVersion"`
+	Kind             string                         `json:"kind"`
+	MeasurementOnly  bool                           `json:"measurementOnly"`
+	Project          string                         `json:"project"`
+	EvaluatedAt      string                         `json:"evaluatedAt"`
+	Provenance       projectLaneProvenance          `json:"provenance"`
+	Corpus           projectLaneCorpus              `json:"corpus"`
+	Harness          projectLaneHarness             `json:"harness"`
+	Models           []projectLaneModel             `json:"models"`
+	Profiles         []projectLaneProfile           `json:"profiles"`
+	Cases            []projectLaneCase              `json:"cases"`
+	Slices           json.RawMessage                `json:"slices"`
+	Uncertainty      projectLaneUncertainty         `json:"uncertainty"`
+	Sensitivity      projectLaneSensitivity         `json:"sensitivity"`
+	HistoricalRerank projectLaneHistoricalRerank    `json:"historicalRerank"`
+	Validation       json.RawMessage                `json:"validation"`
+	Decision         projectLaneMeasurementDecision `json:"decision"`
+}
+
+type projectLaneProvenance struct {
+	FrozenSourceRevision       string `json:"frozenSourceRevision"`
+	ProjectGitRevision         string `json:"projectGitRevision"`
+	ProjectDirtyFingerprint    string `json:"projectDirtyFingerprint"`
+	FrozenRuntimeFingerprint   string `json:"frozenRuntimeFingerprint"`
+	RawBenchmarkSHA256         string `json:"rawBenchmarkSha256"`
+	RawBenchmarkRunID          string `json:"rawBenchmarkRunId"`
+	RawBenchmarkComplete       bool   `json:"rawBenchmarkComplete"`
+	RawBenchmarkArmCount       int    `json:"rawBenchmarkArmCount"`
+	RawBenchmarkCasesPerArm    int    `json:"rawBenchmarkCasesPerArm"`
+	RawBenchmarkDurationMillis int    `json:"rawBenchmarkDurationMillis"`
+	ParserVersion              string `json:"parserVersion"`
+	ChunkerVersion             string `json:"chunkerVersion"`
+	ProfileCatalogSHA256       string `json:"profileCatalogSha256"`
+	ModelManifestSHA256        string `json:"modelManifestSha256"`
+}
+
+type projectLaneCorpus struct {
+	GenerationID                     string          `json:"generationId"`
+	CorpusFingerprint                string          `json:"corpusFingerprint"`
+	DocumentCount                    int             `json:"documentCount"`
+	ChunkCount                       int             `json:"chunkCount"`
+	IndexedSourceProof               json.RawMessage `json:"indexedSourceProof"`
+	FinalEvalFileCount               int             `json:"finalEvalFileCount"`
+	FinalEvalCaseCount               int             `json:"finalEvalCaseCount"`
+	FinalEvalFiles                   json.RawMessage `json:"finalEvalFiles"`
+	ProjectedEvalFingerprint         string          `json:"projectedEvalFingerprint"`
+	ProjectionManifestSHA256         string          `json:"projectionManifestSha256"`
+	ProjectionTransformDigest        string          `json:"projectionTransformDigest"`
+	ProjectionOperation              string          `json:"projectionOperation"`
+	ProjectionRemovedOccurrences     int             `json:"projectionRemovedOccurrences"`
+	ProjectionPreservesAllOtherBytes bool            `json:"projectionPreservesAllOtherBytes"`
+}
+
+type projectLaneHarness struct {
+	SourceRepositoryMutated          bool            `json:"sourceRepositoryMutated"`
+	IndexedSourceBytesUnchanged      bool            `json:"indexedSourceBytesUnchanged"`
+	ReceiptSHA256                    string          `json:"receiptSha256"`
+	PluginRevision                   string          `json:"pluginRevision"`
+	ProjectRevision                  string          `json:"projectRevision"`
+	BenchmarkCommandSHA256           string          `json:"benchmarkCommandSha256"`
+	ProjectionManifestArtifactSHA256 string          `json:"projectionManifestArtifactSha256"`
+	IndexedSourcesManifestSHA256     string          `json:"indexedSourcesManifestSha256"`
+	ControlPlaneSubstitutions        json.RawMessage `json:"controlPlaneSubstitutions"`
+	RenamedPaths                     json.RawMessage `json:"renamedPaths"`
+	ExcludedSourcePaths              json.RawMessage `json:"excludedSourcePaths"`
+	NegativeControls                 json.RawMessage `json:"negativeControls"`
+}
+
+type projectLaneModel struct {
+	ID             string `json:"id"`
+	Role           string `json:"role"`
+	Revision       string `json:"revision"`
+	Implementation string `json:"implementation"`
+	SpecSHA256     string `json:"specSha256"`
+	ArtifactSHA256 string `json:"artifactSha256,omitempty"`
+}
+
+type projectLaneProfile struct {
+	Role                 string                        `json:"role"`
+	Name                 string                        `json:"name"`
+	ActiveLanes          []string                      `json:"activeLanes"`
+	EffectiveIdentity    string                        `json:"effectiveIdentity"`
+	ObservationDigest    string                        `json:"observationDigest"`
+	ModelIDs             []string                      `json:"modelIds"`
+	HardGatesPassed      bool                          `json:"hardGatesPassed"`
+	NonInferiorToLexical bool                          `json:"nonInferiorToLexical"`
+	Metrics              map[string]float64            `json:"metrics"`
+	MetricsBySplit       map[string]map[string]float64 `json:"metricsBySplit"`
+}
+
+type projectLaneOutcome struct {
+	CaseID                 string   `json:"caseId"`
+	Split                  string   `json:"split"`
+	Topic                  string   `json:"topic"`
+	Paths                  []string `json:"paths"`
+	Tiers                  []string `json:"tiers"`
+	ChunkIDs               []string `json:"chunkIds"`
+	ContentHashes          []string `json:"contentHashes"`
+	RelevantPaths          []string `json:"relevantPaths"`
+	RelevantRanks          []int    `json:"relevantRanks"`
+	HardNegativeHits       []string `json:"hardNegativeHits"`
+	ExpectedCitationsFound []string `json:"expectedCitationsFound"`
+	EstimatedTokens        int      `json:"estimatedTokens"`
+	ReturnedUniquePaths    int      `json:"returnedUniquePaths"`
+	ExpectedFound          bool     `json:"expectedFound"`
+	CompleteEvidence       bool     `json:"completeEvidence"`
+	AuthoritySafe          bool     `json:"authoritySafe"`
+	CitationMetadataSafe   bool     `json:"citationMetadataSafe"`
+	CitationSafe           bool     `json:"citationSafe"`
+	CorpusMatched          bool     `json:"corpusMatched"`
+	AbstentionCorrect      bool     `json:"abstentionCorrect"`
+	BudgetSafe             bool     `json:"budgetSafe"`
+	ReplayIdentical        bool     `json:"replayIdentical"`
+	MinimumTokenBudget     int      `json:"minimumTokenBudget"`
+	QualityGateApplicable  bool     `json:"qualityGateApplicable"`
+	SafetyPassed           bool     `json:"safetyPassed"`
+	QualityPassed          bool     `json:"qualityPassed"`
+	GatePassed             bool     `json:"gatePassed"`
+	ReturnedTokens         int      `json:"returnedTokens"`
+	RelevantTokens         int      `json:"relevantTokens"`
+	DuplicateTokens        int      `json:"duplicateTokens"`
+	StaleResults           int      `json:"staleResults"`
+	LatencyMillis          int      `json:"latencyMillis"`
+}
+
+type projectLaneComparison struct {
+	HitEffect    string `json:"hitEffect"`
+	RankDelta    int    `json:"rankDelta"`
+	PathsChanged bool   `json:"pathsChanged"`
+	UniqueRescue bool   `json:"uniqueRescue"`
+	RankImproved bool   `json:"rankImproved"`
+	RankDegraded bool   `json:"rankDegraded"`
+}
+
+type projectLaneCase struct {
+	CaseID           string                `json:"caseId"`
+	Split            string                `json:"split"`
+	Role             string                `json:"role"`
+	Topic            string                `json:"topic"`
+	QueryClass       string                `json:"queryClass"`
+	VocabularyPolicy string                `json:"vocabularyPolicy"`
+	Answerable       bool                  `json:"answerable"`
+	Baseline         projectLaneOutcome    `json:"baseline"`
+	Dense            projectLaneOutcome    `json:"dense"`
+	DenseComparison  projectLaneComparison `json:"denseComparison"`
+}
+
+type projectLaneWilsonInterval struct {
+	Slice      string  `json:"slice"`
+	Event      string  `json:"event"`
+	Successes  int     `json:"successes"`
+	Trials     int     `json:"trials"`
+	Confidence float64 `json:"confidence"`
+	Estimate   float64 `json:"estimate"`
+	Lower      float64 `json:"lower"`
+	Upper      float64 `json:"upper"`
+}
+
+type projectLaneBootstrap struct {
+	Method              string  `json:"method"`
+	ClusterKey          string  `json:"clusterKey"`
+	ClusterCount        int     `json:"clusterCount"`
+	Replicates          int     `json:"replicates"`
+	Seed                int     `json:"seed"`
+	Estimand            string  `json:"estimand"`
+	PointEstimate       float64 `json:"pointEstimate"`
+	Lower               float64 `json:"lower"`
+	Median              float64 `json:"median"`
+	Upper               float64 `json:"upper"`
+	ZeroOrLowerFraction float64 `json:"zeroOrLowerFraction"`
+}
+
+type projectLaneUncertainty struct {
+	WilsonIntervals       []projectLaneWilsonInterval `json:"wilsonIntervals"`
+	TopicClusterBootstrap projectLaneBootstrap        `json:"topicClusterBootstrap"`
+}
+
+type projectLaneLeaveOneOut struct {
+	OmittedTopic      string  `json:"omittedTopic"`
+	AnswerableCases   int     `json:"answerableCases"`
+	DenseHitRateDelta float64 `json:"denseHitRateDelta"`
+}
+
+type projectLaneSensitivity struct {
+	BudgetSlices          json.RawMessage          `json:"budgetSlices"`
+	BudgetCaseComparisons json.RawMessage          `json:"budgetCaseComparisons"`
+	LeaveOneTopicOut      []projectLaneLeaveOneOut `json:"leaveOneTopicOut"`
+	DensePathChangedCases int                      `json:"densePathChangedCases"`
+	PreliminaryComparison json.RawMessage          `json:"preliminaryComparison"`
+}
+
+type projectLaneHistoricalProvenance struct {
+	RuntimeSourceRevision      string `json:"runtimeSourceRevision"`
+	ProjectGitRevision         string `json:"projectGitRevision"`
+	ProjectDirtyFingerprint    string `json:"projectDirtyFingerprint"`
+	RuntimeFingerprint         string `json:"runtimeFingerprint"`
+	RawBenchmarkSHA256         string `json:"rawBenchmarkSha256"`
+	EvidenceArchivePath        string `json:"evidenceArchivePath"`
+	EvidenceArchiveSHA256      string `json:"evidenceArchiveSha256"`
+	RawBenchmarkByteCount      int64  `json:"rawBenchmarkByteCount"`
+	EvidenceArchiveByteCount   int64  `json:"evidenceArchiveByteCount"`
+	EvidenceArchiveFormat      string `json:"evidenceArchiveFormat"`
+	RawBenchmarkRunID          string `json:"rawBenchmarkRunId"`
+	RawBenchmarkComplete       bool   `json:"rawBenchmarkComplete"`
+	RawBenchmarkArmCount       int    `json:"rawBenchmarkArmCount"`
+	RawBenchmarkCasesPerArm    int    `json:"rawBenchmarkCasesPerArm"`
+	RawBenchmarkDurationMillis int    `json:"rawBenchmarkDurationMillis"`
+	GenerationID               string `json:"generationId"`
+	CorpusFingerprint          string `json:"corpusFingerprint"`
+	EvalFingerprint            string `json:"evalFingerprint"`
+	ParserVersion              string `json:"parserVersion"`
+	ChunkerVersion             string `json:"chunkerVersion"`
+	ProfileCatalogSHA256       string `json:"profileCatalogSha256"`
+	ModelManifestSHA256        string `json:"modelManifestSha256"`
+	ProjectionManifestSHA256   string `json:"projectionManifestSha256"`
+	ProjectionTransformDigest  string `json:"projectionTransformDigest"`
+}
+
+type projectLaneHistoricalCase struct {
+	CaseID           string                `json:"caseId"`
+	Split            string                `json:"split"`
+	Topic            string                `json:"topic"`
+	Answerable       bool                  `json:"answerable"`
+	Dense            projectLaneOutcome    `json:"dense"`
+	Rerank           projectLaneOutcome    `json:"rerank"`
+	RerankComparison projectLaneComparison `json:"rerankComparison"`
+}
+
+type projectLaneHistoricalRerank struct {
+	Provenance                   projectLaneHistoricalProvenance `json:"provenance"`
+	Models                       []projectLaneModel              `json:"models"`
+	Profiles                     []projectLaneProfile            `json:"profiles"`
+	Cases                        []projectLaneHistoricalCase     `json:"cases"`
+	BudgetSlices                 json.RawMessage                 `json:"budgetSlices"`
+	BudgetCaseComparisons        json.RawMessage                 `json:"budgetCaseComparisons"`
+	SharedSafetyFailures         int                             `json:"sharedSafetyFailures"`
+	RerankAddedSafetyRegressions int                             `json:"rerankAddedSafetyRegressions"`
+	Decision                     projectLaneDecision             `json:"decision"`
+}
+
+type projectLaneDecision struct {
+	Action           string   `json:"action"`
+	PositiveEvidence bool     `json:"positiveEvidence"`
+	EventCount       int      `json:"eventCount"`
+	CaseIDs          []string `json:"caseIds"`
+	Rationale        string   `json:"rationale"`
+}
+
+type projectLaneMeasurementDecision struct {
+	Dense                       projectLaneDecision `json:"dense"`
+	Rerank                      projectLaneDecision `json:"rerank"`
+	ProductionLanes             []string            `json:"productionLanes"`
+	SharedSafetyFailures        int                 `json:"sharedSafetyFailures"`
+	DenseAddedSafetyRegressions int                 `json:"denseAddedSafetyRegressions"`
+	ProductionProfileConsistent bool                `json:"productionProfileConsistent"`
+	ReleaseGatePassed           bool                `json:"releaseGatePassed"`
+	Rationale                   string              `json:"rationale"`
+}
+
+type projectLaneDerived struct {
+	Dense             laneAblationProjectLaneMetric
+	Rerank            laneAblationProjectLaneMetric
+	Rescues           []laneAblationProjectRescue
+	ZeroOmittedTopics []string
+	ClusterFragile    bool
 }
 
 func main() {
@@ -983,10 +1456,10 @@ func discoverSharedAssets(moduleRoot string) ([]manifestFile, error) {
 		}
 	}
 	sort.Slice(assets, func(i, j int) bool { return assets[i].Path < assets[j].Path })
-	if len(binaryAssets) == 0 {
-		return nil, errors.New("shared runtime assets contain no packaged model artifact")
-	}
 	if err := verifySharedModelPins(moduleRoot, binaryAssets); err != nil {
+		return nil, err
+	}
+	if err := verifyLaneShipmentGate(moduleRoot); err != nil {
 		return nil, err
 	}
 	return assets, nil
@@ -997,6 +1470,15 @@ func sharedAssetKind(relative string) (string, error) {
 	case relative == "evals/conformance/cases.json" ||
 		relative == "evals/conformance/finding-cases.json":
 		return "benchmark-cases", nil
+	case relative == "evals/conformance/lane-ablation-decision.json":
+		return "lane-ablation-decision", nil
+	case relative == "evals/conformance/lane-ablation-report.json":
+		return "lane-ablation-report", nil
+	case relative == projectLaneMeasurementPath:
+		return "project-lane-ablation-measurement", nil
+	case strings.HasPrefix(relative, "evals/conformance/evidence/") &&
+		strings.HasSuffix(strings.ToLower(relative), ".zip"):
+		return "lane-ablation-evidence-archive", nil
 	case strings.HasPrefix(relative, "evals/conformance/fixture/") &&
 		(strings.HasSuffix(strings.ToLower(relative), ".md") ||
 			strings.HasSuffix(strings.ToLower(relative), ".json") ||
@@ -1021,6 +1503,1274 @@ func sharedAssetKind(relative string) (string, error) {
 	default:
 		return "", fmt.Errorf("unclassified shared runtime asset %q", relative)
 	}
+}
+
+// verifyLaneShipmentGate makes the holdout decision executable release
+// policy. A future profile cannot silently reintroduce a dense or rerank lane,
+// or its associated model, unless the checked-in holdout receipt records a
+// positive unique-first or net ranking contribution and explicitly retains
+// that lane.
+func verifyLaneShipmentGate(moduleRoot string) error {
+	profileBody, err := os.ReadFile(filepath.Join(moduleRoot, "profiles", "balanced-v1.json"))
+	if err != nil {
+		return err
+	}
+	var profile packagedRetrievalProfile
+	if err := json.Unmarshal(profileBody, &profile); err != nil {
+		return fmt.Errorf("decode retrieval profile for lane shipment gate: %w", err)
+	}
+	if len(profile.EffectiveProfiles) == 0 {
+		return errors.New("retrieval profile has no evidence-gated effective profile")
+	}
+	manifestBody, err := os.ReadFile(filepath.Join(moduleRoot, "models", "manifest.json"))
+	if err != nil {
+		return err
+	}
+	var manifest packagedModelManifest
+	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
+		return fmt.Errorf("decode model manifest for lane shipment gate: %w", err)
+	}
+	reportPath := filepath.Join(
+		moduleRoot, "evals", "conformance", "lane-ablation-report.json")
+	var report laneAblationReport
+	reportBody, err := decodeStrictJSONFile(reportPath, "lane ablation report", &report)
+	if err != nil {
+		return err
+	}
+	receiptPath := filepath.Join(
+		moduleRoot, "evals", "conformance", "lane-ablation-decision.json")
+	var receipt laneAblationDecision
+	if _, err := decodeStrictJSONFile(receiptPath, "lane shipment evidence", &receipt); err != nil {
+		return err
+	}
+	if err := validateLaneAblationIdentity(report, receipt, reportBody); err != nil {
+		return err
+	}
+
+	findingCasesBody, err := os.ReadFile(filepath.Join(
+		moduleRoot, "evals", "conformance", "finding-cases.json"))
+	if err != nil {
+		return fmt.Errorf("read lane shipment holdout corpus: %w", err)
+	}
+	var findingSuite struct {
+		Cases []struct {
+			ID    string `json:"id"`
+			Split string `json:"split"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(findingCasesBody, &findingSuite); err != nil {
+		return fmt.Errorf("decode lane shipment holdout corpus: %w", err)
+	}
+	holdoutIDs := map[string]bool{}
+	for _, eval := range findingSuite.Cases {
+		if eval.Split != "holdout" {
+			continue
+		}
+		if strings.TrimSpace(eval.ID) == "" || holdoutIDs[eval.ID] {
+			return errors.New("lane shipment holdout corpus has a missing or duplicate case id")
+		}
+		holdoutIDs[eval.ID] = true
+	}
+	packagedLayer := receipt.EvidenceLayers.PackagedConformance
+	if len(holdoutIDs) < 10 || packagedLayer.HoldoutCases != len(holdoutIDs) {
+		return fmt.Errorf(
+			"lane shipment evidence holdout count %d does not match corpus count %d",
+			packagedLayer.HoldoutCases, len(holdoutIDs))
+	}
+	if err := validateLaneAblationProfiles(report.Profiles); err != nil {
+		return err
+	}
+	if err := validateLaneAblationModels(report.Models); err != nil {
+		return err
+	}
+	computed, err := validateAndAggregateLaneCases(report.Cases, holdoutIDs)
+	if err != nil {
+		return err
+	}
+	for _, lane := range []string{"dense", "rerank"} {
+		evidence, present := packagedLayer.Lanes[lane]
+		counts := computed[lane]
+		if !present || evidence.UniqueFirst != counts.UniqueFirst ||
+			evidence.Improved != counts.Improved || evidence.Degraded != counts.Degraded {
+			return fmt.Errorf(
+				"lane shipment evidence for %s does not match recomputed report aggregates", lane)
+		}
+	}
+	if err := validateProjectLaneEvidence(moduleRoot, report, receipt); err != nil {
+		return err
+	}
+
+	requested := map[string]bool{}
+	for _, row := range profile.EffectiveProfiles {
+		for _, lane := range row.Lanes {
+			if lane == "dense" || lane == "rerank" {
+				requested[lane] = true
+			}
+		}
+		if row.Benchmark.Suite != receipt.Suite || row.Benchmark.Status != "passed" {
+			return fmt.Errorf(
+				"lane shipment evidence uses a different or unpassed suite for profile %q", row.Name)
+		}
+		role := ""
+		if containsString(row.Lanes, "rerank") {
+			role = "rerank"
+		} else if containsString(row.Lanes, "dense") {
+			role = "dense"
+		}
+		if role != "" {
+			evidenceProfile, ok := laneProfileByRole(report.Profiles, role)
+			if !ok || row.Benchmark.EvalFingerprint != receipt.EvalFingerprint ||
+				row.Benchmark.ModelFingerprint != evidenceProfile.ModelFingerprint ||
+				row.Benchmark.RuntimeFingerprint != report.RuntimeFingerprint ||
+				!validSHA256Identity(row.Benchmark.Digest) ||
+				!validSHA256Identity(row.Benchmark.CorpusFingerprint) {
+				return fmt.Errorf(
+					"requested %s lane profile %q is not bound to the measured model/runtime and current packaged receipt", role, row.Name)
+			}
+		}
+	}
+	modelCounts := map[string]int{}
+	for _, model := range manifest.Models {
+		switch model.Role {
+		case "embedding":
+			modelCounts[model.Role]++
+			if !requested["dense"] {
+				return fmt.Errorf("embedding model %q ships without an evidence-gated dense lane", model.ID)
+			}
+			if evidenceModel, ok := laneModelByRole(report.Models, model.Role); !ok ||
+				!packagedModelMatchesAblation(model, evidenceModel) {
+				return fmt.Errorf("embedding model %q is not the model measured by the lane report", model.ID)
+			}
+		case "reranker":
+			return fmt.Errorf("reranker model %q ships despite a two-layer removal decision", model.ID)
+		default:
+			return fmt.Errorf("model %q has unsupported shipment role %q", model.ID, model.Role)
+		}
+	}
+	if requested["dense"] && modelCounts["embedding"] != 1 {
+		return errors.New("dense lane must ship exactly one report-bound embedding model")
+	}
+	if requested["rerank"] {
+		return errors.New("rerank lane cannot ship after zero measured benefit in both evidence layers")
+	}
+	if !requested["dense"] {
+		return errors.New("production profile omits the project-evidence-retained dense lane")
+	}
+	denseChoice, densePresent := receipt.Lanes["dense"]
+	rerankChoice, rerankPresent := receipt.Lanes["rerank"]
+	if !densePresent || denseChoice.Decision != "retain" ||
+		denseChoice.Basis != "project-corpus-rescues" {
+		return errors.New("dense lane lacks a project-corpus rescue decision and cannot ship")
+	}
+	if !rerankPresent || rerankChoice.Decision != "remove" ||
+		rerankChoice.Basis != "no-measured-benefit-across-both-layers" {
+		return errors.New("rerank removal decision is incomplete")
+	}
+	return nil
+}
+
+func decodeStrictJSONFile(path, label string, target any) ([]byte, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", label, err)
+	}
+	if err := rejectDuplicateJSONKeys(body); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", label, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", label, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("decode %s: trailing JSON value", label)
+	}
+	return body, nil
+}
+
+func rejectDuplicateJSONKeys(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	var consumeValue func() error
+	consumeValue = func() error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delimiter, isDelimiter := token.(json.Delim)
+		if !isDelimiter {
+			return nil
+		}
+		switch delimiter {
+		case '{':
+			seen := map[string]bool{}
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return errors.New("object key is not a string")
+				}
+				if seen[key] {
+					return fmt.Errorf("duplicate JSON key %q", key)
+				}
+				seen[key] = true
+				if err := consumeValue(); err != nil {
+					return err
+				}
+			}
+			closing, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			if closing != json.Delim('}') {
+				return errors.New("object is not closed")
+			}
+		case '[':
+			for decoder.More() {
+				if err := consumeValue(); err != nil {
+					return err
+				}
+			}
+			closing, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			if closing != json.Delim(']') {
+				return errors.New("array is not closed")
+			}
+		default:
+			return fmt.Errorf("unexpected JSON delimiter %q", delimiter)
+		}
+		return nil
+	}
+	if err := consumeValue(); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return errors.New("trailing JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func validSHA256Identity(value string) bool {
+	if len(value) != 71 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	return err == nil
+}
+
+func validBareSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func validateLaneAblationIdentity(
+	report laneAblationReport,
+	receipt laneAblationDecision,
+	reportBody []byte,
+) error {
+	if report.SchemaVersion != 2 || report.Suite != "packaged-conformance-v1" ||
+		!validSHA256Identity(report.EvalFingerprint) ||
+		!validSHA256Identity(report.CorpusFingerprint) ||
+		!validSHA256Identity(report.RuntimeFingerprint) ||
+		strings.TrimSpace(report.ParserVersion) == "" || strings.TrimSpace(report.ChunkerVersion) == "" ||
+		len(report.SourceRevision) != 40 || report.SourceRevision != strings.ToLower(report.SourceRevision) {
+		return errors.New("lane ablation report has an incomplete immutable runtime identity")
+	}
+	if _, err := hex.DecodeString(report.SourceRevision); err != nil {
+		return errors.New("lane ablation report has an invalid source revision")
+	}
+	if _, err := time.Parse(time.RFC3339, report.EvaluatedAt); err != nil {
+		return errors.New("lane ablation report has an invalid evaluation timestamp")
+	}
+	reportHash := sha256.Sum256(reportBody)
+	reportDigest := "sha256:" + hex.EncodeToString(reportHash[:])
+	if receipt.SchemaVersion != 3 || receipt.Suite != report.Suite ||
+		receipt.EvaluatedAt != report.EvaluatedAt ||
+		receipt.EvalFingerprint != report.EvalFingerprint ||
+		receipt.CorpusFingerprint != report.CorpusFingerprint ||
+		receipt.RuntimeFingerprint != report.RuntimeFingerprint ||
+		receipt.ReportDigest != reportDigest ||
+		strings.TrimSpace(receipt.Conclusion) == "" || len(receipt.Lanes) != 2 {
+		return errors.New("lane shipment evidence is not bound to the immutable ablation report")
+	}
+	for _, lane := range []string{"dense", "rerank"} {
+		choice, present := receipt.Lanes[lane]
+		if !present || (choice.Decision != "remove" && choice.Decision != "retain") ||
+			strings.TrimSpace(choice.Basis) == "" {
+			return fmt.Errorf("lane shipment evidence for %s is incomplete", lane)
+		}
+	}
+	packaged := receipt.EvidenceLayers.PackagedConformance
+	if packaged.Status != "underpowered-no-positive-contribution" ||
+		packaged.HoldoutCases < 10 || len(packaged.Lanes) != 2 {
+		return errors.New("packaged conformance evidence layer is incomplete")
+	}
+	project := receipt.EvidenceLayers.ProjectCorpus
+	if project.Status != "final-corpus-verified" ||
+		project.CasesPerArm != 64 || !validSHA256Identity(project.RawBenchmarkSHA256) ||
+		project.ProjectMeasurementPath != projectLaneMeasurementPath ||
+		!validSHA256Identity(project.ProjectMeasurementSHA256) ||
+		len(project.Lanes) != 2 {
+		return errors.New("project-corpus evidence layer is incomplete")
+	}
+	return nil
+}
+
+func validateProjectLaneEvidence(
+	moduleRoot string,
+	report laneAblationReport,
+	receipt laneAblationDecision,
+) error {
+	measurementFile, err := sharedAssetPath(moduleRoot, projectLaneMeasurementPath)
+	if err != nil {
+		return err
+	}
+	var measurement projectLaneMeasurement
+	measurementBody, err := decodeStrictJSONFile(
+		measurementFile, "project lane-ablation measurement", &measurement)
+	if err != nil {
+		return err
+	}
+	measurementSum := sha256.Sum256(measurementBody)
+	measurementIdentity := "sha256:" + hex.EncodeToString(measurementSum[:])
+	if err := validateProjectLaneMeasurementIdentity(measurement, report); err != nil {
+		return err
+	}
+	if err := validateProjectLaneArchive(moduleRoot, measurement.HistoricalRerank.Provenance); err != nil {
+		return err
+	}
+	derived, err := deriveProjectLaneMeasurement(measurement)
+	if err != nil {
+		return err
+	}
+
+	project := report.ProjectEvidence
+	if project.Suite != "project-benchmark-v1" || project.Project != measurement.Project ||
+		project.Status != "final-corpus-verified" ||
+		project.EvaluatedAt != measurement.EvaluatedAt ||
+		project.FrozenSourceRevision != measurement.Provenance.FrozenSourceRevision ||
+		project.RawBenchmarkSHA256 != measurement.Provenance.RawBenchmarkSHA256 ||
+		project.RawBenchmarkRunID != measurement.Provenance.RawBenchmarkRunID ||
+		project.Complete != measurement.Provenance.RawBenchmarkComplete ||
+		project.ArmCount != 2 || project.CasesPerArm != 64 ||
+		project.CorpusFingerprint != measurement.Corpus.CorpusFingerprint ||
+		project.EvalFingerprint != measurement.Corpus.ProjectedEvalFingerprint ||
+		project.ProjectionTransformDigest != measurement.Corpus.ProjectionTransformDigest ||
+		project.ProjectMeasurementPath != projectLaneMeasurementPath ||
+		project.ProjectMeasurementSHA256 != measurementIdentity ||
+		project.IndexedSourceBytesUnchanged != measurement.Harness.IndexedSourceBytesUnchanged ||
+		project.SharedHardGateFailures != measurement.Decision.SharedSafetyFailures ||
+		project.DenseAddedHardGateRegressions != measurement.Decision.DenseAddedSafetyRegressions ||
+		project.RerankAddedHardGateRegressions != measurement.HistoricalRerank.RerankAddedSafetyRegressions {
+		return errors.New("project lane evidence does not match the checked-in per-case measurement")
+	}
+	if err := compareProjectLaneMetrics("dense", project.Dense, derived.Dense); err != nil {
+		return err
+	}
+	if err := compareProjectLaneMetrics("rerank", project.Rerank, derived.Rerank); err != nil {
+		return err
+	}
+	if err := compareProjectRescues(project.RescueCases, derived.Rescues); err != nil {
+		return err
+	}
+	if err := compareProjectUncertainty(
+		project.Uncertainty, measurement.Uncertainty, derived,
+	); err != nil {
+		return err
+	}
+
+	projectReceipt := receipt.EvidenceLayers.ProjectCorpus
+	if projectReceipt.Status != project.Status ||
+		projectReceipt.CasesPerArm != project.CasesPerArm ||
+		projectReceipt.RawBenchmarkSHA256 != project.RawBenchmarkSHA256 ||
+		projectReceipt.ProjectMeasurementPath != project.ProjectMeasurementPath ||
+		projectReceipt.ProjectMeasurementSHA256 != project.ProjectMeasurementSHA256 ||
+		len(projectReceipt.Lanes) != 2 {
+		return errors.New("project decision layer is not bound to the checked-in measurement")
+	}
+	want := map[string]laneAblationProjectCounts{
+		"dense": {
+			Rescues: derived.Dense.Rescues, Losses: derived.Dense.Losses,
+			RankImprovements:         derived.Dense.RankImprovements,
+			RankDegradations:         derived.Dense.RankDegradations,
+			AddedHardGateRegressions: measurement.Decision.DenseAddedSafetyRegressions,
+		},
+		"rerank": {
+			Rescues: derived.Rerank.Rescues, Losses: derived.Rerank.Losses,
+			RankImprovements:         derived.Rerank.RankImprovements,
+			RankDegradations:         derived.Rerank.RankDegradations,
+			AddedHardGateRegressions: measurement.HistoricalRerank.RerankAddedSafetyRegressions,
+		},
+	}
+	for lane, expected := range want {
+		if actual, ok := projectReceipt.Lanes[lane]; !ok || actual != expected {
+			return fmt.Errorf(
+				"project decision layer for %s does not match recomputed per-case evidence", lane)
+		}
+	}
+	if choice := receipt.Lanes["dense"]; choice.Decision != measurement.Decision.Dense.Action {
+		return errors.New("dense shipment decision differs from the current-runtime project measurement")
+	}
+	if choice := receipt.Lanes["rerank"]; choice.Decision != measurement.Decision.Rerank.Action {
+		return errors.New("rerank shipment decision differs from the frozen historical project measurement")
+	}
+	return nil
+}
+
+func validateProjectLaneMeasurementIdentity(
+	measurement projectLaneMeasurement,
+	report laneAblationReport,
+) error {
+	current := measurement.Provenance
+	historical := measurement.HistoricalRerank.Provenance
+	if measurement.SchemaVersion != 2 ||
+		measurement.Schema != "plugin://re-discipline/schemas/project-lane-ablation-report.schema.json" ||
+		measurement.Kind != "project-retrieval-lane-ablation" || !measurement.MeasurementOnly ||
+		strings.TrimSpace(measurement.Project) == "" ||
+		current.RawBenchmarkArmCount != 2 || current.RawBenchmarkCasesPerArm != 64 ||
+		!current.RawBenchmarkComplete || !validSHA256Identity(current.RawBenchmarkSHA256) ||
+		!validSHA256Identity(current.FrozenRuntimeFingerprint) ||
+		!validSHA256Identity(current.ProjectDirtyFingerprint) ||
+		!validSHA256Identity(current.ProfileCatalogSHA256) ||
+		!validSHA256Identity(current.ModelManifestSHA256) ||
+		!validFullRevision(current.FrozenSourceRevision) ||
+		!validFullRevision(current.ProjectGitRevision) ||
+		measurement.Corpus.FinalEvalCaseCount != 64 ||
+		!validSHA256Identity(measurement.Corpus.CorpusFingerprint) ||
+		!validSHA256Identity(measurement.Corpus.ProjectedEvalFingerprint) ||
+		!validSHA256Identity(measurement.Corpus.ProjectionTransformDigest) ||
+		measurement.Harness.SourceRepositoryMutated ||
+		!measurement.Harness.IndexedSourceBytesUnchanged ||
+		!validSHA256Identity(measurement.Harness.ReceiptSHA256) ||
+		!validSHA256Identity(measurement.Harness.BenchmarkCommandSHA256) ||
+		!validSHA256Identity(measurement.Harness.ProjectionManifestArtifactSHA256) ||
+		!validSHA256Identity(measurement.Harness.IndexedSourcesManifestSHA256) ||
+		!validFullRevision(measurement.Harness.PluginRevision) ||
+		!validFullRevision(measurement.Harness.ProjectRevision) ||
+		measurement.Harness.PluginRevision != current.FrozenSourceRevision ||
+		measurement.Harness.ProjectRevision != current.ProjectGitRevision ||
+		measurement.Harness.ProjectionManifestArtifactSHA256 != measurement.Corpus.ProjectionManifestSHA256 {
+		return errors.New("project lane measurement has an incomplete current-runtime identity")
+	}
+	if _, err := time.Parse(time.RFC3339, measurement.EvaluatedAt); err != nil {
+		return errors.New("project lane measurement has an invalid evaluation timestamp")
+	}
+	if historical.RawBenchmarkArmCount != 3 || historical.RawBenchmarkCasesPerArm != 64 ||
+		!historical.RawBenchmarkComplete || historical.EvidenceArchiveFormat != "zip-deflate-fixed-v1" ||
+		!validSHA256Identity(historical.RawBenchmarkSHA256) ||
+		!validSHA256Identity(historical.EvidenceArchiveSHA256) ||
+		!validSHA256Identity(historical.RuntimeFingerprint) ||
+		!validSHA256Identity(historical.ProjectDirtyFingerprint) ||
+		!validSHA256Identity(historical.CorpusFingerprint) ||
+		!validSHA256Identity(historical.EvalFingerprint) ||
+		!validSHA256Identity(historical.ProfileCatalogSHA256) ||
+		!validSHA256Identity(historical.ModelManifestSHA256) ||
+		!validSHA256Identity(historical.ProjectionManifestSHA256) ||
+		!validSHA256Identity(historical.ProjectionTransformDigest) ||
+		!validFullRevision(historical.RuntimeSourceRevision) ||
+		!validFullRevision(historical.ProjectGitRevision) ||
+		historical.RuntimeSourceRevision != report.SourceRevision ||
+		historical.RawBenchmarkByteCount < 1 || historical.EvidenceArchiveByteCount < 1 {
+		return errors.New("project lane measurement has an incomplete historical rerank identity")
+	}
+	if err := validateProjectMeasurementModels(measurement); err != nil {
+		return err
+	}
+	if err := validateProjectMeasurementProfiles(
+		measurement.Profiles, false,
+	); err != nil {
+		return err
+	}
+	if err := validateProjectMeasurementProfiles(
+		measurement.HistoricalRerank.Profiles, true,
+	); err != nil {
+		return err
+	}
+	if !measurement.Decision.ReleaseGatePassed ||
+		!measurement.Decision.ProductionProfileConsistent ||
+		measurement.Decision.DenseAddedSafetyRegressions != 0 ||
+		measurement.HistoricalRerank.RerankAddedSafetyRegressions != 0 ||
+		!sameProjectDecision(
+			measurement.Decision.Rerank,
+			measurement.HistoricalRerank.Decision,
+		) {
+		return errors.New("project lane measurement does not carry a closed two-layer release decision")
+	}
+	return nil
+}
+
+func validateProjectMeasurementModels(measurement projectLaneMeasurement) error {
+	current := measurement.Models
+	historical := measurement.HistoricalRerank.Models
+	if len(current) != 1 || current[0].Role != "embedding" ||
+		len(historical) != 2 || historical[0].Role != "embedding" ||
+		historical[1].Role != "reranker" {
+		return errors.New("project lane measurement mixes current and historical model inventories")
+	}
+	validate := func(model projectLaneModel, requireArtifact bool) bool {
+		return strings.TrimSpace(model.ID) != "" &&
+			strings.TrimSpace(model.Revision) != "" &&
+			strings.TrimSpace(model.Implementation) != "" &&
+			validBareSHA256(model.SpecSHA256) &&
+			(!requireArtifact || validBareSHA256(model.ArtifactSHA256)) &&
+			(model.ArtifactSHA256 == "" || validBareSHA256(model.ArtifactSHA256))
+	}
+	if !validate(current[0], true) || !validate(historical[0], true) ||
+		!validate(historical[1], false) || current[0] != historical[0] {
+		return errors.New("project lane measurement model identities are incomplete or cross-runtime inconsistent")
+	}
+	currentProfiles := measurement.Profiles
+	historicalProfiles := measurement.HistoricalRerank.Profiles
+	if len(currentProfiles) != 2 || len(historicalProfiles) != 3 ||
+		len(currentProfiles[0].ModelIDs) != 0 ||
+		!equalStrings(currentProfiles[1].ModelIDs, []string{current[0].ID}) ||
+		len(historicalProfiles[0].ModelIDs) != 0 ||
+		!equalStrings(historicalProfiles[1].ModelIDs, []string{historical[0].ID}) ||
+		!equalStrings(
+			historicalProfiles[2].ModelIDs,
+			[]string{historical[0].ID, historical[1].ID},
+		) {
+		return errors.New("project lane measurement profiles do not bind the controlled model inventory")
+	}
+	return nil
+}
+
+func validateProjectMeasurementProfiles(
+	profiles []projectLaneProfile,
+	includeRerank bool,
+) error {
+	expected := []struct {
+		role  string
+		name  string
+		lanes []string
+	}{
+		{role: "baseline", name: "lexical-graph-v1", lanes: []string{"exact", "fts", "graph"}},
+		{role: "dense", name: "hybrid-no-rerank-v1", lanes: []string{"exact", "fts", "graph", "dense"}},
+	}
+	if includeRerank {
+		expected = append(expected, struct {
+			role  string
+			name  string
+			lanes []string
+		}{role: "rerank", name: "hybrid-local-v1", lanes: []string{"exact", "fts", "graph", "dense", "rerank"}})
+	}
+	if len(profiles) != len(expected) {
+		return errors.New("project lane measurement has the wrong controlled profile count")
+	}
+	for index, want := range expected {
+		profile := profiles[index]
+		if profile.Role != want.role || profile.Name != want.name ||
+			!equalStrings(profile.ActiveLanes, want.lanes) ||
+			!validSHA256Identity(profile.ObservationDigest) ||
+			strings.TrimSpace(profile.EffectiveIdentity) == "" {
+			return fmt.Errorf("project lane measurement profile %q is not controlled", profile.Role)
+		}
+	}
+	return nil
+}
+
+func validateProjectLaneArchive(
+	moduleRoot string,
+	provenance projectLaneHistoricalProvenance,
+) error {
+	if !strings.HasPrefix(provenance.EvidenceArchivePath, "evals/conformance/evidence/") ||
+		!strings.HasSuffix(strings.ToLower(provenance.EvidenceArchivePath), ".zip") {
+		return errors.New("historical rerank evidence archive path is not canonical")
+	}
+	archivePath, err := sharedAssetPath(moduleRoot, provenance.EvidenceArchivePath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(archivePath)
+	if err != nil {
+		return fmt.Errorf("stat historical rerank evidence archive: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != provenance.EvidenceArchiveByteCount {
+		return errors.New("historical rerank evidence archive size or file type differs from provenance")
+	}
+	digest, err := fileSHA256(archivePath)
+	if err != nil {
+		return err
+	}
+	if "sha256:"+digest != provenance.EvidenceArchiveSHA256 {
+		return errors.New("historical rerank evidence archive digest differs from provenance")
+	}
+	archive, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return fmt.Errorf("open historical rerank evidence archive: %w", err)
+	}
+	defer archive.Close()
+	if archive.Comment != "" {
+		return errors.New("historical rerank evidence archive comment must be empty")
+	}
+	required := map[string]string{
+		"raw-benchmark.json":       provenance.RawBenchmarkSHA256,
+		"projection-manifest.json": provenance.ProjectionManifestSHA256,
+		"profile-catalog.json":     provenance.ProfileCatalogSHA256,
+		"model-manifest.json":      provenance.ModelManifestSHA256,
+	}
+	if len(archive.File) != 13 {
+		return fmt.Errorf("historical rerank evidence archive has %d entries, want 13", len(archive.File))
+	}
+	previous := ""
+	evalCount := 0
+	seen := map[string]bool{}
+	for _, file := range archive.File {
+		name := file.Name
+		parts := strings.Split(name, "/")
+		canonicalParts := len(parts) > 0
+		for _, part := range parts {
+			if part == "" || part == "." || part == ".." {
+				canonicalParts = false
+				break
+			}
+		}
+		if !canonicalParts || strings.Contains(name, "\\") || strings.HasPrefix(name, "/") ||
+			strings.Contains("/"+name+"/", "/../") || seen[name] ||
+			(previous != "" && name <= previous) || file.Method != zip.Deflate ||
+			file.Flags != 0 || file.CreatorVersion != (3<<8)|20 ||
+			file.ReaderVersion != 20 || file.ExternalAttrs != uint32(0o100644<<16) ||
+			len(file.Extra) != 0 || file.Comment != "" ||
+			!file.Mode().IsRegular() || file.Mode().Perm() != 0o644 ||
+			file.Modified.Year() != 1980 || file.Modified.Month() != time.January ||
+			file.Modified.Day() != 1 || file.Modified.Hour() != 0 ||
+			file.Modified.Minute() != 0 || file.Modified.Second() != 0 {
+			return fmt.Errorf("historical rerank evidence archive entry %q is non-canonical", name)
+		}
+		seen[name] = true
+		previous = name
+		if strings.HasPrefix(name, "evals/") {
+			evalCount++
+		}
+		reader, err := file.Open()
+		if err != nil {
+			return err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(reader, 32<<20))
+		closeErr := reader.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if int64(len(body)) != int64(file.UncompressedSize64) {
+			return fmt.Errorf("historical rerank evidence archive member %q is truncated", name)
+		}
+		wantDigest, selected := required[name]
+		if !selected {
+			continue
+		}
+		if sha256Identity(body) != wantDigest {
+			return fmt.Errorf("historical rerank evidence archive member %q differs from provenance", name)
+		}
+		if name == "raw-benchmark.json" && int64(len(body)) != provenance.RawBenchmarkByteCount {
+			return errors.New("historical raw benchmark byte count differs from provenance")
+		}
+		delete(required, name)
+	}
+	if evalCount != 9 || len(required) != 0 {
+		return errors.New("historical rerank evidence archive inventory is incomplete")
+	}
+	return nil
+}
+
+func deriveProjectLaneMeasurement(
+	measurement projectLaneMeasurement,
+) (projectLaneDerived, error) {
+	var derived projectLaneDerived
+	if len(measurement.Cases) != 64 {
+		return derived, errors.New("project lane measurement must contain 64 current cases")
+	}
+	previous := ""
+	denseIDs := []string{}
+	for _, eval := range measurement.Cases {
+		if strings.TrimSpace(eval.CaseID) == "" ||
+			(previous != "" && eval.CaseID <= previous) {
+			return derived, fmt.Errorf("project lane measurement has an unsorted or duplicate current case %q", eval.CaseID)
+		}
+		previous = eval.CaseID
+		if err := validateProjectOutcome(eval, "baseline", eval.Baseline); err != nil {
+			return derived, err
+		}
+		if err := validateProjectOutcome(eval, "dense", eval.Dense); err != nil {
+			return derived, err
+		}
+		comparison := compareProjectOutcomes(eval.Baseline, eval.Dense)
+		if comparison != eval.DenseComparison {
+			return derived, fmt.Errorf("project lane measurement current case %s has a stale dense comparison", eval.CaseID)
+		}
+		updateProjectLaneMetric(&derived.Dense, comparison)
+		if comparison.UniqueRescue {
+			denseIDs = append(denseIDs, eval.CaseID)
+			path, rank, ok := bestProjectRelevantPath(eval.Dense)
+			if !ok {
+				return derived, fmt.Errorf("project lane measurement rescue %s has no relevant evidence", eval.CaseID)
+			}
+			derived.Rescues = append(derived.Rescues, laneAblationProjectRescue{
+				CaseID: eval.CaseID, Split: eval.Split, Topic: eval.Topic,
+				TargetPath: path, BaselineRelevantRank: projectOutcomeRank(eval.Baseline),
+				DenseRelevantRank: rank,
+				TargetDisjoint:    eval.VocabularyPolicy == "target-disjoint-v1",
+				SourceClass:       projectSourceClass(path), AddedHardGateRegressions: 0,
+			})
+		}
+	}
+
+	historical := measurement.HistoricalRerank
+	if len(historical.Cases) != 64 {
+		return derived, errors.New("project lane measurement must contain 64 historical rerank cases")
+	}
+	previous = ""
+	rerankIDs := []string{}
+	for _, eval := range historical.Cases {
+		if strings.TrimSpace(eval.CaseID) == "" ||
+			(previous != "" && eval.CaseID <= previous) {
+			return derived, fmt.Errorf("project lane measurement has an unsorted or duplicate historical case %q", eval.CaseID)
+		}
+		previous = eval.CaseID
+		metadata := projectLaneCase{
+			CaseID: eval.CaseID, Split: eval.Split, Topic: eval.Topic,
+			Answerable: eval.Answerable,
+		}
+		if err := validateProjectOutcome(metadata, "dense", eval.Dense); err != nil {
+			return derived, err
+		}
+		if err := validateProjectOutcome(metadata, "rerank", eval.Rerank); err != nil {
+			return derived, err
+		}
+		comparison := compareProjectOutcomes(eval.Dense, eval.Rerank)
+		if comparison != eval.RerankComparison {
+			return derived, fmt.Errorf("project lane measurement historical case %s has a stale rerank comparison", eval.CaseID)
+		}
+		updateProjectLaneMetric(&derived.Rerank, comparison)
+		if comparison.PathsChanged {
+			derived.Rerank.PathsChanged++
+		}
+		if comparison.UniqueRescue || comparison.RankImproved {
+			rerankIDs = append(rerankIDs, eval.CaseID)
+		}
+	}
+
+	if err := validateProjectDecision(
+		measurement.Decision.Dense, denseIDs, derived.Dense.Losses,
+		measurement.Decision.DenseAddedSafetyRegressions, "dense",
+	); err != nil {
+		return derived, err
+	}
+	if err := validateProjectDecision(
+		historical.Decision, rerankIDs, derived.Rerank.Losses,
+		historical.RerankAddedSafetyRegressions, "rerank",
+	); err != nil {
+		return derived, err
+	}
+
+	currentProfiles := projectProfilesByRole(measurement.Profiles)
+	if err := populateProjectMetricDeltas(&derived.Dense, currentProfiles, "baseline", "dense"); err != nil {
+		return derived, err
+	}
+	for _, row := range measurement.Sensitivity.LeaveOneTopicOut {
+		if row.DenseHitRateDelta <= 0 {
+			derived.ZeroOmittedTopics = append(derived.ZeroOmittedTopics, row.OmittedTopic)
+		}
+	}
+	derived.ClusterFragile = len(derived.ZeroOmittedTopics) > 0
+	return derived, nil
+}
+
+func validateProjectOutcome(
+	metadata projectLaneCase,
+	label string,
+	outcome projectLaneOutcome,
+) error {
+	if outcome.CaseID != metadata.CaseID || outcome.Split != metadata.Split ||
+		outcome.Topic != metadata.Topic ||
+		len(outcome.Paths) != len(outcome.Tiers) ||
+		len(outcome.Paths) != len(outcome.ChunkIDs) ||
+		len(outcome.Paths) != len(outcome.ContentHashes) ||
+		len(outcome.RelevantPaths) != len(outcome.RelevantRanks) ||
+		outcome.ReturnedUniquePaths != uniqueStringCount(outcome.Paths) ||
+		outcome.EstimatedTokens < 0 || outcome.ReturnedTokens < 0 ||
+		outcome.RelevantTokens < 0 || outcome.DuplicateTokens < 0 ||
+		outcome.StaleResults < 0 || outcome.LatencyMillis < 0 ||
+		outcome.MinimumTokenBudget < 128 {
+		return fmt.Errorf("project lane measurement case %s has an invalid %s outcome", metadata.CaseID, label)
+	}
+	pathSet := map[string]bool{}
+	for _, path := range outcome.Paths {
+		pathSet[path] = true
+	}
+	for index, path := range outcome.RelevantPaths {
+		if !pathSet[path] || outcome.RelevantRanks[index] < 1 ||
+			outcome.RelevantRanks[index] > len(outcome.Paths) {
+			return fmt.Errorf("project lane measurement case %s has invalid %s relevant evidence", metadata.CaseID, label)
+		}
+	}
+	expectedFound := len(outcome.RelevantRanks) > 0
+	if !metadata.Answerable {
+		expectedFound = outcome.AbstentionCorrect
+	}
+	safety := outcome.AuthoritySafe && outcome.CitationMetadataSafe &&
+		outcome.CorpusMatched && outcome.BudgetSafe && outcome.ReplayIdentical &&
+		outcome.StaleResults == 0
+	quality := !outcome.QualityGateApplicable ||
+		(outcome.ExpectedFound && outcome.CompleteEvidence && outcome.CitationSafe &&
+			outcome.AbstentionCorrect && len(outcome.HardNegativeHits) == 0)
+	if outcome.ExpectedFound != expectedFound || outcome.SafetyPassed != safety ||
+		outcome.QualityPassed != quality || outcome.GatePassed != (safety && quality) {
+		return fmt.Errorf("project lane measurement case %s has inconsistent %s gates", metadata.CaseID, label)
+	}
+	return nil
+}
+
+func compareProjectOutcomes(before, after projectLaneOutcome) projectLaneComparison {
+	beforeRank := projectOutcomeRank(before)
+	afterRank := projectOutcomeRank(after)
+	effect := "unchanged"
+	if !before.ExpectedFound && after.ExpectedFound {
+		effect = "rescue"
+	} else if before.ExpectedFound && !after.ExpectedFound {
+		effect = "loss"
+	}
+	both := before.ExpectedFound && after.ExpectedFound
+	return projectLaneComparison{
+		HitEffect: effect,
+		RankDelta: func() int {
+			if both {
+				return beforeRank - afterRank
+			}
+			return 0
+		}(),
+		PathsChanged: !equalStrings(before.Paths, after.Paths),
+		UniqueRescue: effect == "rescue",
+		RankImproved: both && afterRank < beforeRank,
+		RankDegraded: both && afterRank > beforeRank,
+	}
+}
+
+func updateProjectLaneMetric(
+	metric *laneAblationProjectLaneMetric,
+	comparison projectLaneComparison,
+) {
+	if comparison.UniqueRescue {
+		metric.Rescues++
+	}
+	if comparison.HitEffect == "loss" {
+		metric.Losses++
+	}
+	if comparison.RankImproved {
+		metric.RankImprovements++
+	}
+	if comparison.RankDegraded {
+		metric.RankDegradations++
+	}
+}
+
+func validateProjectDecision(
+	decision projectLaneDecision,
+	caseIDs []string,
+	losses int,
+	regressions int,
+	lane string,
+) error {
+	expectedAction := "remove"
+	if len(caseIDs) > 0 && (losses > 0 || regressions > 0) {
+		expectedAction = "inconclusive"
+	} else if len(caseIDs) > 0 {
+		expectedAction = "retain"
+	}
+	if !equalStrings(decision.CaseIDs, caseIDs) ||
+		decision.EventCount != len(caseIDs) ||
+		decision.PositiveEvidence != (len(caseIDs) > 0) ||
+		decision.Action != expectedAction || strings.TrimSpace(decision.Rationale) == "" {
+		return fmt.Errorf("project lane measurement has a stale %s decision", lane)
+	}
+	return nil
+}
+
+func populateProjectMetricDeltas(
+	metric *laneAblationProjectLaneMetric,
+	profiles map[string]projectLaneProfile,
+	baselineRole string,
+	candidateRole string,
+) error {
+	baseline, baselineOK := profiles[baselineRole]
+	candidate, candidateOK := profiles[candidateRole]
+	if !baselineOK || !candidateOK {
+		return errors.New("project lane measurement is missing metric profiles")
+	}
+	lookup := func(values map[string]float64, field string) (float64, bool) {
+		value, ok := values[field]
+		return value, ok && !math.IsNaN(value) && !math.IsInf(value, 0)
+	}
+	baselineRecall, ok1 := lookup(baseline.Metrics, "recallAtK")
+	candidateRecall, ok2 := lookup(candidate.Metrics, "recallAtK")
+	baselineComplete, ok3 := lookup(baseline.Metrics, "completeEvidenceCoverage")
+	candidateComplete, ok4 := lookup(candidate.Metrics, "completeEvidenceCoverage")
+	baselineHoldoutRecall, ok5 := lookup(baseline.MetricsBySplit["holdout"], "recallAtK")
+	candidateHoldoutRecall, ok6 := lookup(candidate.MetricsBySplit["holdout"], "recallAtK")
+	baselineHoldoutComplete, ok7 := lookup(baseline.MetricsBySplit["holdout"], "completeEvidenceCoverage")
+	candidateHoldoutComplete, ok8 := lookup(candidate.MetricsBySplit["holdout"], "completeEvidenceCoverage")
+	if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8) {
+		return errors.New("project lane measurement profiles omit required quality metrics")
+	}
+	metric.OverallRecallDelta = candidateRecall - baselineRecall
+	metric.HoldoutRecallDelta = candidateHoldoutRecall - baselineHoldoutRecall
+	metric.OverallCompleteEvidenceDelta = candidateComplete - baselineComplete
+	metric.HoldoutCompleteEvidenceDelta = candidateHoldoutComplete - baselineHoldoutComplete
+	return nil
+}
+
+func compareProjectLaneMetrics(
+	lane string,
+	actual laneAblationProjectLaneMetric,
+	expected laneAblationProjectLaneMetric,
+) error {
+	if actual.Rescues != expected.Rescues || actual.Losses != expected.Losses ||
+		actual.RankImprovements != expected.RankImprovements ||
+		actual.RankDegradations != expected.RankDegradations ||
+		actual.PathsChanged != expected.PathsChanged ||
+		!closeFloat(actual.OverallRecallDelta, expected.OverallRecallDelta) ||
+		!closeFloat(actual.HoldoutRecallDelta, expected.HoldoutRecallDelta) ||
+		!closeFloat(actual.OverallCompleteEvidenceDelta, expected.OverallCompleteEvidenceDelta) ||
+		!closeFloat(actual.HoldoutCompleteEvidenceDelta, expected.HoldoutCompleteEvidenceDelta) {
+		return fmt.Errorf("project %s aggregate does not match recomputed per-case measurement", lane)
+	}
+	return nil
+}
+
+func compareProjectRescues(
+	actual []laneAblationProjectRescue,
+	expected []laneAblationProjectRescue,
+) error {
+	if len(actual) != len(expected) {
+		return errors.New("project dense rescue inventory does not match per-case measurement")
+	}
+	for index := range expected {
+		if actual[index] != expected[index] {
+			return fmt.Errorf("project dense rescue %q does not match per-case measurement", actual[index].CaseID)
+		}
+	}
+	return nil
+}
+
+func compareProjectUncertainty(
+	actual laneAblationProjectUncertainty,
+	expected projectLaneUncertainty,
+	derived projectLaneDerived,
+) error {
+	if len(actual.WilsonIntervals) != len(expected.WilsonIntervals) {
+		return errors.New("project uncertainty does not mirror the current measurement")
+	}
+	for index, want := range expected.WilsonIntervals {
+		got := actual.WilsonIntervals[index]
+		if got.Slice != want.Slice || got.Successes != want.Successes ||
+			got.Trials != want.Trials || !closeFloat(got.Estimate, want.Estimate) ||
+			!closeFloat(got.Lower, want.Lower) || !closeFloat(got.Upper, want.Upper) {
+			return errors.New("project Wilson intervals do not mirror the current measurement")
+		}
+	}
+	bootstrap := expected.TopicClusterBootstrap
+	if actual.TopicBootstrap.Replicates != bootstrap.Replicates ||
+		!closeFloat(actual.TopicBootstrap.PointEstimate, bootstrap.PointEstimate) ||
+		!closeFloat(actual.TopicBootstrap.Lower, bootstrap.Lower) ||
+		!closeFloat(actual.TopicBootstrap.Upper, bootstrap.Upper) ||
+		!closeFloat(actual.TopicBootstrap.ZeroOrLowerFraction, bootstrap.ZeroOrLowerFraction) ||
+		!equalStrings(actual.LeaveOneTopicOutZeroWhenOmitting, derived.ZeroOmittedTopics) ||
+		actual.ClusterFragile != derived.ClusterFragile || actual.FinalCorpusRerunRequired {
+		return errors.New("project cluster uncertainty does not mirror the current measurement")
+	}
+	return nil
+}
+
+func projectProfilesByRole(profiles []projectLaneProfile) map[string]projectLaneProfile {
+	result := map[string]projectLaneProfile{}
+	for _, profile := range profiles {
+		result[profile.Role] = profile
+	}
+	return result
+}
+
+func projectOutcomeRank(outcome projectLaneOutcome) int {
+	best := 0
+	for _, rank := range outcome.RelevantRanks {
+		if best == 0 || rank < best {
+			best = rank
+		}
+	}
+	return best
+}
+
+func bestProjectRelevantPath(outcome projectLaneOutcome) (string, int, bool) {
+	bestIndex := -1
+	for index, rank := range outcome.RelevantRanks {
+		if bestIndex < 0 || rank < outcome.RelevantRanks[bestIndex] {
+			bestIndex = index
+		}
+	}
+	if bestIndex < 0 || bestIndex >= len(outcome.RelevantPaths) {
+		return "", 0, false
+	}
+	return outcome.RelevantPaths[bestIndex], outcome.RelevantRanks[bestIndex], true
+}
+
+func projectSourceClass(path string) string {
+	for _, candidate := range []struct {
+		prefix string
+		class  string
+	}{
+		{prefix: "docs/history/", class: "history"},
+		{prefix: "docs/truth/", class: "truth"},
+		{prefix: "docs/backlog/", class: "backlog"},
+		{prefix: "active/", class: "active"},
+	} {
+		if strings.HasPrefix(path, candidate.prefix) {
+			return candidate.class
+		}
+	}
+	return "project"
+}
+
+func uniqueStringCount(values []string) int {
+	seen := map[string]bool{}
+	for _, value := range values {
+		seen[value] = true
+	}
+	return len(seen)
+}
+
+func sameProjectDecision(left, right projectLaneDecision) bool {
+	return left.Action == right.Action &&
+		left.PositiveEvidence == right.PositiveEvidence &&
+		left.EventCount == right.EventCount &&
+		equalStrings(left.CaseIDs, right.CaseIDs) &&
+		left.Rationale == right.Rationale
+}
+
+func validFullRevision(value string) bool {
+	if len(value) != 40 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func sha256Identity(body []byte) string {
+	digest := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func closeFloat(left, right float64) bool {
+	return !math.IsNaN(left) && !math.IsNaN(right) &&
+		!math.IsInf(left, 0) && !math.IsInf(right, 0) &&
+		math.Abs(left-right) <= 1e-12
+}
+
+func validateLaneAblationProfiles(profiles []laneAblationProfile) error {
+	if len(profiles) != 3 {
+		return errors.New("lane ablation report must contain exactly three controlled profiles")
+	}
+	expected := map[string][]string{
+		"baseline": {"exact", "fts", "graph"},
+		"dense":    {"exact", "fts", "graph", "dense"},
+		"rerank":   {"exact", "fts", "graph", "dense", "rerank"},
+	}
+	seen := map[string]bool{}
+	fingerprints := map[string]bool{}
+	for _, profile := range profiles {
+		lanes, ok := expected[profile.Role]
+		if !ok || seen[profile.Role] || strings.TrimSpace(profile.Name) == "" ||
+			!equalStringSet(profile.Lanes, lanes) ||
+			!validSHA256Identity(profile.BenchmarkDigest) ||
+			!validSHA256Identity(profile.ModelFingerprint) {
+			return fmt.Errorf("lane ablation profile %q is incomplete", profile.Role)
+		}
+		seen[profile.Role] = true
+		fingerprints[profile.ModelFingerprint] = true
+	}
+	if len(fingerprints) != 3 {
+		return errors.New("lane ablation profiles do not identify three distinct model configurations")
+	}
+	return nil
+}
+
+func validateLaneAblationModels(models []laneAblationModel) error {
+	if len(models) != 2 {
+		return errors.New("lane ablation report must identify the measured embedding and reranker models")
+	}
+	seen := map[string]bool{}
+	for _, model := range models {
+		if (model.Role != "embedding" && model.Role != "reranker") || seen[model.Role] ||
+			strings.TrimSpace(model.ID) == "" || strings.TrimSpace(model.Revision) == "" ||
+			strings.TrimSpace(model.Implementation) == "" || !validBareSHA256(model.SpecSHA256) {
+			return fmt.Errorf("lane ablation model %q is incomplete", model.ID)
+		}
+		if model.Role == "embedding" && !validBareSHA256(model.ArtifactSHA256) {
+			return fmt.Errorf("lane ablation embedding model %q lacks its artifact identity", model.ID)
+		}
+		if model.Role == "reranker" && model.ArtifactSHA256 != "" &&
+			!validBareSHA256(model.ArtifactSHA256) {
+			return fmt.Errorf("lane ablation reranker model %q has an invalid artifact identity", model.ID)
+		}
+		seen[model.Role] = true
+	}
+	return nil
+}
+
+func validateAndAggregateLaneCases(
+	cases []laneAblationCaseOutcome,
+	holdoutIDs map[string]bool,
+) (map[string]laneAblationCounts, error) {
+	if len(cases) != len(holdoutIDs) {
+		return nil, fmt.Errorf(
+			"lane ablation report case count %d does not match holdout count %d",
+			len(cases), len(holdoutIDs))
+	}
+	seen := map[string]bool{}
+	previous := ""
+	computed := map[string]laneAblationCounts{"dense": {}, "rerank": {}}
+	for _, eval := range cases {
+		if !holdoutIDs[eval.CaseID] || seen[eval.CaseID] ||
+			(previous != "" && eval.CaseID <= previous) {
+			return nil, fmt.Errorf("lane ablation report has an unknown, duplicate, or unsorted case %q", eval.CaseID)
+		}
+		seen[eval.CaseID] = true
+		previous = eval.CaseID
+		for label, outcome := range map[string]laneAblationQueryOutcome{
+			"baseline": eval.Baseline, "dense": eval.Dense, "rerank": eval.Rerank,
+		} {
+			if err := validateLaneAblationOutcome(eval.CaseID, label, outcome); err != nil {
+				return nil, err
+			}
+		}
+		if eval.Baseline.UniqueFirst || eval.Rerank.UniqueFirst {
+			return nil, fmt.Errorf("lane ablation case %s assigns unique-first to a non-dense arm", eval.CaseID)
+		}
+		dense := computed["dense"]
+		if eval.Dense.UniqueFirst {
+			dense.UniqueFirst++
+		}
+		updateLaneMovement(&dense, eval.Baseline, eval.Dense)
+		computed["dense"] = dense
+		rerank := computed["rerank"]
+		updateLaneMovement(&rerank, eval.Dense, eval.Rerank)
+		computed["rerank"] = rerank
+	}
+	return computed, nil
+}
+
+func validateLaneAblationOutcome(
+	caseID, label string,
+	outcome laneAblationQueryOutcome,
+) error {
+	if outcome.RelevantRank < 0 || outcome.RelevantHit != (outcome.RelevantRank > 0) ||
+		(outcome.UniqueFirst && (!outcome.RelevantHit || outcome.RelevantRank != 1)) ||
+		(outcome.RelevantRank > len(outcome.FindingIDs)) || !strictlySortedUnique(outcome.FindingIDs) {
+		return fmt.Errorf("lane ablation case %s has an invalid %s outcome", caseID, label)
+	}
+	for _, id := range outcome.FindingIDs {
+		if len(id) < 3 || !strings.HasPrefix(id, "F-") {
+			return fmt.Errorf("lane ablation case %s has an invalid %s finding id", caseID, label)
+		}
+	}
+	return nil
+}
+
+func updateLaneMovement(
+	counts *laneAblationCounts,
+	baseline, candidate laneAblationQueryOutcome,
+) {
+	if candidate.RelevantHit && (!baseline.RelevantHit || candidate.RelevantRank < baseline.RelevantRank) {
+		counts.Improved++
+	}
+	if baseline.RelevantHit && (!candidate.RelevantHit || candidate.RelevantRank > baseline.RelevantRank) {
+		counts.Degraded++
+	}
+}
+
+func strictlySortedUnique(values []string) bool {
+	for index, value := range values {
+		if strings.TrimSpace(value) == "" || (index > 0 && value <= values[index-1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	want := map[string]bool{}
+	for _, value := range right {
+		want[value] = true
+	}
+	for _, value := range left {
+		if !want[value] {
+			return false
+		}
+		delete(want, value)
+	}
+	return len(want) == 0
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func laneProfileByRole(
+	profiles []laneAblationProfile,
+	role string,
+) (laneAblationProfile, bool) {
+	for _, profile := range profiles {
+		if profile.Role == role {
+			return profile, true
+		}
+	}
+	return laneAblationProfile{}, false
+}
+
+func laneModelByRole(models []laneAblationModel, role string) (laneAblationModel, bool) {
+	for _, model := range models {
+		if model.Role == role {
+			return model, true
+		}
+	}
+	return laneAblationModel{}, false
+}
+
+func packagedModelMatchesAblation(
+	model struct {
+		ID             string `json:"id"`
+		Role           string `json:"role"`
+		Revision       string `json:"revision"`
+		Implementation string `json:"implementation"`
+		SpecFile       string `json:"specFile"`
+		SpecSHA256     string `json:"specSha256"`
+		ArtifactFile   string `json:"artifactFile"`
+		ArtifactSHA256 string `json:"artifactSha256"`
+		License        string `json:"license"`
+	},
+	evidence laneAblationModel,
+) bool {
+	return model.ID == evidence.ID && model.Role == evidence.Role &&
+		model.Revision == evidence.Revision && model.Implementation == evidence.Implementation &&
+		model.SpecSHA256 == evidence.SpecSHA256 && model.ArtifactSHA256 == evidence.ArtifactSHA256
 }
 
 func verifySharedModelPins(moduleRoot string, binaryAssets map[string]string) error {

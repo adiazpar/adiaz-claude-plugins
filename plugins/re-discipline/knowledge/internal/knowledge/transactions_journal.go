@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -66,6 +69,21 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	if err := store.recoverTransactionsLocked(ctx); err != nil {
 		return StateTransactionReceipt{}, err
 	}
+	head, err := store.LoadHead()
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	inventory, err := store.loadCommittedInventory(head)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	dirtyPaths, err := store.inventoryDrift(inventory)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	if len(dirtyPaths) != 0 && prepared.Request.Action != "reconcile.import" {
+		return StateTransactionReceipt{}, fmt.Errorf("%w: %s", ErrStateDirty, strings.Join(dirtyPaths, ", "))
+	}
 	if receipt, found, err := store.loadIdempotencyReceipt(prepared.Request.IdempotencyKey); err != nil {
 		return StateTransactionReceipt{}, err
 	} else if found {
@@ -73,10 +91,6 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 			return StateTransactionReceipt{}, ErrIdempotencyConflict
 		}
 		return receipt, nil
-	}
-	head, err := store.LoadHead()
-	if err != nil {
-		return StateTransactionReceipt{}, err
 	}
 	if head.Revision != prepared.Request.ExpectedHeadRevision || head.Digest != prepared.Request.ExpectedHeadDigest {
 		return StateTransactionReceipt{}, fmt.Errorf("%w: expected head %d/%s, found %d/%s",
@@ -107,12 +121,8 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	if err := nextGraph.Validate(); err != nil {
 		return StateTransactionReceipt{}, fmt.Errorf("resulting campaign graph: %w", err)
 	}
-	stateViewBody, err := RenderCampaignState(nextGraph)
-	if err != nil {
-		return StateTransactionReceipt{}, err
-	}
-	stateViewDigest := "sha256:" + SHA256Bytes(stateViewBody)
-	mutationDigest, resultingStateDigest, err := transactionStateDigests(head, writes, prepared.Artifacts)
+	mutationDigest, resultingStateDigest, err := transactionStateDigests(
+		head, writes, prepared.Artifacts, prepared.Request.RetireActiveTree)
 	if err != nil {
 		return StateTransactionReceipt{}, err
 	}
@@ -122,6 +132,9 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	}
 	for _, artifact := range prepared.Artifacts {
 		affected = append(affected, artifact.Path)
+	}
+	if prepared.Request.RetireActiveTree != "" {
+		affected = append(affected, prepared.Request.RetireActiveTree)
 	}
 	affected = SortedUnique(affected)
 	event := StateEvent{
@@ -139,10 +152,55 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		return StateTransactionReceipt{}, err
 	}
 	eventPath := "active/" + prepared.Request.CampaignSlug + "/events/events.jsonl"
+	resultingEventJournal := eventPath
+	if prepared.Request.RetiredEventJournal != "" {
+		resultingEventJournal = prepared.Request.RetiredEventJournal
+	}
+	eventBody, err := store.appendEventBody(eventPath, previousCampaignEventID, event)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	events, err := campaignEventsFromBody(eventBody, nextGraph)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	stateViewBody, err := RenderCampaignStateAt(nextGraph, now, events)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	stateViewDigest := "sha256:" + SHA256Bytes(stateViewBody)
+	if prepared.Request.RetiredEventJournal != "" {
+		target, err := store.canonicalOutputPath(prepared.Request.RetiredEventJournal)
+		if err != nil {
+			return StateTransactionReceipt{}, err
+		}
+		if _, exists, err := currentFileDigest(target); err != nil {
+			return StateTransactionReceipt{}, err
+		} else if exists {
+			return StateTransactionReceipt{}, fmt.Errorf("%w: retired event journal already exists", ErrStateConflict)
+		}
+	}
+	if prepared.Request.Action == "reconcile.import" {
+		if err := requireReconciledInventoryDrift(dirtyPaths, writes, prepared.Artifacts, resultingEventJournal); err != nil {
+			return StateTransactionReceipt{}, err
+		}
+	}
+	resultingInventory, err := store.resultingStateInventory(
+		inventory, head.Revision+1, writes, prepared.Artifacts, resultingEventJournal,
+		eventBody, prepared.Request.RetireActiveTree,
+	)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	inventoryBody, err := canonicalJSON(resultingInventory)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
 	resultingHead := StateHead{
 		SchemaVersion: CampaignSchemaVersion, Revision: head.Revision + 1,
 		EventID: event.ID, EventDigest: event.Digest, StateDigest: resultingStateDigest,
-		TransactionID: prepared.TransactionID, EventJournal: eventPath,
+		InventoryDigest: resultingInventory.Digest,
+		TransactionID:   prepared.TransactionID, EventJournal: resultingEventJournal,
 		UpdatedAt: RFC3339UTC(now),
 	}
 	if err := sealStateHead(&resultingHead); err != nil {
@@ -175,16 +233,14 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	artifacts = append(artifacts, publicationArtifact{
 		Kind: "derived", Target: stateViewPath, Body: stateViewBody, Mode: 0o644,
 	})
-	eventBody, err := store.appendEventBody(eventPath, previousCampaignEventID, event)
-	if err != nil {
-		return StateTransactionReceipt{}, err
-	}
-	artifacts = append(artifacts, publicationArtifact{Kind: "event", Target: eventPath, Body: eventBody, Mode: 0o644})
+	artifacts = append(artifacts, publicationArtifact{Kind: "event", Target: resultingEventJournal, Body: eventBody, Mode: 0o644})
+	artifacts = append(artifacts, publicationArtifact{Kind: "inventory", Target: stateInventoryPath, Body: inventoryBody, Mode: 0o600})
 	receipt := StateTransactionReceipt{
 		SchemaVersion: CampaignSchemaVersion, TransactionID: prepared.TransactionID,
 		CorrelationID: prepared.Request.CorrelationID, IdempotencyKey: prepared.Request.IdempotencyKey,
 		RequestDigest: prepared.RequestDigest, PreviousHead: head, ResultingHead: resultingHead,
-		Event: event, Records: recordResults, Artifacts: artifactResults, GeneratedViewDigest: stateViewDigest,
+		Event: event, Records: recordResults, Artifacts: artifactResults,
+		RetiredTree: prepared.Request.RetireActiveTree, GeneratedViewDigest: stateViewDigest,
 		CommittedAt: RFC3339UTC(now),
 	}
 	if err := sealTransactionReceipt(&receipt); err != nil {
@@ -196,6 +252,11 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	}
 	receiptTarget := ".re-discipline/state/receipts/" + SHA256String(prepared.Request.IdempotencyKey) + ".json"
 	artifacts = append(artifacts, publicationArtifact{Kind: "receipt", Target: receiptTarget, Body: receiptBody, Mode: 0o600})
+	if prepared.Request.RetireActiveTree != "" {
+		artifacts = append(artifacts, publicationArtifact{
+			Kind: "retire-tree", Target: prepared.Request.RetireActiveTree, Mode: 0o700,
+		})
+	}
 	journal, journalPath, err := store.prepareTransactionJournal(prepared, head, resultingHead, receipt, artifacts)
 	if err != nil {
 		return StateTransactionReceipt{}, err
@@ -214,8 +275,14 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		if operation.Kind == "event" {
 			point = FailAfterEventPublish
 		}
+		if operation.Kind == "inventory" {
+			point = FailAfterInventoryPublish
+		}
 		if operation.Kind == "receipt" {
 			point = FailAfterReceiptPublish
+		}
+		if operation.Kind == "retire-tree" {
+			point = FailAfterTreeRetire
 		}
 		if err := store.hitFailpoint(point, prepared.TransactionID, operation.Target, index); err != nil {
 			return StateTransactionReceipt{}, err
@@ -268,6 +335,14 @@ func (store *StateStore) augmentCampaignWrite(prepared preparedTransaction, grap
 		campaign, ok := writes[index].Record.(CampaignRecord)
 		if !ok {
 			continue
+		}
+		if prepared.Request.Action == "reconcile.import" {
+			// A campaign carries transaction-owned event-head fields, so an
+			// explicitly imported out-of-band campaign cannot remain byte-exact.
+			// Advance it from the exact submitted revision while preserving the
+			// manager-selected content; all other imported record types remain at
+			// the submitted revision.
+			campaign.Revision++
 		}
 		campaign.LastEventID, campaign.UpdatedAt = eventID, timestamp
 		campaign.UpdatedBy, campaign.CorrelationID = prepared.Request.Actor, prepared.Request.CorrelationID
@@ -327,8 +402,12 @@ func (store *StateStore) validateAndApplyWrites(request StateTransactionRequest,
 				return CampaignGraph{}, err
 			}
 		}
-		if err := validateRecordTransition(previous, write.Record, request.Action, request.Authority); err != nil {
-			return CampaignGraph{}, fmt.Errorf("record %s: %w", write.RecordID, err)
+		reconciledExactRecord := request.Action == "reconcile.import" && previous != nil &&
+			reflect.DeepEqual(previous, write.Record)
+		if !reconciledExactRecord {
+			if err := validateRecordTransition(previous, write.Record, request.Action, request.Authority); err != nil {
+				return CampaignGraph{}, fmt.Errorf("record %s: %w", write.RecordID, err)
+			}
 		}
 		applyRecordToGraph(&next, write.Record)
 	}
@@ -342,7 +421,7 @@ func (store *StateStore) validateAndApplyWrites(request StateTransactionRequest,
 		}
 	}
 	if request.Action == "review.submit" || request.Action == "decision.record" {
-		if err := validateAppliedManagerReview(graph, writes); err != nil {
+		if err := validateAppliedManagerReview(store, graph, writes, request.ReviewPacket); err != nil {
 			return CampaignGraph{}, err
 		}
 	}
@@ -566,8 +645,8 @@ func applyRecordToGraph(graph *CampaignGraph, value any) {
 	}
 }
 
-func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifacts []preparedStateArtifact) (string, string, error) {
-	descriptors := make([]any, 0, len(writes)+len(artifacts))
+func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifacts []preparedStateArtifact, retiredTree string) (string, string, error) {
+	descriptors := make([]any, 0, len(writes)+len(artifacts)+1)
 	for _, write := range writes {
 		descriptors = append(descriptors, struct {
 			Kind   string            `json:"kind"`
@@ -582,6 +661,12 @@ func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifa
 		}{"artifact", StateArtifactResult{
 			Path: artifact.Path, PreviousDigest: artifact.ExpectedDigest, ContentDigest: artifact.ContentDigest,
 		}})
+	}
+	if retiredTree != "" {
+		descriptors = append(descriptors, struct {
+			Kind string `json:"kind"`
+			Path string `json:"path"`
+		}{"retire-tree", retiredTree})
 	}
 	mutationDigest, err := CanonicalDigest(descriptors)
 	if err != nil {
@@ -626,6 +711,13 @@ func sealTransactionReceipt(receipt *StateTransactionReceipt) error {
 			return errors.New("transaction receipt artifact is invalid")
 		}
 		seenArtifacts[artifact.Path] = true
+	}
+	if receipt.RetiredTree != "" {
+		parts := strings.Split(receipt.RetiredTree, "/")
+		if len(parts) != 2 || parts[0] != "active" || !managedSlugRE.MatchString(parts[1]) ||
+			receipt.Event.Action != "closure.finalize" {
+			return errors.New("transaction receipt active-tree retirement is invalid")
+		}
 	}
 	return nil
 }
@@ -675,6 +767,31 @@ func (store *StateStore) appendEventBody(relative, previousCampaignEventID strin
 	return body, nil
 }
 
+func campaignEventsFromBody(body []byte, graph CampaignGraph) ([]StateEvent, error) {
+	result := []StateEvent{}
+	seen := map[string]bool{}
+	pending := defermentEventTriggerKeys(graph)
+	var previousRevision int64 = -1
+	for index, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event StateEvent
+		if err := decodeStrictJSON([]byte(line), &event); err != nil || verifyStateEvent(event) != nil {
+			return nil, fmt.Errorf("event journal line %d is invalid", index+1)
+		}
+		if seen[event.ID] || (previousRevision >= 0 && event.PreviousRevision <= previousRevision) {
+			return nil, errors.New("campaign event journal order is broken")
+		}
+		seen[event.ID] = true
+		previousRevision = event.PreviousRevision
+		if consumeMatchingDefermentEvent(event, pending) {
+			result = append(result, event)
+		}
+	}
+	return result, nil
+}
+
 func verifyStateEvent(event StateEvent) error {
 	want := event.Digest
 	if err := sealStateEvent(&event); err != nil {
@@ -694,7 +811,8 @@ func (store *StateStore) prepareTransactionJournal(
 ) (transactionJournal, string, error) {
 	operations := make([]journalOperation, 0, len(artifacts))
 	for index, artifact := range artifacts {
-		operation, err := store.prepareJournalOperation(prepared.TransactionID, index, artifact)
+		operation, err := store.prepareJournalOperation(
+			prepared.TransactionID, index, artifact, artifacts[:index])
 		if err != nil {
 			store.removeTransactionStaging(prepared.TransactionID)
 			return transactionJournal{}, "", err
@@ -720,10 +838,43 @@ func (store *StateStore) prepareTransactionJournal(
 	return journal, journalPath, nil
 }
 
-func (store *StateStore) prepareJournalOperation(transactionID string, index int, artifact publicationArtifact) (journalOperation, error) {
+func (store *StateStore) prepareJournalOperation(transactionID string, index int, artifact publicationArtifact, prior []publicationArtifact) (journalOperation, error) {
 	target, err := store.canonicalOutputPath(artifact.Target)
 	if err != nil {
 		return journalOperation{}, err
+	}
+	if artifact.Kind == "retire-tree" {
+		info, err := os.Lstat(target)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return journalOperation{}, fmt.Errorf("retirement target %s is not a real directory", artifact.Target)
+		}
+		previousDigest, err := digestDirectoryTree(target)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		resultDigest, err := digestDirectoryTreeWithArtifacts(target, artifact.Target, prior)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		stage := fmt.Sprintf("staging/%s/retired-tree", transactionID)
+		stagePath, err := store.statePath(stage)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		if _, err := os.Lstat(stagePath); err == nil || !os.IsNotExist(err) {
+			return journalOperation{}, errors.New("transaction retirement staging already exists")
+		}
+		if err := os.MkdirAll(filepath.Dir(stagePath), 0o700); err != nil {
+			return journalOperation{}, err
+		}
+		return journalOperation{
+			Kind: "retire-tree", Target: artifact.Target, Stage: stage,
+			Existed: true, PreviousDigest: previousDigest, ResultDigest: resultDigest,
+			PreviousMode: uint32(info.Mode().Perm()), ResultMode: uint32(info.Mode().Perm()),
+		}, nil
 	}
 	operation := journalOperation{
 		Kind: artifact.Kind, Target: artifact.Target,
@@ -798,7 +949,7 @@ func sealTransactionJournal(journal *transactionJournal) error {
 		return err
 	}
 	for _, operation := range journal.Operations {
-		if !validOne(operation.Kind, "record", "artifact", "derived", "event", "receipt") ||
+		if !validOne(operation.Kind, "record", "artifact", "derived", "event", "inventory", "receipt", "retire-tree") ||
 			!digestRE.MatchString(operation.ResultDigest) || operation.ResultMode == 0 {
 			return errors.New("transaction journal operation is invalid")
 		}
@@ -807,6 +958,13 @@ func sealTransactionJournal(journal *transactionJournal) error {
 		}
 		if err := validateRelativeRecordPath(operation.Stage); err != nil {
 			return err
+		}
+		if operation.Kind == "retire-tree" {
+			if !operation.Existed || operation.Backup != "" ||
+				!digestRE.MatchString(operation.PreviousDigest) || operation.PreviousMode == 0 {
+				return errors.New("transaction retirement metadata is invalid")
+			}
+			continue
 		}
 		if operation.Existed {
 			if !digestRE.MatchString(operation.PreviousDigest) || operation.Backup == "" || operation.PreviousMode == 0 {
@@ -839,6 +997,9 @@ func (store *StateStore) writeTransactionJournal(path string, journal *transacti
 }
 
 func (store *StateStore) publishJournalOperation(operation journalOperation) error {
+	if operation.Kind == "retire-tree" {
+		return store.publishTreeRetirement(operation)
+	}
 	stagePath, err := store.statePath(operation.Stage)
 	if err != nil {
 		return err
@@ -858,6 +1019,169 @@ func (store *StateStore) publishJournalOperation(operation journalOperation) err
 		return err
 	}
 	return verifyFileDigest(target, operation.ResultDigest)
+}
+
+func (store *StateStore) publishTreeRetirement(operation journalOperation) error {
+	target, err := store.canonicalOutputPath(operation.Target)
+	if err != nil {
+		return err
+	}
+	stage, err := store.statePath(operation.Stage)
+	if err != nil {
+		return err
+	}
+	targetInfo, targetErr := os.Lstat(target)
+	stageInfo, stageErr := os.Lstat(stage)
+	switch {
+	case targetErr == nil && stageErr == nil:
+		return fmt.Errorf("%w: retirement target and staging both exist", ErrStateDirty)
+	case targetErr == nil:
+		if targetInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.IsDir() {
+			return errors.New("retirement target is not a real directory")
+		}
+		digest, err := digestDirectoryTree(target)
+		if err != nil || digest != operation.ResultDigest {
+			return fmt.Errorf("%w: retirement target digest changed (got %s, want %s)", ErrStateDirty, digest, operation.ResultDigest)
+		}
+		if err := os.Rename(target, stage); err != nil {
+			return err
+		}
+		if err := syncTransactionDirectory(filepath.Dir(target)); err != nil {
+			return err
+		}
+		return syncTransactionDirectory(filepath.Dir(stage))
+	case os.IsNotExist(targetErr) && stageErr == nil:
+		if stageInfo.Mode()&os.ModeSymlink != 0 || !stageInfo.IsDir() {
+			return errors.New("retired tree staging is not a real directory")
+		}
+		digest, err := digestDirectoryTree(stage)
+		if err != nil || digest != operation.ResultDigest {
+			return fmt.Errorf("%w: retired tree staging digest changed", ErrStateDirty)
+		}
+		return nil
+	case !os.IsNotExist(targetErr):
+		return targetErr
+	case !os.IsNotExist(stageErr):
+		return stageErr
+	default:
+		return fmt.Errorf("%w: retirement target and staging are both missing", ErrStateDirty)
+	}
+}
+
+type treeDigestEntry struct {
+	Path   string `json:"path"`
+	Kind   string `json:"kind"`
+	Mode   uint32 `json:"mode"`
+	Digest string `json:"digest,omitempty"`
+}
+
+func digestDirectoryTree(root string) (string, error) {
+	entries, err := directoryTreeEntries(root)
+	if err != nil {
+		return "", err
+	}
+	return digestTreeEntries(entries)
+}
+
+func directoryTreeEntries(root string) (map[string]treeDigestEntry, error) {
+	entries := map[string]treeDigestEntry{}
+	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("retirement tree contains a symbolic link")
+		}
+		item := treeDigestEntry{Path: filepath.ToSlash(relative), Mode: uint32(info.Mode().Perm())}
+		switch {
+		case entry.IsDir():
+			item.Kind = "directory"
+		case info.Mode().IsRegular():
+			file, err := os.Open(current)
+			if err != nil {
+				return err
+			}
+			multiple, linkErr := writerFileHasMultipleLinks(file)
+			_ = file.Close()
+			if linkErr != nil || multiple {
+				return errors.New("retirement tree contains an unsafe hard-linked file")
+			}
+			body, err := readSingleLinkRegularFile(current)
+			if err != nil {
+				return err
+			}
+			item.Kind, item.Digest = "file", "sha256:"+SHA256Bytes(body)
+		default:
+			return errors.New("retirement tree contains an unsupported filesystem entry")
+		}
+		entries[item.Path] = item
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func digestTreeEntries(entries map[string]treeDigestEntry) (string, error) {
+	ordered := make([]treeDigestEntry, 0, len(entries))
+	for _, entry := range entries {
+		ordered = append(ordered, entry)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Path < ordered[j].Path })
+	return CanonicalDigest(ordered)
+}
+
+func digestDirectoryTreeWithArtifacts(root, target string, artifacts []publicationArtifact) (string, error) {
+	entries, err := directoryTreeEntries(root)
+	if err != nil {
+		return "", err
+	}
+	prefix := target + "/"
+	for _, artifact := range artifacts {
+		if artifact.Kind == "retire-tree" || !strings.HasPrefix(artifact.Target, prefix) {
+			continue
+		}
+		relative := strings.TrimPrefix(artifact.Target, prefix)
+		parent := path.Dir(relative)
+		for parent != "." && parent != "" {
+			if _, present := entries[parent]; !present {
+				entries[parent] = treeDigestEntry{Path: parent, Kind: "directory", Mode: effectivePublishedDirectoryMode(0o700)}
+			}
+			parent = path.Dir(parent)
+		}
+		entries[relative] = treeDigestEntry{
+			Path: relative, Kind: "file", Mode: effectivePublishedFileMode(artifact.Mode),
+			Digest: "sha256:" + SHA256Bytes(artifact.Body),
+		}
+	}
+	return digestTreeEntries(entries)
+}
+
+func effectivePublishedFileMode(mode fs.FileMode) uint32 {
+	if runtime.GOOS == "windows" {
+		// Windows exposes non-read-only files through Go's synthetic 0666 mode.
+		return uint32(0o666)
+	}
+	return uint32(mode.Perm())
+}
+
+func effectivePublishedDirectoryMode(mode fs.FileMode) uint32 {
+	if runtime.GOOS == "windows" {
+		return uint32(0o777)
+	}
+	return uint32(mode.Perm())
 }
 
 func verifyFileDigest(path, expected string) error {
@@ -987,7 +1311,25 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 	}
 	switch head.Digest {
 	case journal.ResultingHead.Digest:
+		retiredPrefix := ""
 		for _, operation := range journal.Operations {
+			if operation.Kind == "retire-tree" {
+				if err := store.publishTreeRetirement(operation); err != nil {
+					return err
+				}
+				retiredPrefix = operation.Target + "/"
+				break
+			}
+		}
+		for _, operation := range journal.Operations {
+			if operation.Kind == "retire-tree" {
+				continue
+			}
+			// The verified staged-tree digest commits every publication under
+			// the retired prefix, whose canonical paths are intentionally gone.
+			if retiredPrefix != "" && strings.HasPrefix(operation.Target, retiredPrefix) {
+				continue
+			}
 			target, err := store.canonicalOutputPath(operation.Target)
 			if err != nil {
 				return err
@@ -1012,8 +1354,17 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 		}
 		journal.Phase = "committed"
 	case journal.PreviousHead.Digest:
+		var retiredOperation *journalOperation
 		for index := len(journal.Operations) - 1; index >= 0; index-- {
 			operation := journal.Operations[index]
+			if operation.Kind == "retire-tree" {
+				if err := store.rollbackTreeRetirement(operation); err != nil {
+					return err
+				}
+				copy := operation
+				retiredOperation = &copy
+				continue
+			}
 			target, err := store.canonicalOutputPath(operation.Target)
 			if err != nil {
 				return err
@@ -1068,6 +1419,11 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 				}
 			}
 		}
+		if retiredOperation != nil {
+			if err := store.verifyRolledBackTree(*retiredOperation); err != nil {
+				return err
+			}
+		}
 		journal.Phase = "rolled-back"
 	default:
 		return fmt.Errorf("%w: prepared transaction %s has neither its old nor new head", ErrStateDirty, journal.ID)
@@ -1078,6 +1434,74 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 	}
 	store.cleanupJournalStaging(*journal)
 	return nil
+}
+
+func (store *StateStore) verifyRolledBackTree(operation journalOperation) error {
+	target, err := store.canonicalOutputPath(operation.Target)
+	if err != nil {
+		return err
+	}
+	stage, err := store.statePath(operation.Stage)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%w: rolled-back retirement target is missing or unsafe", ErrStateDirty)
+	}
+	if _, err := os.Lstat(stage); err == nil || !os.IsNotExist(err) {
+		return fmt.Errorf("%w: retirement staging remained after rollback", ErrStateDirty)
+	}
+	digest, err := digestDirectoryTree(target)
+	if err != nil || digest != operation.PreviousDigest {
+		return fmt.Errorf("%w: rolled-back retirement target digest changed", ErrStateDirty)
+	}
+	return nil
+}
+
+func (store *StateStore) rollbackTreeRetirement(operation journalOperation) error {
+	target, err := store.canonicalOutputPath(operation.Target)
+	if err != nil {
+		return err
+	}
+	stage, err := store.statePath(operation.Stage)
+	if err != nil {
+		return err
+	}
+	targetInfo, targetErr := os.Lstat(target)
+	stageInfo, stageErr := os.Lstat(stage)
+	switch {
+	case targetErr == nil && os.IsNotExist(stageErr):
+		if targetInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.IsDir() {
+			return fmt.Errorf("%w: restored retirement target is unsafe", ErrStateDirty)
+		}
+		// Earlier journal operations are rolled back after this one. The tree
+		// may therefore still contain their published bytes at this point.
+		return nil
+	case os.IsNotExist(targetErr) && stageErr == nil:
+		if stageInfo.Mode()&os.ModeSymlink != 0 || !stageInfo.IsDir() {
+			return fmt.Errorf("%w: retirement staging is unsafe", ErrStateDirty)
+		}
+		digest, err := digestDirectoryTree(stage)
+		if err != nil || digest != operation.ResultDigest {
+			return fmt.Errorf("%w: retirement staging changed", ErrStateDirty)
+		}
+		if err := os.Rename(stage, target); err != nil {
+			return err
+		}
+		if err := syncTransactionDirectory(filepath.Dir(stage)); err != nil {
+			return err
+		}
+		return syncTransactionDirectory(filepath.Dir(target))
+	case targetErr == nil && stageErr == nil:
+		return fmt.Errorf("%w: retirement target and staging both exist during rollback", ErrStateDirty)
+	case !os.IsNotExist(targetErr):
+		return targetErr
+	case !os.IsNotExist(stageErr):
+		return stageErr
+	default:
+		return fmt.Errorf("%w: retirement target and staging both disappeared", ErrStateDirty)
+	}
 }
 
 // removeEmptyRolledBackRunWorkspace is deliberately narrower than general

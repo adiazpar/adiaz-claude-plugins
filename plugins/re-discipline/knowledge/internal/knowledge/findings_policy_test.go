@@ -70,32 +70,22 @@ func TestServiceArchivePolicyComesOnlyFromRatifiedProjectSettings(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := testArchiveReceipt(t)
-	receipt.Binding = binding
-	suite, err := LoadFindingEvalSuite(filepath.Join(
-		service.AssetRoot, "evals", "conformance", "finding-cases.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	suite.CorpusSnapshot = binding.CorpusFingerprint
-	suite.Digest, err = FindingEvalSuiteDigest(suite)
-	if err != nil {
-		t.Fatal(err)
-	}
-	receipt.SuiteID = suite.ID
-	receipt.SuiteDigest = suite.Digest
-	receipt.Digest, err = ArchiveReceiptDigest(receipt)
-	if err != nil {
-		t.Fatal(err)
+	receipt, report, suite := testArchiveEvidence(t, &generation, &selected)
+	if receipt.Binding != binding {
+		t.Fatalf("test archive evidence did not bind service generation: %#v != %#v", receipt.Binding, binding)
 	}
 	suiteRelative := ".re-discipline/knowledge/evals/findings/normalized-finding-ablation-v1.json"
 	writeTestJSON(t, filepath.Join(root, filepath.FromSlash(suiteRelative)), suite)
-	receiptRelative := ".re-discipline/knowledge/receipts/normalized-beats-raw.json"
+	receiptRelative := receipt.ResultingSettings.Archive.NormalizedBeatsRawReceipt
+	reportBody, err := canonicalJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWrite(filepath.Join(root, filepath.FromSlash(receipt.ReportPath)), reportBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writeTestJSON(t, filepath.Join(root, filepath.FromSlash(receiptRelative)), receipt)
-	settings := DefaultKnowledgeSettings()
-	settings.Archive.FallbackMode = "opt-in"
-	settings.Archive.ReportFallbackUntilMeasured = false
-	settings.Archive.NormalizedBeatsRawReceipt = receiptRelative
+	settings := receipt.ResultingSettings
 	writeTestJSON(t, filepath.Join(root, ".re-discipline", "knowledge", "policy.jsonc"), settings)
 
 	service = newAdversarialService(t, root, nil)
@@ -152,7 +142,8 @@ func TestArchivedFindingsAndReportsUseTypedHistoryAndArchiveClasses(t *testing.T
 		SchemaVersion: CampaignSchemaVersion, CampaignID: document.Record.CampaignID,
 		SourceRunCoverage: map[string]string{}, FindingCoverage: map[string]string{},
 		WorkItemCoverage: map[string]string{}, FileRetention: map[string]string{},
-		UnresolvedConflicts: []string{}, MissingDecisions: []string{},
+		ActiveFileDispositions: map[string]string{},
+		UnresolvedConflicts:    []string{}, MissingDecisions: []string{},
 	}
 	if err := sealClosureCoverage(&coverage); err != nil {
 		t.Fatal(err)

@@ -45,7 +45,7 @@
         "F-0101": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0201"
+        "F-0102"
       ],
       "answerable": true
     },
@@ -88,7 +88,7 @@
         "F-0101": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0201"
+        "F-0102"
       ],
       "answerable": true
     },
@@ -131,7 +131,7 @@
         "F-0101": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0201"
+        "F-0102"
       ],
       "answerable": true
     },
@@ -174,7 +174,7 @@
         "F-0101": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0201"
+        "F-0102"
       ],
       "answerable": true
     },
@@ -217,7 +217,7 @@
         "F-0102": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0202"
+        "F-0103"
       ],
       "answerable": true
     },
@@ -260,7 +260,7 @@
         "F-0102": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0202"
+        "F-0103"
       ],
       "answerable": true
     },
@@ -303,7 +303,7 @@
         "F-0102": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0202"
+        "F-0103"
       ],
       "answerable": true
     },
@@ -346,7 +346,7 @@
         "F-0102": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0202"
+        "F-0103"
       ],
       "answerable": true
     },
@@ -389,7 +389,7 @@
         "F-0103": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0203"
+        "F-0104"
       ],
       "answerable": true
     },
@@ -432,7 +432,7 @@
         "F-0103": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0203"
+        "F-0104"
       ],
       "answerable": true
     },
@@ -475,7 +475,7 @@
         "F-0103": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0203"
+        "F-0104"
       ],
       "answerable": true
     },
@@ -518,7 +518,7 @@
         "F-0103": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0203"
+        "F-0104"
       ],
       "answerable": true
     },
@@ -561,7 +561,7 @@
         "F-0104": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0204"
+        "F-0105"
       ],
       "answerable": true
     },
@@ -604,7 +604,7 @@
         "F-0104": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0204"
+        "F-0105"
       ],
       "answerable": true
     },
@@ -647,7 +647,7 @@
         "F-0104": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0204"
+        "F-0105"
       ],
       "answerable": true
     },
@@ -690,7 +690,7 @@
         "F-0104": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0204"
+        "F-0105"
       ],
       "answerable": true
     },
@@ -733,7 +733,7 @@
         "F-0105": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0205"
+        "F-0101"
       ],
       "answerable": true
     },
@@ -776,7 +776,7 @@
         "F-0105": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0205"
+        "F-0101"
       ],
       "answerable": true
     },
@@ -819,7 +819,7 @@
         "F-0105": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0205"
+        "F-0101"
       ],
       "answerable": true
     },
@@ -862,7 +862,7 @@
         "F-0105": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0205"
+        "F-0101"
       ],
       "answerable": true
     },
@@ -905,7 +905,7 @@
         "F-0201": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0101"
+        "F-0202"
       ],
       "answerable": true
     },
@@ -948,7 +948,7 @@
         "F-0201": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0101"
+        "F-0202"
       ],
       "answerable": true
     },
@@ -991,7 +991,7 @@
         "F-0201": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0101"
+        "F-0202"
       ],
       "answerable": true
     },
@@ -1034,7 +1034,7 @@
         "F-0201": "current"
       },
       "hardNegativeFindingIds": [
-        "F-0101"
+        "F-0202"
       ],
       "answerable": true
     },
@@ -1077,7 +1077,7 @@
         "F-0202": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0102"
+        "F-0203"
       ],
       "answerable": true
     },
@@ -1120,7 +1120,7 @@
         "F-0202": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0102"
+        "F-0203"
       ],
       "answerable": true
     },
@@ -1163,7 +1163,7 @@
         "F-0202": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0102"
+        "F-0203"
       ],
       "answerable": true
     },
@@ -1206,7 +1206,7 @@
         "F-0202": "challenged"
       },
       "hardNegativeFindingIds": [
-        "F-0102"
+        "F-0203"
       ],
       "answerable": true
     },
@@ -1249,7 +1249,7 @@
         "F-0203": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0103"
+        "F-0204"
       ],
       "answerable": true
     },
@@ -1292,7 +1292,7 @@
         "F-0203": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0103"
+        "F-0204"
       ],
       "answerable": true
     },
@@ -1335,7 +1335,7 @@
         "F-0203": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0103"
+        "F-0204"
       ],
       "answerable": true
     },
@@ -1378,7 +1378,7 @@
         "F-0203": "provisional"
       },
       "hardNegativeFindingIds": [
-        "F-0103"
+        "F-0204"
       ],
       "answerable": true
     },
@@ -1421,7 +1421,7 @@
         "F-0204": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0104"
+        "F-0205"
       ],
       "answerable": true
     },
@@ -1464,7 +1464,7 @@
         "F-0204": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0104"
+        "F-0205"
       ],
       "answerable": true
     },
@@ -1507,7 +1507,7 @@
         "F-0204": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0104"
+        "F-0205"
       ],
       "answerable": true
     },
@@ -1550,7 +1550,7 @@
         "F-0204": "superseded"
       },
       "hardNegativeFindingIds": [
-        "F-0104"
+        "F-0205"
       ],
       "answerable": true
     },
@@ -1593,7 +1593,7 @@
         "F-0205": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0105"
+        "F-0201"
       ],
       "answerable": true
     },
@@ -1636,7 +1636,7 @@
         "F-0205": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0105"
+        "F-0201"
       ],
       "answerable": true
     },
@@ -1679,7 +1679,7 @@
         "F-0205": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0105"
+        "F-0201"
       ],
       "answerable": true
     },
@@ -1722,7 +1722,7 @@
         "F-0205": "historical"
       },
       "hardNegativeFindingIds": [
-        "F-0105"
+        "F-0201"
       ],
       "answerable": true
     },
@@ -1975,5 +1975,5 @@
       "answerable": false
     }
   ],
-  "digest": "sha256:21cabaa405538b9e38fdcb3a4e5941d3705d8f94c93f83d7303aacebb56ef48b"
+  "digest": "sha256:324eb3acaddd2bbdeda2d940f7e4899188c6e24654ea9a15f6c706c15c82d972"
 }

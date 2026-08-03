@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +32,7 @@ type ClosureApplyRequest struct {
 	ExpectedArtifactDigests  map[string]string `json:"expectedArtifactDigests,omitempty"`
 	ExpectedCoverageRevision int64             `json:"expectedCoverageRevision,omitempty"`
 	FileRetention            map[string]string `json:"fileRetention,omitempty"`
+	ActiveFileDispositions   map[string]string `json:"activeFileDispositions,omitempty"`
 	ExportedWorkItemIDs      []string          `json:"exportedWorkItemIds,omitempty"`
 	ProjectionDestinations   map[string]string `json:"projectionDestinations,omitempty"`
 }
@@ -75,6 +79,13 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 	if err := store.Recover(ctx); err != nil {
 		return ClosureApplyResult{}, err
 	}
+	if request.Action == "finalize" {
+		if replay, found, err := replayRetiredClosureFinalization(store, request); err != nil {
+			return ClosureApplyResult{}, err
+		} else if found {
+			return replay, nil
+		}
+	}
 	graph, err := store.LoadCampaignGraph(request.CampaignID)
 	if err != nil {
 		return ClosureApplyResult{}, err
@@ -106,6 +117,9 @@ func (service *Service) startClosure(
 	if !correlationIDRE.MatchString(request.ClosureJobID) {
 		return ClosureApplyResult{}, errors.New("closure start requires a stable closureJobId")
 	}
+	if err := validateExportedDefermentIDs(graph, request.ExportedWorkItemIDs); err != nil {
+		return ClosureApplyResult{}, err
+	}
 	plan, err := BuildClosurePlan(graph, request.ArchiveDestination)
 	if err != nil {
 		return ClosureApplyResult{}, err
@@ -113,6 +127,11 @@ func (service *Service) startClosure(
 	prior := explicitClosureCoverage(graph.Campaign.ID, request)
 	coverage, err := ComputeClosureCoverage(graph, &prior)
 	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	if err := service.applyClosureActiveFileInventory(
+		graph, request.CampaignSlug, prior.ActiveFileDispositions, &coverage,
+	); err != nil {
 		return ClosureApplyResult{}, err
 	}
 	campaign := *graph.Campaign
@@ -139,6 +158,9 @@ func (service *Service) startClosure(
 	})
 	if err != nil {
 		return ClosureApplyResult{}, err
+	}
+	if _, err := service.queueClosureNormalization(graph, request.Timestamp); err != nil {
+		return ClosureApplyResult{}, fmt.Errorf("queue closure normalization: %w", err)
 	}
 	receipt, err := store.Apply(ctx, StateTransactionRequest{
 		CampaignSlug: request.CampaignSlug, CampaignID: request.CampaignID,
@@ -178,33 +200,77 @@ func (service *Service) advanceClosure(
 	if !fromOK || !toOK || to != from+1 {
 		return ClosureApplyResult{}, errors.New("closure targetStage must be the next explicit stage")
 	}
+	if err := validateExportedDefermentIDs(graph, request.ExportedWorkItemIDs); err != nil {
+		return ClosureApplyResult{}, err
+	}
+	if to > closureStageIndex["project"] && len(request.ExportedWorkItemIDs) != 0 {
+		return ClosureApplyResult{}, errors.New("deferred backlog exports must be declared no later than the project stage")
+	}
 	prior := cloneClosureCoverage(*graph.ClosureCoverage)
 	for key, value := range request.FileRetention {
 		prior.FileRetention[key] = value
+	}
+	for key, value := range request.ActiveFileDispositions {
+		prior.ActiveFileDispositions[key] = value
 	}
 	for _, id := range request.ExportedWorkItemIDs {
 		prior.WorkItemCoverage[id] = "exported-backlog"
 	}
 	workingGraph := graph
 	extraWrites := []closureWriteSpec{}
+	promotionWrites := []closureWriteSpec{}
 	if target == "project" {
 		projectedGraph, projectionFindingWrites, transitionErr := service.prepareClosureFindingTransitions(store, graph, request)
 		if transitionErr != nil {
 			return ClosureApplyResult{}, transitionErr
 		}
 		workingGraph = projectedGraph
-		extraWrites = append(extraWrites, projectionFindingWrites...)
+		promotionWrites = projectionFindingWrites
+	} else if from >= closureStageIndex["project"] {
+		projectedGraph, _, stagingErr := service.stagedClosureGraph(graph)
+		if stagingErr != nil {
+			return ClosureApplyResult{}, stagingErr
+		}
+		workingGraph = projectedGraph
 	}
 	coverage, err := ComputeClosureCoverage(workingGraph, &prior)
 	if err != nil {
 		return ClosureApplyResult{}, err
+	}
+	if err := service.applyClosureActiveFileInventory(
+		graph, request.CampaignSlug, prior.ActiveFileDispositions, &coverage,
+	); err != nil {
+		return ClosureApplyResult{}, err
+	}
+	if _, err := service.queueClosureNormalization(graph, request.Timestamp); err != nil {
+		return ClosureApplyResult{}, fmt.Errorf("queue closure normalization: %w", err)
+	}
+	normalizationBlockers := []string{}
+	if closureStageIndex[target] >= closureStageIndex["reconcile"] {
+		normalizationBlockers, err = service.closureNormalizationBlockers(graph)
+		if err != nil {
+			return ClosureApplyResult{}, fmt.Errorf("verify closure normalization: %w", err)
+		}
+	}
+	if target == "finalize" && coverage.Digest != graph.ClosureCoverage.Digest {
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure finalization cannot change verified coverage: %s",
+			strings.Join(closureCoverageBlockers(coverage), ","),
+		)
+	}
+	if target == "finalize" && len(normalizationBlockers) != 0 {
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure finalization cannot retire unresolved normalization work: %s",
+			strings.Join(normalizationBlockers, ","),
+		)
 	}
 	next := *graph.ClosureJob
 	next.Revision++
 	next.UpdatedAt, next.UpdatedBy, next.CorrelationID, next.Digest =
 		request.Timestamp, request.Actor, request.CorrelationID, ""
 	next.Stage, next.Status, next.Coverage = target, "running", &coverage
-	next.Blockers = closureCoverageBlockers(coverage)
+	next.Blockers = SortedUnique(append(
+		closureCoverageBlockers(coverage), normalizationBlockers...))
 	if len(next.Blockers) != 0 {
 		next.Status = "blocked"
 	}
@@ -216,41 +282,47 @@ func (service *Service) advanceClosure(
 	switch target {
 	case "project":
 		action = "closure.project"
-		truthDigests, projectionDigests, projectArtifacts, err := service.prepareClosureProjections(workingGraph, request)
+		truthDigests, projectionDigests, projectArtifacts, err := service.prepareClosureProjections(workingGraph, graph, coverage, request)
+		if err != nil {
+			return ClosureApplyResult{}, err
+		}
+		staging, err := service.stageClosureProjections(
+			graph, workingGraph, truthDigests, projectionDigests,
+			projectArtifacts, promotionWrites, request)
 		if err != nil {
 			return ClosureApplyResult{}, err
 		}
 		next.TruthDigests = truthDigests
 		next.ProjectionDigests = projectionDigests
-		artifacts = append(artifacts, projectArtifacts...)
+		next.StagingDigest = staging.Digest
 	case "verify":
 		action = "closure.verify"
-		if err := service.verifyClosureProjections(graph, request); err != nil {
+		if err := service.verifyClosureProjections(ctx, graph, request); err != nil {
 			return ClosureApplyResult{}, err
 		}
 		next.Status = "verified"
 	case "archive":
 		action = "closure.archive"
-		manifest, archiveArtifacts, err := service.prepareClosureArchive(store, graph, request)
+		manifest, staging, err := service.prepareClosureArchive(ctx, store, graph, request)
 		if err != nil {
 			return ClosureApplyResult{}, err
 		}
 		next.ArchiveDigest = manifest.Digest
+		next.StagingDigest = staging.Digest
 		archive = &manifest
-		artifacts = append(artifacts, archiveArtifacts...)
-		extraWrites = append(extraWrites, closureWriteSpec{
-			value: manifest, path: path.Join(graph.ClosureJob.ArchiveDestination, "manifest.json"),
-		})
 	case "finalize":
 		action = "closure.finalize"
 		next.Status = "completed"
-		campaign, receipt, finalizeArtifacts, err := service.prepareClosureFinalization(store, graph, next, request)
+		next.StagingDigest = ""
+		campaign, receipt, manifest, finalizeArtifacts, err := service.prepareClosureFinalization(ctx, store, graph, next, request)
 		if err != nil {
 			return ClosureApplyResult{}, err
 		}
 		finalReceipt = &receipt
+		archive = &manifest
 		artifacts = append(artifacts, finalizeArtifacts...)
 		extraWrites = append(extraWrites,
+			closureWriteSpec{value: manifest, path: path.Join(graph.ClosureJob.ArchiveDestination, "manifest.json")},
 			closureWriteSpec{value: campaign, expectedRevision: graph.Campaign.Revision,
 				expectedDigest: request.ExpectedRecordDigests[graph.Campaign.ID]},
 			closureWriteSpec{value: receipt},
@@ -283,15 +355,41 @@ func (service *Service) advanceClosure(
 	if err != nil {
 		return ClosureApplyResult{}, err
 	}
-	receipt, err := store.Apply(ctx, StateTransactionRequest{
+	transaction := StateTransactionRequest{
 		CampaignSlug: request.CampaignSlug, CampaignID: request.CampaignID,
 		Actor: request.Actor, Authority: "manager", Action: action,
 		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
 		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
 		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes, Artifacts: artifacts,
-	})
+	}
+	if target == "finalize" {
+		snapshots, err := closureFinalizationSnapshotArtifacts(request, writes, graph.ClosureJob.ArchiveDestination)
+		if err != nil {
+			return ClosureApplyResult{}, err
+		}
+		transaction.Artifacts = append(transaction.Artifacts, snapshots...)
+		replayBody, err := canonicalJSON(request)
+		if err != nil {
+			return ClosureApplyResult{}, err
+		}
+		replayPath := path.Join(graph.ClosureJob.ArchiveDestination, "finalization", "request.json")
+		transaction.Artifacts = append(transaction.Artifacts, StateArtifactWrite{
+			Path: replayPath, ExpectedDigest: request.ExpectedArtifactDigests[replayPath],
+			ContentDigest: "sha256:" + SHA256Bytes(replayBody), Body: replayBody,
+		})
+		transaction.RetireActiveTree = path.Join("active", request.CampaignSlug)
+		transaction.RetiredEventJournal = path.Join(
+			graph.ClosureJob.ArchiveDestination, "finalization", "events", "events.jsonl")
+	}
+	receipt, err := store.Apply(ctx, transaction)
 	if err != nil {
 		return ClosureApplyResult{}, err
+	}
+	if target == "finalize" {
+		// The immutable transaction is already committed. Staging is derived and
+		// intentionally best-effort to clean; a crash here leaves only an inert,
+		// unindexed cache that the replay path can discard later.
+		_ = discardClosureStaging(service.Boundary, graph.Campaign.ID, graph.ClosureJob.ID)
 	}
 	result := ClosureApplyResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
@@ -299,6 +397,489 @@ func (service *Service) advanceClosure(
 		Receipt: finalReceipt, Archive: archive,
 	}
 	return sealClosureApplyResult(result)
+}
+
+func closureFinalizationSnapshotArtifacts(
+	request ClosureApplyRequest,
+	writes []StateWrite,
+	archiveDestination string,
+) ([]StateArtifactWrite, error) {
+	predictedEvent := eventIDForRequest(StateTransactionRequest{
+		CampaignSlug: request.CampaignSlug, CampaignID: request.CampaignID,
+		Actor: request.Actor, Authority: "manager", Action: "closure.finalize",
+		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
+		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
+		ExpectedHeadDigest: request.ExpectedHeadDigest,
+	})
+	result := []StateArtifactWrite{}
+	for _, write := range writes {
+		name := ""
+		switch record := write.Record.(type) {
+		case CampaignRecord:
+			name = "campaign.json"
+			record.LastEventID = predictedEvent
+			write.Record = record
+		case ClosureJob:
+			name = "closure-job.json"
+		default:
+			continue
+		}
+		prepared, err := prepareStateWrite(
+			request.CampaignSlug, request.CampaignID, request.CorrelationID,
+			predictedEvent, request.ExpectedHeadRevision+1, write)
+		if err != nil {
+			return nil, err
+		}
+		destination := path.Join(archiveDestination, "finalization", name)
+		result = append(result, StateArtifactWrite{
+			Path: destination, ExpectedDigest: request.ExpectedArtifactDigests[destination],
+			ContentDigest: prepared.ContentDigest, Body: prepared.Body,
+		})
+	}
+	if len(result) != 2 {
+		return nil, errors.New("closure finalization must snapshot its closed campaign and completed job")
+	}
+	return result, nil
+}
+
+func replayRetiredClosureFinalization(
+	store *StateStore,
+	request ClosureApplyRequest,
+) (ClosureApplyResult, bool, error) {
+	receipt, found, err := store.loadIdempotencyReceipt(request.IdempotencyKey)
+	if err != nil || !found {
+		return ClosureApplyResult{}, false, err
+	}
+	retiredTree := path.Join("active", request.CampaignSlug)
+	if receipt.RetiredTree != retiredTree || receipt.Event.Action != "closure.finalize" ||
+		receipt.Event.Actor != request.Actor || receipt.Event.Authority != "manager" ||
+		receipt.CorrelationID != request.CorrelationID || receipt.Event.CorrelationID != request.CorrelationID ||
+		receipt.Event.Timestamp != request.Timestamp || receipt.Event.Rationale != request.Rationale ||
+		receipt.PreviousHead.Revision != request.ExpectedHeadRevision ||
+		receipt.PreviousHead.Digest != request.ExpectedHeadDigest {
+		return ClosureApplyResult{}, false, ErrIdempotencyConflict
+	}
+	activePath, err := store.canonicalOutputPath(retiredTree)
+	if err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	if _, err := os.Lstat(activePath); err == nil || !os.IsNotExist(err) {
+		return ClosureApplyResult{}, false, fmt.Errorf("%w: committed closure retirement left an active tree", ErrStateDirty)
+	}
+
+	archiveDestination := ""
+	for _, artifact := range receipt.Artifacts {
+		if strings.HasSuffix(artifact.Path, "/closure/receipt.json") {
+			if archiveDestination != "" {
+				return ClosureApplyResult{}, false, ErrStateDirty
+			}
+			archiveDestination = strings.TrimSuffix(artifact.Path, "/closure/receipt.json")
+		}
+	}
+	if archiveDestination == "" || validateArchiveDestination(archiveDestination) != nil ||
+		validateRetiredEventJournal(path.Join(archiveDestination, "finalization", "events", "events.jsonl")) != nil {
+		return ClosureApplyResult{}, false, ErrStateDirty
+	}
+	var closureReceipt ClosureReceipt
+	_, err = loadRetiredClosureRecord(
+		store, path.Join(archiveDestination, "closure", "receipt.json"), &closureReceipt)
+	if err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	var campaign CampaignRecord
+	_, err = loadRetiredClosureRecord(
+		store, path.Join(archiveDestination, "finalization", "campaign.json"), &campaign)
+	if err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	var job ClosureJob
+	_, err = loadRetiredClosureRecord(
+		store, path.Join(archiveDestination, "finalization", "closure-job.json"), &job)
+	if err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	if campaign.ID != request.CampaignID || campaign.Slug != request.CampaignSlug ||
+		campaign.Status != "closed" || job.CampaignID != request.CampaignID ||
+		job.Status != "completed" || closureReceipt.CampaignID != request.CampaignID ||
+		closureReceipt.ArchiveDestination != archiveDestination {
+		return ClosureApplyResult{}, false, ErrStateDirty
+	}
+	var manifest ArchiveManifest
+	_, err = loadRetiredClosureRecord(
+		store, path.Join(archiveDestination, "manifest.json"), &manifest)
+	if err != nil || manifest.Digest != closureReceipt.ArchiveDigest ||
+		manifest.CampaignID != closureReceipt.CampaignID ||
+		manifest.Coverage.Digest != closureReceipt.CoverageDigest {
+		return ClosureApplyResult{}, false, fmt.Errorf("%w: retired archive manifest does not bind the closure receipt", ErrStateDirty)
+	}
+	if err := authenticateRetiredClosureArtifacts(store, receipt, archiveDestination, manifest); err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	if err := authenticateRetiredArchiveManifest(store.Boundary, archiveDestination, manifest); err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	if err := authenticateRetiredClosureEventJournal(store, receipt, archiveDestination, manifest); err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	replayPath := path.Join(archiveDestination, "finalization", "request.json")
+	replayBody, err := loadRetiredClosureArtifact(store, replayPath)
+	if err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	wantReplayBody, err := canonicalJSON(request)
+	if err != nil {
+		return ClosureApplyResult{}, false, err
+	}
+	if string(replayBody) != string(wantReplayBody) {
+		return ClosureApplyResult{}, false, ErrIdempotencyConflict
+	}
+	result := ClosureApplyResult{
+		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
+		Transaction: &receipt, Job: &job, Receipt: &closureReceipt,
+		Archive: &manifest,
+	}
+	_ = discardClosureStaging(store.Boundary, job.CampaignID, job.ID)
+	sealed, err := sealClosureApplyResult(result)
+	return sealed, true, err
+}
+
+func authenticateRetiredClosureArtifacts(
+	store *StateStore,
+	receipt StateTransactionReceipt,
+	archiveDestination string,
+	manifest ArchiveManifest,
+) error {
+	required := map[string]bool{
+		path.Join(archiveDestination, "closure", "receipt.json"):          true,
+		path.Join(archiveDestination, "README.md"):                        true,
+		path.Join(archiveDestination, "finalization", "campaign.json"):    true,
+		path.Join(archiveDestination, "finalization", "closure-job.json"): true,
+		path.Join(archiveDestination, "finalization", "request.json"):     true,
+	}
+	expected := map[string]string{}
+	for relative, digest := range manifest.Files {
+		destination := path.Join(archiveDestination, relative)
+		expected[destination] = digest
+		required[destination] = true
+	}
+	for destination, digest := range manifest.Projections {
+		expected[destination] = digest
+		required[destination] = true
+	}
+	for _, navigation := range []string{
+		"docs/INDEX.md", "docs/history/INDEX.md", "docs/truth/INDEX.md",
+		"docs/backlog/INDEX.md", "docs/playbooks/INDEX.md",
+	} {
+		expected[navigation] = ""
+	}
+	seen := map[string]bool{}
+	for _, artifact := range receipt.Artifacts {
+		_, special := required[artifact.Path]
+		want, allowed := expected[artifact.Path]
+		if seen[artifact.Path] || (!special && !allowed) || !digestRE.MatchString(artifact.ContentDigest) ||
+			(want != "" && want != artifact.ContentDigest) {
+			return fmt.Errorf("%w: finalization receipt has an unexpected artifact inventory", ErrStateDirty)
+		}
+		seen[artifact.Path] = true
+		body, err := loadRetiredClosureArtifact(store, artifact.Path)
+		if err != nil || "sha256:"+SHA256Bytes(body) != artifact.ContentDigest {
+			return fmt.Errorf("%w: archived artifact %s does not match its transaction receipt", ErrStateDirty, artifact.Path)
+		}
+	}
+	for artifact := range required {
+		if !seen[artifact] {
+			return fmt.Errorf("%w: finalization receipt omits artifact %s", ErrStateDirty, artifact)
+		}
+	}
+	return nil
+}
+
+func authenticateRetiredArchiveManifest(
+	boundary Boundary,
+	archiveDestination string,
+	manifest ArchiveManifest,
+) error {
+	for relative, expected := range manifest.Files {
+		absolute, err := boundary.Resolve(path.Join(archiveDestination, relative), true)
+		if err != nil {
+			return fmt.Errorf("%w: archived manifest file %s is unavailable", ErrStateDirty, relative)
+		}
+		body, err := readSingleLinkRegularFile(absolute)
+		if err != nil || "sha256:"+SHA256Bytes(body) != expected {
+			return fmt.Errorf("%w: archived manifest file %s changed", ErrStateDirty, relative)
+		}
+	}
+	for projection, expected := range manifest.Projections {
+		absolute, err := boundary.Resolve(projection, true)
+		if err != nil {
+			return fmt.Errorf("%w: archived projection %s is unavailable", ErrStateDirty, projection)
+		}
+		body, err := readSingleLinkRegularFile(absolute)
+		if err != nil || "sha256:"+SHA256Bytes(body) != expected {
+			return fmt.Errorf("%w: archived projection %s changed", ErrStateDirty, projection)
+		}
+	}
+	allowed := map[string]bool{
+		"manifest.json": true, "closure/receipt.json": true, "README.md": true,
+		"finalization/campaign.json": true, "finalization/closure-job.json": true,
+		"finalization/request.json": true, "finalization/events/events.jsonl": true,
+	}
+	for relative := range manifest.Files {
+		allowed[relative] = true
+	}
+	if err := verifyArchiveDirectoryInventory(boundary, archiveDestination, allowed, false); err != nil {
+		return fmt.Errorf("%w: %v", ErrStateDirty, err)
+	}
+	return nil
+}
+
+func authenticateRetiredClosureEventJournal(
+	store *StateStore,
+	receipt StateTransactionReceipt,
+	archiveDestination string,
+	manifest ArchiveManifest,
+) error {
+	finalRelative := path.Join(archiveDestination, "finalization", "events", "events.jsonl")
+	if receipt.ResultingHead.EventJournal != finalRelative ||
+		receipt.ResultingHead.EventID != receipt.Event.ID ||
+		receipt.ResultingHead.EventDigest != receipt.Event.Digest {
+		return fmt.Errorf("%w: transaction receipt does not bind the retired event journal", ErrStateDirty)
+	}
+	baseRelative := "events/events.jsonl"
+	expectedBaseDigest, present := manifest.Files[baseRelative]
+	if !present {
+		return fmt.Errorf("%w: archive manifest omits the pre-finalization event journal", ErrStateDirty)
+	}
+	base, err := loadRetiredClosureArtifact(store, path.Join(archiveDestination, baseRelative))
+	if err != nil || "sha256:"+SHA256Bytes(base) != expectedBaseDigest {
+		return fmt.Errorf("%w: pre-finalization event journal does not verify", ErrStateDirty)
+	}
+	for index, line := range strings.Split(strings.TrimSpace(string(base)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event StateEvent
+		if decodeStrictJSON([]byte(line), &event) != nil || verifyStateEvent(event) != nil {
+			return fmt.Errorf("%w: archived event journal line %d is invalid", ErrStateDirty, index+1)
+		}
+	}
+	chain, err := authenticatedReceiptsSinceManifestHead(
+		store, receipt.PreviousHead, manifest.EventHead,
+	)
+	if err != nil {
+		return err
+	}
+	if err := authenticateArchivePublicationReceipt(receipt, archiveDestination, manifest); err != nil {
+		return err
+	}
+	expected := append([]byte(nil), base...)
+	if len(expected) != 0 && expected[len(expected)-1] != '\n' {
+		expected = append(expected, '\n')
+	}
+	for _, prior := range chain {
+		if !transactionReceiptBindsCampaign(prior, receipt.RetiredTree) {
+			continue
+		}
+		line, marshalErr := json.Marshal(prior.Event)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		expected = append(expected, line...)
+		expected = append(expected, '\n')
+	}
+	eventLine, err := json.Marshal(receipt.Event)
+	if err != nil {
+		return err
+	}
+	expected = append(expected, eventLine...)
+	expected = append(expected, '\n')
+	actual, err := loadRetiredClosureArtifact(store, finalRelative)
+	if err != nil || string(actual) != string(expected) {
+		return fmt.Errorf("%w: retired event journal bytes do not match the immutable transaction event", ErrStateDirty)
+	}
+	return nil
+}
+
+func authenticatedReceiptsSinceManifestHead(
+	store *StateStore,
+	cursor StateHead,
+	eventHead string,
+) ([]StateTransactionReceipt, error) {
+	backward := []StateTransactionReceipt{}
+	seen := map[string]bool{}
+	for cursor.Revision > 0 && cursor.EventID != eventHead {
+		if seen[cursor.TransactionID] || !correlationIDRE.MatchString(cursor.TransactionID) {
+			return nil, fmt.Errorf("%w: archived receipt chain is cyclic or incomplete", ErrStateDirty)
+		}
+		seen[cursor.TransactionID] = true
+		prior, found, err := loadTransactionReceiptByID(store, cursor.TransactionID)
+		if err != nil {
+			return nil, err
+		}
+		if !found || prior.ResultingHead != cursor {
+			return nil, fmt.Errorf("%w: archived event is not bound to its immutable transaction receipt", ErrStateDirty)
+		}
+		backward = append(backward, prior)
+		cursor = prior.PreviousHead
+	}
+	if cursor.EventID != eventHead {
+		return nil, fmt.Errorf("%w: archive manifest event head is unavailable", ErrStateDirty)
+	}
+	for left, right := 0, len(backward)-1; left < right; left, right = left+1, right-1 {
+		backward[left], backward[right] = backward[right], backward[left]
+	}
+	return backward, nil
+}
+
+func loadTransactionReceiptByID(
+	store *StateStore,
+	transactionID string,
+) (StateTransactionReceipt, bool, error) {
+	receiptRoot, err := store.statePath("receipts")
+	if err != nil {
+		return StateTransactionReceipt{}, false, err
+	}
+	entries, err := os.ReadDir(receiptRoot)
+	if err != nil {
+		return StateTransactionReceipt{}, false, err
+	}
+	var matched StateTransactionReceipt
+	found := false
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() || path.Ext(entry.Name()) != ".json" {
+			return StateTransactionReceipt{}, false, fmt.Errorf("%w: receipt store contains an unexpected entry", ErrStateDirty)
+		}
+		body, readErr := readSingleLinkRegularFile(filepath.Join(receiptRoot, entry.Name()))
+		if readErr != nil {
+			return StateTransactionReceipt{}, false, readErr
+		}
+		var candidate StateTransactionReceipt
+		if decodeStrictJSON(body, &candidate) != nil ||
+			authenticateTransactionReceiptEnvelope(candidate) != nil ||
+			entry.Name() != SHA256String(candidate.IdempotencyKey)+".json" {
+			return StateTransactionReceipt{}, false, fmt.Errorf("%w: immutable transaction receipt does not verify", ErrStateDirty)
+		}
+		canonical, canonicalErr := canonicalJSON(candidate)
+		if canonicalErr != nil || string(canonical) != string(body) {
+			return StateTransactionReceipt{}, false, fmt.Errorf("%w: immutable transaction receipt is not canonical", ErrStateDirty)
+		}
+		if candidate.TransactionID != transactionID {
+			continue
+		}
+		if found {
+			return StateTransactionReceipt{}, false, fmt.Errorf("%w: duplicate immutable transaction receipt", ErrStateDirty)
+		}
+		matched, found = candidate, true
+	}
+	return matched, found, nil
+}
+
+func authenticateTransactionReceiptEnvelope(receipt StateTransactionReceipt) error {
+	if verifyTransactionReceipt(receipt) != nil ||
+		verifyStateHead(receipt.PreviousHead) != nil ||
+		verifyStateHead(receipt.ResultingHead) != nil ||
+		verifyStateEvent(receipt.Event) != nil ||
+		receipt.ResultingHead.TransactionID != receipt.TransactionID ||
+		receipt.ResultingHead.EventID != receipt.Event.ID ||
+		receipt.ResultingHead.EventDigest != receipt.Event.Digest ||
+		receipt.Event.PreviousRevision != receipt.PreviousHead.Revision ||
+		receipt.Event.ResultingRevision != receipt.ResultingHead.Revision ||
+		receipt.Event.PreviousEventID != receipt.PreviousHead.EventID ||
+		receipt.Event.PreviousStateDigest != receipt.PreviousHead.StateDigest ||
+		receipt.Event.ResultingStateDigest != receipt.ResultingHead.StateDigest {
+		return errors.New("transaction receipt envelope does not verify")
+	}
+	return nil
+}
+
+func archivePublicationReceiptMatches(
+	receipt StateTransactionReceipt,
+	archiveDestination string,
+	manifest ArchiveManifest,
+) bool {
+	manifestPath := path.Join(archiveDestination, "manifest.json")
+	manifestBody, err := canonicalJSON(manifest)
+	if err != nil {
+		return false
+	}
+	foundManifest := false
+	for _, record := range receipt.Records {
+		if record.Path == manifestPath && record.RecordID == "archive-manifest" &&
+			record.RecordDigest == manifest.Digest &&
+			record.ContentDigest == "sha256:"+SHA256Bytes(manifestBody) {
+			foundManifest = true
+		}
+	}
+	if !foundManifest {
+		return false
+	}
+	expected := map[string]string{}
+	for relative, digest := range manifest.Files {
+		expected[path.Join(archiveDestination, relative)] = digest
+	}
+	for destination, digest := range manifest.Projections {
+		expected[destination] = digest
+	}
+	for _, artifact := range receipt.Artifacts {
+		if want, required := expected[artifact.Path]; required {
+			if want != artifact.ContentDigest {
+				return false
+			}
+			delete(expected, artifact.Path)
+		}
+	}
+	return len(expected) == 0
+}
+
+func authenticateArchivePublicationReceipt(
+	receipt StateTransactionReceipt,
+	archiveDestination string,
+	manifest ArchiveManifest,
+) error {
+	if !archivePublicationReceiptMatches(receipt, archiveDestination, manifest) {
+		return fmt.Errorf("%w: archive manifest and files are not bound to the archive transaction receipt", ErrStateDirty)
+	}
+	return nil
+}
+
+func transactionReceiptBindsCampaign(receipt StateTransactionReceipt, retiredTree string) bool {
+	prefix := retiredTree + "/"
+	if retiredTree == "" || !strings.HasPrefix(retiredTree, "active/") {
+		return false
+	}
+	found := false
+	for _, record := range receipt.Records {
+		if strings.HasPrefix(record.Path, "active/") {
+			if !strings.HasPrefix(record.Path, prefix) {
+				return false
+			}
+			found = true
+		}
+	}
+	return found
+}
+
+func loadRetiredClosureRecord(store *StateStore, relative string, target any) ([]byte, error) {
+	body, err := loadRetiredClosureArtifact(store, relative)
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeStrictJSON(body, target); err != nil {
+		return nil, err
+	}
+	_, canonical, err := sealStateRecord(targetValue(target), relative)
+	if err != nil || string(canonical) != string(body) {
+		return nil, errors.New("retired closure record digest or canonical encoding does not verify")
+	}
+	return body, nil
+}
+
+func loadRetiredClosureArtifact(store *StateStore, relative string) ([]byte, error) {
+	absolute, err := store.canonicalOutputPath(relative)
+	if err != nil {
+		return nil, err
+	}
+	return readSingleLinkRegularFile(absolute)
 }
 
 func (service *Service) reopenClosure(
@@ -320,6 +901,8 @@ func (service *Service) reopenClosure(
 	job.UpdatedAt, job.UpdatedBy, job.CorrelationID, job.Digest =
 		request.Timestamp, request.Actor, request.CorrelationID, ""
 	job.Status = "reopened"
+	job.StagingDigest, job.ArchiveDigest = "", ""
+	job.TruthDigests, job.ProjectionDigests = map[string]string{}, map[string]string{}
 	if err := sealClosureJobForComparison(&job); err != nil {
 		return ClosureApplyResult{}, err
 	}
@@ -343,6 +926,7 @@ func (service *Service) reopenClosure(
 	if err != nil {
 		return ClosureApplyResult{}, err
 	}
+	_ = discardClosureStaging(service.Boundary, graph.Campaign.ID, graph.ClosureJob.ID)
 	result := ClosureApplyResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
 		Transaction: &receipt, Plan: graph.ClosurePlan, Job: &job, Coverage: graph.ClosureCoverage,
@@ -391,10 +975,14 @@ func explicitClosureCoverage(campaignID string, request ClosureApplyRequest) Clo
 		SchemaVersion: CampaignSchemaVersion, CampaignID: campaignID,
 		SourceRunCoverage: map[string]string{}, FindingCoverage: map[string]string{},
 		WorkItemCoverage: map[string]string{}, FileRetention: map[string]string{},
-		UnresolvedConflicts: []string{}, MissingDecisions: []string{},
+		ActiveFileDispositions: map[string]string{},
+		UnresolvedConflicts:    []string{}, MissingDecisions: []string{},
 	}
 	for key, value := range request.FileRetention {
 		prior.FileRetention[key] = value
+	}
+	for key, value := range request.ActiveFileDispositions {
+		prior.ActiveFileDispositions[key] = value
 	}
 	for _, id := range request.ExportedWorkItemIDs {
 		prior.WorkItemCoverage[id] = "exported-backlog"
@@ -412,40 +1000,227 @@ func cloneClosureCoverage(source ClosureCoverage) ClosureCoverage {
 	result.FindingCoverage = cloneStringMap(source.FindingCoverage)
 	result.WorkItemCoverage = cloneStringMap(source.WorkItemCoverage)
 	result.FileRetention = cloneStringMap(source.FileRetention)
+	result.ActiveFileDispositions = cloneStringMap(source.ActiveFileDispositions)
 	result.UnresolvedConflicts = append([]string(nil), source.UnresolvedConflicts...)
 	result.MissingDecisions = append([]string(nil), source.MissingDecisions...)
 	return result
 }
 
-// prepareClosureFindingTransitions performs the sole provisional-to-current
-// promotion. It reads each canonical finding document, advances exactly one
-// revision under the closure action, and returns a graph projection used to
-// render truth bytes. The finding revisions and truth artifacts are committed
-// together by the caller.
+func (service *Service) applyClosureActiveFileInventory(
+	graph CampaignGraph,
+	slug string,
+	prior map[string]string,
+	coverage *ClosureCoverage,
+) error {
+	if service == nil || coverage == nil {
+		return errors.New("closure active-file inventory requires a service and coverage")
+	}
+	files, err := listActiveTreeFiles(service.Boundary, slug)
+	if err != nil {
+		return err
+	}
+	known := knownActiveFileDispositions(graph, *coverage)
+	actual := map[string]bool{}
+	dispositions := map[string]string{}
+	missing := make([]string, 0, len(coverage.MissingDecisions))
+	for _, blocker := range coverage.MissingDecisions {
+		if !strings.HasPrefix(blocker, "active-file:") {
+			missing = append(missing, blocker)
+		}
+	}
+	for _, relative := range files {
+		actual[relative] = true
+		if inferred := known[relative]; inferred != "" {
+			dispositions[relative] = inferred
+			continue
+		}
+		disposition := prior[relative]
+		if !validOne(disposition, "retain", "destroy-approved", "ephemeral") {
+			disposition = "decision-required"
+			missing = append(missing, "active-file:"+relative)
+		}
+		dispositions[relative] = disposition
+	}
+	for relative := range prior {
+		if validateRelativeRecordPath(relative) != nil {
+			return fmt.Errorf("closure active-file disposition path %q is invalid", relative)
+		}
+		if !actual[relative] {
+			return fmt.Errorf("closure active-file disposition %s names a missing file", relative)
+		}
+	}
+	coverage.ActiveFileDispositions = dispositions
+	coverage.MissingDecisions = SortedUnique(missing)
+	return sealClosureCoverage(coverage)
+}
+
+func listActiveTreeFiles(boundary Boundary, slug string) ([]string, error) {
+	if !managedSlugRE.MatchString(slug) {
+		return nil, errors.New("closure active-file inventory requires a valid campaign slug")
+	}
+	root := filepath.Join(boundary.Root, "active", slug)
+	resolved, err := canonicalExistingPath(root)
+	if err != nil || !withinRoot(boundary.Root, resolved) {
+		return nil, errors.New("closure active tree does not resolve inside the project")
+	}
+	info, err := os.Lstat(root)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, errors.New("closure active tree is not a real directory")
+	}
+	files := []string{}
+	err = filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == root {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("closure active tree contains symbolic link %s", current)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("closure active tree contains unsupported entry %s", current)
+		}
+		file, err := os.Open(current)
+		if err != nil {
+			return err
+		}
+		multiple, linkErr := writerFileHasMultipleLinks(file)
+		closeErr := file.Close()
+		if linkErr != nil || closeErr != nil || multiple {
+			return fmt.Errorf("closure active tree contains unsafe hard-linked file %s", current)
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if validateRelativeRecordPath(relative) != nil {
+			return fmt.Errorf("closure active tree contains unsafe path %s", relative)
+		}
+		files = append(files, relative)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func knownActiveFileDispositions(graph CampaignGraph, coverage ClosureCoverage) map[string]string {
+	known := map[string]string{
+		"campaign.json": "retain", "events/events.jsonl": "retain", "STATE.md": "ephemeral",
+	}
+	for id := range graph.WorkItems {
+		known[path.Join("work-items", id+".json")] = "retain"
+	}
+	for id := range graph.Findings {
+		known[path.Join("findings", id+".md")] = "retain"
+	}
+	for id := range graph.Intakes {
+		known[path.Join("intake", id+".json")] = "retain"
+	}
+	for id := range graph.Reviews {
+		known[path.Join("reviews", id+".json")] = "retain"
+	}
+	if graph.ClosurePlan != nil {
+		known["closure/plan.json"] = "retain"
+	}
+	if graph.ClosureJob != nil {
+		known["closure/job.json"] = "retain"
+	}
+	if graph.ClosureCoverage != nil {
+		known["closure/coverage.json"] = "retain"
+	}
+	if graph.ClosureReceipt != nil {
+		known["closure/receipt.json"] = "retain"
+	}
+	activePrefix := path.Join("active", graph.Campaign.Slug) + "/"
+	for id, run := range graph.Runs {
+		known[path.Join("runs", id, "run.json")] = "retain"
+		known[path.Join("runs", id, "AGENTS.override.md")] = "ephemeral"
+		for _, handle := range []*FileHandle{run.Brief, run.ContextPack, run.Report} {
+			if handle != nil && strings.HasPrefix(handle.Path, activePrefix) {
+				known[strings.TrimPrefix(handle.Path, activePrefix)] = "retain"
+			}
+		}
+		for _, file := range run.Files {
+			relative := path.Join("runs", id, file.Path)
+			switch coverage.FileRetention[id+":"+file.Path] {
+			case "retained-inline", "distilled-and-retained":
+				known[relative] = "retain"
+			case "retained-by-reference", "discarded-approved", "external-verified":
+				known[relative] = "destroy-approved"
+			case "decision-required", "":
+				known[relative] = "decision-required"
+			default:
+				if strings.HasPrefix(coverage.FileRetention[id+":"+file.Path], "maintained:") {
+					known[relative] = "destroy-approved"
+				}
+			}
+		}
+	}
+	return known
+}
+
+// prepareClosureFindingTransitions builds closure-owned finding revisions
+// without publishing them. Truth candidates become current, and every finding
+// whose evidence is inside the retiring campaign receives durable archive
+// handles. The revised documents and rendered projections remain private until
+// finalization publishes the archive and durable outputs in one transaction.
 func (service *Service) prepareClosureFindingTransitions(
 	store *StateStore,
 	graph CampaignGraph,
 	request ClosureApplyRequest,
 ) (CampaignGraph, []closureWriteSpec, error) {
+	if graph.ClosurePlan == nil || graph.ClosureJob == nil {
+		return CampaignGraph{}, nil, errors.New("closure finding projection requires a canonical plan and job")
+	}
 	next := cloneCampaignGraph(graph)
 	writes := []closureWriteSpec{}
-	ids := append([]string(nil), graph.ClosurePlan.ProjectionFindingIDs...)
-	sort.Strings(ids)
-	for _, id := range ids {
+	truthCandidates := map[string]bool{}
+	for _, id := range graph.ClosurePlan.ProjectionFindingIDs {
 		finding, present := graph.Findings[id]
 		if !present || finding.Projection != "truth" {
 			return CampaignGraph{}, nil, fmt.Errorf("truth projection finding %s is missing or no longer targets truth", id)
 		}
-		if finding.Validity == "current" {
-			continue
-		}
-		if finding.Validity != "provisional" || finding.ReviewState != "manager-ratified" ||
-			finding.EvidenceGrade != "direct" || len(finding.Relations.Contradicts) != 0 {
+		truthCandidates[id] = true
+	}
+	ids := make([]string, 0, len(graph.Findings))
+	for id := range graph.Findings {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		finding := graph.Findings[id]
+		truthCandidate := truthCandidates[id]
+		if truthCandidate && (!validOne(finding.Validity, "provisional", "current") ||
+			finding.ReviewState != "manager-ratified" || finding.EvidenceGrade != "direct" ||
+			len(finding.Relations.Contradicts) != 0) {
 			return CampaignGraph{}, nil, fmt.Errorf("truth projection finding %s is not closure-promotable", id)
+		}
+		changed := truthCandidate && finding.Validity != "current"
+		projectedEvidence := append([]EvidenceReference(nil), finding.Evidence...)
+		for index := range projectedEvidence {
+			durable := durableClosureEvidenceReference(
+				projectedEvidence[index], request.CampaignSlug,
+				graph.ClosureJob.ArchiveDestination)
+			if durable != projectedEvidence[index] {
+				changed = true
+			}
+			projectedEvidence[index] = durable
+		}
+		if !changed {
+			continue
 		}
 		expectedDigest := request.ExpectedRecordDigests[id]
 		if expectedDigest != finding.Digest || !digestRE.MatchString(expectedDigest) {
-			return CampaignGraph{}, nil, fmt.Errorf("truth projection finding %s requires its exact expected digest", id)
+			return CampaignGraph{}, nil, fmt.Errorf("closure finding %s requires its exact expected digest", id)
 		}
 		relative := path.Join("active", request.CampaignSlug, "findings", id+".md")
 		_, value, handle, err := store.readCanonicalRecordValue(relative)
@@ -454,12 +1229,15 @@ func (service *Service) prepareClosureFindingTransitions(
 		}
 		document, ok := value.(FindingDocument)
 		if !ok || handle.RecordDigest != finding.Digest || document.Record.Revision != finding.Revision {
-			return CampaignGraph{}, nil, fmt.Errorf("truth projection finding %s changed during closure", id)
+			return CampaignGraph{}, nil, fmt.Errorf("closure finding %s changed during projection", id)
 		}
+		document.Record.Evidence = projectedEvidence
 		document.Record.Revision++
 		document.Record.UpdatedAt, document.Record.UpdatedBy = request.Timestamp, request.Actor
 		document.Record.CorrelationID, document.Record.Digest = request.CorrelationID, ""
-		document.Record.Validity = "current"
+		if truthCandidate {
+			document.Record.Validity = "current"
+		}
 		sealed, _, err := sealFindingStateRecord(document, relative)
 		if err != nil {
 			return CampaignGraph{}, nil, err
@@ -473,14 +1251,99 @@ func (service *Service) prepareClosureFindingTransitions(
 	return next, writes, nil
 }
 
+func durableClosureEvidenceReference(
+	evidence EvidenceReference,
+	campaignSlug, archiveDestination string,
+) EvidenceReference {
+	activePrefix := path.Join("active", campaignSlug) + "/"
+	if !strings.HasPrefix(evidence.Path, activePrefix) {
+		return evidence
+	}
+	priorPath := evidence.Path
+	evidence.Path = path.Join(archiveDestination, strings.TrimPrefix(evidence.Path, activePrefix))
+	pathObjectPrefix := "path:" + priorPath
+	if strings.HasPrefix(evidence.ObjectKey, pathObjectPrefix) {
+		evidence.ObjectKey = "path:" + evidence.Path + strings.TrimPrefix(evidence.ObjectKey, pathObjectPrefix)
+	}
+	return evidence
+}
+
+func closureEvidenceSourcesInDurableOrder(
+	source, durable []EvidenceReference,
+	campaignSlug, archiveDestination string,
+) ([]EvidenceReference, error) {
+	if len(source) != len(durable) {
+		return nil, errors.New("closure evidence cardinality changed")
+	}
+	used := make([]bool, len(source))
+	ordered := make([]EvidenceReference, 0, len(durable))
+	for _, target := range durable {
+		matched := -1
+		for index, candidate := range source {
+			if used[index] {
+				continue
+			}
+			projected := durableClosureEvidenceReference(candidate, campaignSlug, archiveDestination)
+			if projected == target {
+				matched = index
+				break
+			}
+		}
+		if matched < 0 {
+			return nil, errors.New("closure durable evidence no longer maps to its exact source reference")
+		}
+		used[matched] = true
+		ordered = append(ordered, source[matched])
+	}
+	return ordered, nil
+}
+
 func (service *Service) prepareClosureProjections(
 	graph CampaignGraph,
+	sourceGraph CampaignGraph,
+	coverage ClosureCoverage,
 	request ClosureApplyRequest,
 ) (map[string]string, map[string]string, []StateArtifactWrite, error) {
+	if graph.ClosurePlan == nil || graph.ClosureJob == nil {
+		return nil, nil, nil, errors.New("closure projection requires a canonical plan and job")
+	}
 	truthDigests := map[string]string{}
 	projectionDigests := map[string]string{}
 	artifacts := []StateArtifactWrite{}
 	seenDestinations := map[string]bool{}
+	workIDs := make([]string, 0, len(graph.WorkItems))
+	for id := range graph.WorkItems {
+		workIDs = append(workIDs, id)
+	}
+	sort.Strings(workIDs)
+	for _, id := range workIDs {
+		if coverage.WorkItemCoverage[id] != "exported-backlog" {
+			continue
+		}
+		item := graph.WorkItems[id]
+		if item.State != "deferred" || item.Deferment == nil || item.Deferment.BlocksClosure ||
+			item.Deferment.ClosureDisposition != DefermentDispositionExportBacklog {
+			return nil, nil, nil, fmt.Errorf("work item %s has invalid exported-backlog coverage", id)
+		}
+		destination := item.Deferment.ClosureDestination
+		if err := validateDefermentBacklogDestination(destination); err != nil {
+			return nil, nil, nil, fmt.Errorf("work item %s: %w", id, err)
+		}
+		if seenDestinations[destination] {
+			return nil, nil, nil, fmt.Errorf("projection destination %s is assigned more than once", destination)
+		}
+		body, err := renderClosureWorkItemProjection(item, destination)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		digest := "sha256:" + SHA256Bytes(body)
+		seenDestinations[destination] = true
+		projectionDigests[destination] = digest
+		artifacts = append(artifacts, StateArtifactWrite{
+			Path: destination, ExpectedDigest: request.ExpectedArtifactDigests[destination],
+			ContentDigest: digest, Body: body,
+		})
+	}
 	ids := make([]string, 0, len(graph.Findings))
 	for id := range graph.Findings {
 		ids = append(ids, id)
@@ -499,6 +1362,9 @@ func (service *Service) prepareClosureProjections(
 		if destination == "" {
 			return nil, nil, nil, fmt.Errorf("finding %s requires a projection destination", id)
 		}
+		if validClosureNavigationPath(destination) {
+			return nil, nil, nil, fmt.Errorf("finding %s cannot replace closure-managed navigation index %s", id, destination)
+		}
 		if seenDestinations[destination] {
 			return nil, nil, nil, fmt.Errorf("projection destination %s is assigned more than once", destination)
 		}
@@ -508,7 +1374,18 @@ func (service *Service) prepareClosureProjections(
 		var digest string
 		switch finding.Projection {
 		case "truth":
-			projection, err := BuildTruthProjection(service.Boundary, finding, destination)
+			sourceFinding, exists := sourceGraph.Findings[id]
+			if !exists {
+				return nil, nil, nil, fmt.Errorf("truth projection source finding %s is missing", id)
+			}
+			sourceEvidence, err := closureEvidenceSourcesInDurableOrder(
+				sourceFinding.Evidence, finding.Evidence, request.CampaignSlug,
+				graph.ClosureJob.ArchiveDestination)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			projection, err := buildTruthProjection(
+				service.Boundary, finding, sourceEvidence, destination)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("project finding %s: %w", id, err)
 			}
@@ -529,6 +1406,17 @@ func (service *Service) prepareClosureProjections(
 		case "maintained":
 			if err := validateRelativeRecordPath(destination); err != nil {
 				return nil, nil, nil, fmt.Errorf("maintained projection %s: %w", id, err)
+			}
+			activeTree := path.Join("active", request.CampaignSlug)
+			cleanDestination := path.Clean(destination)
+			if cleanDestination == activeTree || strings.HasPrefix(cleanDestination, activeTree+"/") {
+				return nil, nil, nil, fmt.Errorf(
+					"maintained projection %s cannot target the campaign tree retired by closure", id)
+			}
+			archiveTree := graph.ClosureJob.ArchiveDestination
+			if cleanDestination == archiveTree || strings.HasPrefix(cleanDestination, archiveTree+"/") {
+				return nil, nil, nil, fmt.Errorf(
+					"maintained projection %s cannot target the closure archive", id)
 			}
 			absolute, err := service.Boundary.Resolve(destination, true)
 			if err != nil {
@@ -560,6 +1448,16 @@ func (service *Service) prepareClosureProjections(
 	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
 	return truthDigests, projectionDigests, artifacts, nil
+}
+
+func validClosureNavigationPath(value string) bool {
+	switch value {
+	case "docs/INDEX.md", "docs/history/INDEX.md", "docs/truth/INDEX.md",
+		"docs/backlog/INDEX.md", "docs/playbooks/INDEX.md":
+		return true
+	default:
+		return false
+	}
 }
 
 func renderClosureFindingProjection(finding FindingRecord, destination string) ([]byte, error) {
@@ -602,105 +1500,328 @@ func renderClosureFindingProjection(finding FindingRecord, destination string) (
 	return []byte(output.String()), nil
 }
 
-func (service *Service) verifyClosureProjections(graph CampaignGraph, request ClosureApplyRequest) error {
+func renderClosureWorkItemProjection(item WorkItemRecord, destination string) ([]byte, error) {
+	if item.Deferment == nil || item.Deferment.ClosureDisposition != DefermentDispositionExportBacklog ||
+		item.Deferment.ClosureDestination != destination {
+		return nil, errors.New("closure work-item projection requires its exact export-backlog contract")
+	}
+	semanticDigest, err := CanonicalDigest(struct {
+		SchemaVersion int               `json:"schemaVersion"`
+		WorkItemID    string            `json:"workItemId"`
+		CampaignID    string            `json:"campaignId"`
+		Destination   string            `json:"destination"`
+		Title         string            `json:"title"`
+		Problem       string            `json:"problem"`
+		Acceptance    []string          `json:"acceptanceCriteria"`
+		Deferment     DefermentContract `json:"deferment"`
+	}{CampaignSchemaVersion, item.ID, item.CampaignID, destination, item.Title,
+		item.Problem, item.Acceptance, *item.Deferment})
+	if err != nil {
+		return nil, err
+	}
+	var output strings.Builder
+	output.WriteString("---\n")
+	fmt.Fprintf(&output, "schemaVersion: %d\n", CampaignSchemaVersion)
+	fmt.Fprintf(&output, "sourceWorkItem: %s\n", yamlScalar(item.ID))
+	fmt.Fprintf(&output, "sourceCampaign: %s\n", yamlScalar(item.CampaignID))
+	fmt.Fprintf(&output, "closureDisposition: %s\n", yamlScalar(item.Deferment.ClosureDisposition))
+	fmt.Fprintf(&output, "semanticDigest: %s\n", yamlScalar(semanticDigest))
+	output.WriteString("---\n\n# ")
+	output.WriteString(item.Title)
+	output.WriteString("\n\n")
+	output.WriteString(item.Problem)
+	output.WriteString("\n\n## Why deferred\n\n")
+	output.WriteString(item.Deferment.Reason)
+	output.WriteString("\n\n## Revisit trigger\n\n- ")
+	output.WriteString(summarizeDefermentTrigger(item.Deferment.RevisitWhen))
+	output.WriteString("\n\n## Owner\n\n- ")
+	output.WriteString(item.Deferment.Owner)
+	output.WriteString("\n\n## Acceptance criteria\n\n")
+	for _, criterion := range item.Acceptance {
+		output.WriteString("- ")
+		output.WriteString(criterion)
+		output.WriteByte('\n')
+	}
+	return []byte(output.String()), nil
+}
+
+func (service *Service) verifyClosureProjections(
+	ctx context.Context,
+	graph CampaignGraph,
+	request ClosureApplyRequest,
+) error {
 	job := graph.ClosureJob
 	if job == nil || len(job.ProjectionDigests) == 0 && len(job.ProjectionFindingIDs) != 0 {
 		return errors.New("closure has no staged projection inventory")
 	}
+	projectedGraph, staging, err := service.stagedClosureGraph(graph)
+	if err != nil {
+		return err
+	}
+	root := closureStagingRoot(service.Boundary, staging.CampaignID, staging.ClosureJobID)
 	for destination, expected := range job.ProjectionDigests {
+		if staged := staging.ProjectionObjects[destination]; staged != "" {
+			body, err := readClosureStageObject(root, staged)
+			if err != nil {
+				return err
+			}
+			if got := "sha256:" + SHA256Bytes(body); got != expected {
+				return fmt.Errorf("staged projection %s digest changed", destination)
+			}
+			continue
+		}
 		absolute, err := service.Boundary.Resolve(destination, true)
 		if err != nil {
-			return err
+			return fmt.Errorf("maintained projection %s: %w", destination, err)
 		}
 		body, err := readSingleLinkRegularFile(absolute)
-		if err != nil {
-			return err
-		}
-		if got := "sha256:" + SHA256Bytes(body); got != expected {
-			return fmt.Errorf("projection %s digest changed", destination)
+		if err != nil || "sha256:"+SHA256Bytes(body) != expected {
+			return fmt.Errorf("maintained projection %s digest changed", destination)
 		}
 	}
-	for _, id := range job.ProjectionFindingIDs {
-		finding, exists := graph.Findings[id]
-		if !exists {
-			return fmt.Errorf("truth projection finding %s is missing", id)
+	for id, destination := range staging.FindingDestinations {
+		if requested := request.ProjectionDestinations[id]; requested != "" && requested != destination {
+			return fmt.Errorf("projection %s destination changed", id)
 		}
-		destination := ""
-		for candidate, digest := range job.ProjectionDigests {
-			if digest == job.TruthDigests[id] && strings.HasPrefix(candidate, "docs/truth/") {
-				destination = candidate
-				break
+		finding, exists := projectedGraph.Findings[id]
+		sourceFinding, sourceExists := graph.Findings[id]
+		if !exists || !sourceExists {
+			return fmt.Errorf("projection finding %s is missing", id)
+		}
+		expected := staging.ProjectionDigests[destination]
+		switch finding.Projection {
+		case "truth":
+			sourceEvidence, err := closureEvidenceSourcesInDurableOrder(
+				sourceFinding.Evidence, finding.Evidence, graph.Campaign.Slug,
+				graph.ClosureJob.ArchiveDestination)
+			if err != nil {
+				return err
+			}
+			projection, err := buildTruthProjection(
+				service.Boundary, finding, sourceEvidence, destination)
+			if err != nil {
+				return err
+			}
+			if projection.ContentDigest != expected || projection.ContentDigest != job.TruthDigests[id] {
+				return fmt.Errorf("truth projection %s no longer reproduces", id)
+			}
+		case "backlog", "playbook":
+			body, err := renderClosureFindingProjection(finding, destination)
+			if err != nil {
+				return err
+			}
+			if "sha256:"+SHA256Bytes(body) != expected {
+				return fmt.Errorf("%s projection %s no longer reproduces", finding.Projection, id)
+			}
+		case "maintained":
+			// Its exact live digest was checked above.
+		default:
+			return fmt.Errorf("finding %s has an unsupported staged projection %s", id, finding.Projection)
+		}
+	}
+	if graph.ClosureCoverage != nil {
+		workIDs := make([]string, 0, len(graph.ClosureCoverage.WorkItemCoverage))
+		for id, disposition := range graph.ClosureCoverage.WorkItemCoverage {
+			if disposition == "exported-backlog" {
+				workIDs = append(workIDs, id)
 			}
 		}
-		if destination == "" {
-			return fmt.Errorf("truth projection %s has no destination", id)
-		}
-		if requested := request.ProjectionDestinations[id]; requested != "" && requested != destination {
-			return fmt.Errorf("truth projection %s destination changed", id)
-		}
-		projection, err := BuildTruthProjection(service.Boundary, finding, destination)
-		if err != nil {
-			return err
-		}
-		if projection.ContentDigest != job.TruthDigests[id] {
-			return fmt.Errorf("truth projection %s no longer reproduces", id)
+		sort.Strings(workIDs)
+		for _, id := range workIDs {
+			item, ok := graph.WorkItems[id]
+			if !ok || item.Deferment == nil {
+				return fmt.Errorf("exported work item %s is missing during projection verification", id)
+			}
+			destination := item.Deferment.ClosureDestination
+			body, err := renderClosureWorkItemProjection(item, destination)
+			if err != nil {
+				return err
+			}
+			if expected := staging.ProjectionDigests[destination]; expected == "" ||
+				"sha256:"+SHA256Bytes(body) != expected || job.ProjectionDigests[destination] != expected {
+				return fmt.Errorf("work-item backlog projection %s no longer reproduces", id)
+			}
 		}
 	}
-	return nil
+	return service.verifyStagedClosureRetrieval(ctx, graph, projectedGraph, staging)
 }
 
 func (service *Service) prepareClosureArchive(
+	ctx context.Context,
 	store *StateStore,
 	graph CampaignGraph,
 	request ClosureApplyRequest,
-) (ArchiveManifest, []StateArtifactWrite, error) {
+) (ArchiveManifest, closureStagingManifest, error) {
 	if graph.ClosureJob.Status != "verified" {
-		return ArchiveManifest{}, nil, errors.New("closure archive requires a verified projection stage")
+		return ArchiveManifest{}, closureStagingManifest{}, errors.New("closure archive requires a verified projection stage")
 	}
-	if err := service.verifyClosureProjections(graph, request); err != nil {
-		return ArchiveManifest{}, nil, err
+	if err := service.verifyClosureProjections(ctx, graph, request); err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
+	}
+	projectedGraph, staging, err := service.stagedClosureGraph(graph)
+	if err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
 	}
 	head, err := store.LoadHead()
 	if err != nil {
-		return ArchiveManifest{}, nil, err
+		return ArchiveManifest{}, closureStagingManifest{}, err
 	}
 	if head.Revision != request.ExpectedHeadRevision || head.Digest != request.ExpectedHeadDigest {
-		return ArchiveManifest{}, nil, ErrStateConflict
+		return ArchiveManifest{}, closureStagingManifest{}, ErrStateConflict
 	}
 	files := map[string]string{}
 	bodies := map[string][]byte{}
-	for _, relative := range requiredArchiveRecordPaths(graph) {
+	stagingRoot := closureStagingRoot(service.Boundary, staging.CampaignID, staging.ClosureJobID)
+	for _, relative := range requiredArchiveRecordPaths(projectedGraph) {
+		if strings.HasPrefix(relative, "findings/") && path.Ext(relative) == ".md" {
+			id := strings.TrimSuffix(path.Base(relative), ".md")
+			if objectDigest := staging.PromotedFindings[id]; objectDigest != "" {
+				body, readErr := readClosureStageObject(stagingRoot, objectDigest)
+				if readErr != nil {
+					return ArchiveManifest{}, closureStagingManifest{}, readErr
+				}
+				files[relative], bodies[relative] = "sha256:"+SHA256Bytes(body), body
+				continue
+			}
+		}
 		source := path.Join("active", request.CampaignSlug, relative)
 		body, digest, err := readArchiveSource(service.Boundary, store, source)
 		if err != nil {
-			return ArchiveManifest{}, nil, fmt.Errorf("archive source %s: %w", source, err)
+			return ArchiveManifest{}, closureStagingManifest{}, fmt.Errorf("archive source %s: %w", source, err)
 		}
 		files[relative], bodies[relative] = digest, body
 	}
-	if err := collectRetainedRunFiles(service.Boundary, graph, files, bodies); err != nil {
-		return ArchiveManifest{}, nil, err
+	if err := collectRetainedRunFiles(service.Boundary, projectedGraph, files, bodies); err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
+	}
+	if err := collectRetainedActiveFiles(service.Boundary, projectedGraph, files, bodies); err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
+	}
+	if err := service.verifyClosureArchiveEvidence(graph, projectedGraph, files); err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
 	}
 	manifest, err := BuildArchiveManifest(
-		graph, *graph.ClosureJob, head.EventID, request.Timestamp,
+		projectedGraph, *graph.ClosureJob, head.EventID, request.Timestamp,
 		files, graph.ClosureJob.ProjectionDigests,
 	)
 	if err != nil {
-		return ArchiveManifest{}, nil, err
+		return ArchiveManifest{}, closureStagingManifest{}, err
+	}
+	allowedArchiveFiles := map[string]bool{"manifest.json": true}
+	for relative := range manifest.Files {
+		allowedArchiveFiles[relative] = true
+	}
+	if err := verifyArchiveDirectoryInventory(
+		service.Boundary, graph.ClosureJob.ArchiveDestination, allowedArchiveFiles, true,
+	); err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
 	}
 	relatives := make([]string, 0, len(bodies))
 	for relative := range bodies {
 		relatives = append(relatives, relative)
 	}
 	sort.Strings(relatives)
-	artifacts := make([]StateArtifactWrite, 0, len(relatives))
 	for _, relative := range relatives {
-		destination := path.Join(graph.ClosureJob.ArchiveDestination, relative)
-		artifacts = append(artifacts, StateArtifactWrite{
-			Path: destination, ExpectedDigest: request.ExpectedArtifactDigests[destination],
-			ContentDigest: files[relative], Body: bodies[relative],
-		})
+		digest, err := writeClosureStageObject(service.Boundary, stagingRoot, bodies[relative])
+		if err != nil || digest != files[relative] {
+			return ArchiveManifest{}, closureStagingManifest{}, errors.New("closure archive staging digest mismatch")
+		}
 	}
-	return manifest, artifacts, nil
+	manifestBody, err := canonicalJSON(manifest)
+	if err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
+	}
+	manifestObject, err := writeClosureStageObject(service.Boundary, stagingRoot, manifestBody)
+	if err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
+	}
+	staging.ArchiveDigest = manifest.Digest
+	staging.ArchiveManifestObject = manifestObject
+	staging.ArchiveFiles = cloneStringMap(files)
+	staging, err = writeClosureStagingManifest(service.Boundary, staging)
+	if err != nil {
+		return ArchiveManifest{}, closureStagingManifest{}, err
+	}
+	return manifest, staging, nil
+}
+
+func (service *Service) verifyClosureArchiveEvidence(
+	sourceGraph CampaignGraph,
+	projectedGraph CampaignGraph,
+	files map[string]string,
+) error {
+	archivePrefix := projectedGraph.ClosureJob.ArchiveDestination + "/"
+	for id, projected := range projectedGraph.Findings {
+		source, exists := sourceGraph.Findings[id]
+		if !exists {
+			return fmt.Errorf("archive evidence inventory for finding %s is incomplete", id)
+		}
+		sourceEvidence, err := closureEvidenceSourcesInDurableOrder(
+			source.Evidence, projected.Evidence, projectedGraph.Campaign.Slug,
+			projectedGraph.ClosureJob.ArchiveDestination)
+		if err != nil {
+			return fmt.Errorf("archive evidence inventory for finding %s: %w", id, err)
+		}
+		for index, durable := range projected.Evidence {
+			prior := sourceEvidence[index]
+			if durable.SHA256 != prior.SHA256 {
+				return fmt.Errorf("archive evidence %s changed identity", durable.Path)
+			}
+			if strings.HasPrefix(durable.Path, archivePrefix) {
+				relative := strings.TrimPrefix(durable.Path, archivePrefix)
+				if files[relative] != durable.SHA256 {
+					return fmt.Errorf("archive evidence %s is not retained at its durable path", durable.Path)
+				}
+				continue
+			}
+			absolute, err := service.Boundary.Resolve(durable.Path, true)
+			if err != nil {
+				return fmt.Errorf("external closure evidence %s is unreachable: %w", durable.Path, err)
+			}
+			body, err := readSingleLinkRegularFile(absolute)
+			if err != nil || "sha256:"+SHA256Bytes(body) != durable.SHA256 {
+				return fmt.Errorf("external closure evidence %s changed", durable.Path)
+			}
+		}
+	}
+	return nil
+}
+
+func collectRetainedActiveFiles(
+	boundary Boundary,
+	graph CampaignGraph,
+	files map[string]string,
+	bodies map[string][]byte,
+) error {
+	if graph.ClosureCoverage == nil {
+		return errors.New("closure active-file retention requires canonical coverage")
+	}
+	paths := make([]string, 0, len(graph.ClosureCoverage.ActiveFileDispositions))
+	for relative, disposition := range graph.ClosureCoverage.ActiveFileDispositions {
+		if disposition == "retain" {
+			paths = append(paths, relative)
+		}
+	}
+	sort.Strings(paths)
+	for _, relative := range paths {
+		if _, alreadyCollected := bodies[relative]; alreadyCollected {
+			continue
+		}
+		absolute, err := boundary.Resolve(path.Join("active", graph.Campaign.Slug, relative), true)
+		if err != nil {
+			return fmt.Errorf("retained active file %s: %w", relative, err)
+		}
+		body, err := readSingleLinkRegularFile(absolute)
+		if err != nil {
+			return fmt.Errorf("retained active file %s: %w", relative, err)
+		}
+		digest := "sha256:" + SHA256Bytes(body)
+		if existing := files[relative]; existing != "" && existing != digest {
+			return fmt.Errorf("retained active file %s conflicts with canonical archive content", relative)
+		}
+		files[relative], bodies[relative] = digest, body
+	}
+	return nil
 }
 
 func readArchiveSource(
@@ -790,22 +1911,36 @@ func collectRetainedRunFiles(
 }
 
 func (service *Service) prepareClosureFinalization(
+	ctx context.Context,
 	store *StateStore,
 	graph CampaignGraph,
 	next ClosureJob,
 	request ClosureApplyRequest,
-) (CampaignRecord, ClosureReceipt, []StateArtifactWrite, error) {
-	manifestPath := path.Join(graph.ClosureJob.ArchiveDestination, "manifest.json")
-	_, value, handle, err := store.readCanonicalRecordValue(manifestPath)
+) (CampaignRecord, ClosureReceipt, ArchiveManifest, []StateArtifactWrite, error) {
+	if err := service.verifyClosureProjections(ctx, graph, request); err != nil {
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+	}
+	_, staging, err := service.stagedClosureGraph(graph)
 	if err != nil {
-		return CampaignRecord{}, ClosureReceipt{}, nil, err
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
 	}
-	manifest, ok := value.(ArchiveManifest)
-	if !ok || handle.RecordDigest != graph.ClosureJob.ArchiveDigest || manifest.CampaignID != request.CampaignID {
-		return CampaignRecord{}, ClosureReceipt{}, nil, errors.New("closure archive manifest does not match the active job")
+	if staging.ArchiveDigest != graph.ClosureJob.ArchiveDigest ||
+		!digestRE.MatchString(staging.ArchiveManifestObject) {
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil,
+			errors.New("closure archive staging does not match the active job")
 	}
-	if err := verifyArchivePublication(service.Boundary, graph.ClosureJob.ArchiveDestination, manifest); err != nil {
-		return CampaignRecord{}, ClosureReceipt{}, nil, err
+	stagingRoot := closureStagingRoot(service.Boundary, staging.CampaignID, staging.ClosureJobID)
+	manifestBody, err := readClosureStageObject(stagingRoot, staging.ArchiveManifestObject)
+	if err != nil {
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+	}
+	var manifest ArchiveManifest
+	if decodeStrictJSON(manifestBody, &manifest) != nil || ValidateArchiveManifest(manifest) != nil ||
+		manifest.Digest != graph.ClosureJob.ArchiveDigest || manifest.CampaignID != request.CampaignID ||
+		!equalStringMap(manifest.Files, staging.ArchiveFiles) ||
+		!equalStringMap(manifest.Projections, staging.ProjectionDigests) {
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil,
+			errors.New("closure staged archive manifest does not verify")
 	}
 	campaign := *graph.Campaign
 	campaign.Revision++
@@ -830,28 +1965,100 @@ func (service *Service) prepareClosureFinalization(
 		CoverageDigest:     graph.ClosureCoverage.Digest, ClosedAt: request.Timestamp,
 	}
 	if err := sealClosureReceipt(&receipt); err != nil {
-		return CampaignRecord{}, ClosureReceipt{}, nil, err
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
 	}
 	receiptBody, err := canonicalJSON(receipt)
 	if err != nil {
-		return CampaignRecord{}, ClosureReceipt{}, nil, err
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
 	}
 	readme := renderArchiveREADME(campaign, next, receipt)
-	paths := []struct {
+	artifacts := []StateArtifactWrite{}
+	appendArtifact := func(destination, digest string, body []byte) error {
+		if "sha256:"+SHA256Bytes(body) != digest {
+			return fmt.Errorf("closure final artifact %s does not match its staged digest", destination)
+		}
+		artifacts = append(artifacts, StateArtifactWrite{
+			Path: destination, ExpectedDigest: request.ExpectedArtifactDigests[destination],
+			ContentDigest: digest, Body: body,
+		})
+		return nil
+	}
+	archiveRelatives := make([]string, 0, len(staging.ArchiveFiles))
+	for relative := range staging.ArchiveFiles {
+		archiveRelatives = append(archiveRelatives, relative)
+	}
+	sort.Strings(archiveRelatives)
+	for _, relative := range archiveRelatives {
+		body, err := readClosureStageObject(stagingRoot, staging.ArchiveFiles[relative])
+		if err != nil {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+		}
+		if err := appendArtifact(
+			path.Join(graph.ClosureJob.ArchiveDestination, relative),
+			staging.ArchiveFiles[relative], body); err != nil {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+		}
+	}
+	projectionPaths := make([]string, 0, len(staging.ProjectionObjects))
+	for destination := range staging.ProjectionObjects {
+		projectionPaths = append(projectionPaths, destination)
+	}
+	sort.Strings(projectionPaths)
+	for _, destination := range projectionPaths {
+		body, err := readClosureStageObject(stagingRoot, staging.ProjectionObjects[destination])
+		if err != nil {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+		}
+		if err := appendArtifact(destination, staging.ProjectionObjects[destination], body); err != nil {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+		}
+	}
+	maintainedPaths := make([]string, 0, len(staging.MaintainedProjections))
+	for destination := range staging.MaintainedProjections {
+		maintainedPaths = append(maintainedPaths, destination)
+	}
+	sort.Strings(maintainedPaths)
+	for _, destination := range maintainedPaths {
+		digest := staging.MaintainedProjections[destination]
+		absolute, err := service.Boundary.Resolve(destination, true)
+		if err != nil {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+		}
+		body, err := readSingleLinkRegularFile(absolute)
+		if err != nil || "sha256:"+SHA256Bytes(body) != digest {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil,
+				fmt.Errorf("maintained projection %s changed before finalization", destination)
+		}
+		artifacts = append(artifacts, StateArtifactWrite{
+			Path: destination, ExpectedDigest: digest, ContentDigest: digest, Body: body,
+		})
+	}
+	for _, item := range []struct {
 		path string
 		body []byte
 	}{
 		{path.Join(graph.ClosureJob.ArchiveDestination, "closure", "receipt.json"), receiptBody},
 		{path.Join(graph.ClosureJob.ArchiveDestination, "README.md"), readme},
+	} {
+		if err := appendArtifact(item.path, "sha256:"+SHA256Bytes(item.body), item.body); err != nil {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
+		}
 	}
-	artifacts := make([]StateArtifactWrite, 0, len(paths))
-	for _, item := range paths {
-		artifacts = append(artifacts, StateArtifactWrite{
-			Path: item.path, ExpectedDigest: request.ExpectedArtifactDigests[item.path],
-			ContentDigest: "sha256:" + SHA256Bytes(item.body), Body: item.body,
-		})
+	navigation, err := service.prepareClosureNavigationArtifacts(campaign, next, manifest, request)
+	if err != nil {
+		return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil, err
 	}
-	return campaign, receipt, artifacts, nil
+	artifacts = append(artifacts, navigation...)
+	seen := map[string]bool{}
+	for _, artifact := range artifacts {
+		if seen[artifact.Path] {
+			return CampaignRecord{}, ClosureReceipt{}, ArchiveManifest{}, nil,
+				fmt.Errorf("closure final transaction repeats artifact %s", artifact.Path)
+		}
+		seen[artifact.Path] = true
+	}
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
+	return campaign, receipt, manifest, artifacts, nil
 }
 
 func verifyArchivePublication(boundary Boundary, destination string, manifest ArchiveManifest) error {
@@ -881,7 +2088,64 @@ func verifyArchivePublication(boundary Boundary, destination string, manifest Ar
 			return fmt.Errorf("projection %s digest changed", projection)
 		}
 	}
-	return nil
+	allowed := map[string]bool{"manifest.json": true}
+	for relative := range manifest.Files {
+		allowed[relative] = true
+	}
+	return verifyArchiveDirectoryInventory(boundary, destination, allowed, false)
+}
+
+func verifyArchiveDirectoryInventory(
+	boundary Boundary,
+	destination string,
+	allowed map[string]bool,
+	allowMissing bool,
+) error {
+	if err := validateArchiveDestination(destination); err != nil {
+		return err
+	}
+	root := filepath.Join(boundary.Root, filepath.FromSlash(destination))
+	info, err := os.Lstat(root)
+	if os.IsNotExist(err) && allowMissing {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("closure archive destination is not a real directory")
+	}
+	resolved, err := canonicalExistingPath(root)
+	if err != nil || !withinRoot(boundary.Root, resolved) {
+		return errors.New("closure archive destination escapes the project boundary")
+	}
+	return filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == root {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("closure archive contains symbolic link %s", current)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("closure archive contains unsupported entry %s", current)
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if !allowed[relative] {
+			return fmt.Errorf("closure archive contains unmanifested file %s", relative)
+		}
+		return nil
+	})
 }
 
 func renderArchiveREADME(campaign CampaignRecord, job ClosureJob, receipt ClosureReceipt) []byte {

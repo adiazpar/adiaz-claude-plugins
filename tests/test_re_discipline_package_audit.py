@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from tests.re_discipline_package_audit import (
+    is_allowlisted,
     parse_checksum_file,
     shared_asset_kind,
     validate_manifest_file,
@@ -10,6 +11,15 @@ from tests.re_discipline_package_audit import (
 
 
 class ReDisciplinePackageAuditTests(unittest.TestCase):
+
+    def test_legacy_hook_allowance_is_enforcement_only(self) -> None:
+        for hook in ("hooks/re-discipline-hook.ps1", "hooks/re-discipline-hook.sh"):
+            self.assertTrue(is_allowlisted(hook, "campaign-narrative-file"))
+            self.assertTrue(is_allowlisted(hook, "review-ledger-file"))
+            self.assertFalse(is_allowlisted(hook, "checkpoint-skill"))
+            self.assertFalse(is_allowlisted(hook, "standalone-truth-skill"))
+            self.assertFalse(is_allowlisted(hook, "categorical-run-root"))
+        self.assertFalse(is_allowlisted("hooks/unrelated.sh", "campaign-narrative-file"))
     def parse(self, body: str) -> dict[str, str]:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "SHA256SUMS"
@@ -48,6 +58,18 @@ class ReDisciplinePackageAuditTests(unittest.TestCase):
         self.assertEqual(
             shared_asset_kind("evals/conformance/finding-cases.json"),
             "benchmark-cases",
+        )
+
+    def test_project_lane_evidence_assets_are_classified(self) -> None:
+        self.assertEqual(
+            shared_asset_kind("evals/conformance/project-lane-ablation.json"),
+            "project-lane-ablation-measurement",
+        )
+        self.assertEqual(
+            shared_asset_kind(
+                "evals/conformance/evidence/2026-08-03-snaphak-pre-removal-rerank.zip"
+            ),
+            "lane-ablation-evidence-archive",
         )
 
     def test_manifest_file_validator_rejects_noncanonical_paths(self) -> None:

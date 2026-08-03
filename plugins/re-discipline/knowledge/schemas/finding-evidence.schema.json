@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/finding-evidence.schema.json",
+  "title": "Embedded Finding Evidence Reference",
+  "description": "One exact evidence reference embedded in canonical FindingRecord frontmatter.",
+  "type": "object",
+  "required": ["path", "sha256"],
+  "properties": {
+    "path": {"type": "string", "minLength": 1, "pattern": "^(?=.*\\S)[^\\r\\n]+$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "startLine": {"type": "integer", "minimum": 1},
+    "endLine": {"type": "integer", "minimum": 1},
+    "objectKey": {"type": "string", "minLength": 1, "pattern": "^(?=.*\\S)[^\\r\\n]+$"},
+    "sourceRun": {"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4,}$"}
+  },
+  "dependentRequired": {
+    "startLine": ["endLine"],
+    "endLine": ["startLine"]
+  },
+  "anyOf": [
+    {"required": ["startLine", "endLine"]},
+    {"required": ["objectKey"]}
+  ],
+  "additionalProperties": false
+}

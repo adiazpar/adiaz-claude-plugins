@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -34,11 +35,14 @@ func EvaluateFindingRetriever(
 		options := eval.queryOptions()
 		normalizedOptions := options
 		normalizedOptions.suppressRaw = true
+		normalizedOptions.suppressProvenance = true
 		normalizedOptions.IncludeRaw = false
 		rawOptions := options
-		// No real finding carries this source class. Raw fallback remains on,
-		// yielding a raw-only arm through the same card query path.
-		rawOptions.AllowedSourceClasses = []string{"evaluation-raw-only"}
+		// The raw-only arm uses an unexported measurement switch instead of a
+		// synthetic public filter, so both arms retain byte-for-byte identical
+		// question, source/review/validity filters, budget, and card limit.
+		rawOptions.suppressNormalized = true
+		rawOptions.suppressProvenance = true
 		rawOptions.IncludeRaw = true
 		normalized, err := retriever.QueryFindingCards(ctx, normalizedOptions)
 		if err != nil {
@@ -97,17 +101,25 @@ func EvaluateFindingRetriever(
 			path := card.Metadata["path"]
 			outcome.RawPaths = append(outcome.RawPaths, path)
 			rawSeen[path] = true
-			outcome.RawTokens += card.ExpansionTokens
+			outcome.RawDocumentExpansionTokens += card.ExpansionTokens
 			if card.SourceClass != "archive" {
 				outcome.DurabilityLabelsAccurate = false
 			}
 		}
-		if outcome.RawTokens == 0 {
-			outcome.RawTokens = raw.EstimatedTokens
+		// Compare like with like: both arms measure the serialized bounded card
+		// response the caller actually received. ExpansionTokens remains useful
+		// planning metadata, but mixing a normalized response cost with a full raw
+		// report expansion made the archive gate structurally favor normalization.
+		outcome.RawTokens = raw.EstimatedTokens
+		evidenceExpansion, err := boundedEvidenceExpansionTokens(
+			ctx, retriever, normalized.Cards, options.TokenBudget)
+		if err != nil {
+			return FindingAblationReport{}, fmt.Errorf(
+				"case %s normalized evidence expansion: %w", eval.ID, err)
 		}
+		outcome.NormalizedEvidenceExpansionTokens = evidenceExpansion
 
-		fusionRanks, rerankRanks, traces := findingTraceRanks(
-			normalized.Trace.Candidates, retriever.Profile.Effective.RerankDepth)
+		_, traces := findingTraceRanks(normalized.Trace.Candidates)
 		for _, expected := range eval.ExpectedFindingIDs {
 			card, present := cardsByID[expected]
 			if !present {
@@ -133,9 +145,6 @@ func EvaluateFindingRetriever(
 						outcome.ClaimVocabularyDisjoint = false
 					}
 				}
-			}
-			if fusionRanks[expected] > 0 && rerankRanks[expected] > 0 {
-				outcome.RerankDelta += fusionRanks[expected] - rerankRanks[expected]
 			}
 			trace := traces[expected]
 			retrievingLanes := []string{}
@@ -180,17 +189,14 @@ func EvaluateFindingRetriever(
 		} else {
 			outcome.AbstentionCorrect = len(normalized.Cards) == 0 && len(raw.Cards) == 0
 		}
-		if outcome.RerankDelta > 0 {
-			report.RerankImproved++
-		} else if outcome.RerankDelta < 0 {
-			report.RerankDegraded++
-		}
 		outcome.FindingIDs = SortedUnique(outcome.FindingIDs)
 		outcome.RawPaths = SortedUnique(outcome.RawPaths)
 		outcome.HardNegativeHits = SortedUnique(outcome.HardNegativeHits)
 		outcome.EvidenceHandlesFound = SortedUnique(outcome.EvidenceHandlesFound)
 		report.NormalizedTokens += outcome.NormalizedTokens
 		report.RawTokens += outcome.RawTokens
+		report.NormalizedEvidenceExpansionTokens += outcome.NormalizedEvidenceExpansionTokens
+		report.RawDocumentExpansionTokens += outcome.RawDocumentExpansionTokens
 		report.HardNegativeHits += len(outcome.HardNegativeHits)
 		report.Cases = append(report.Cases, outcome)
 	}
@@ -209,6 +215,8 @@ func EvaluateFindingRetriever(
 	report.DeterministicReplayRate = overall.DeterministicReplayRate
 	report.NormalizedMedianTokens = overall.NormalizedMedianTokens
 	report.RawMedianTokens = overall.RawMedianTokens
+	report.NormalizedMedianEvidenceExpansionTokens = overall.NormalizedMedianEvidenceExpansionTokens
+	report.RawMedianDocumentExpansionTokens = overall.RawMedianDocumentExpansionTokens
 	durable := 0
 	for _, outcome := range report.Cases {
 		if outcome.DurabilityLabelsAccurate {
@@ -231,6 +239,52 @@ func EvaluateFindingRetriever(
 	return sealFindingAblationReport(report)
 }
 
+func boundedEvidenceExpansionTokens(
+	ctx context.Context,
+	retriever Retriever,
+	cards []ContextCard,
+	perHandleBudget int,
+) (int, error) {
+	if perHandleBudget < 128 || perHandleBudget > 8192 {
+		return 0, fmt.Errorf("invalid per-handle token budget %d", perHandleBudget)
+	}
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(retriever.Generation.Database))
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	service := Service{Boundary: retriever.Boundary}
+	seen := map[string]bool{}
+	total := 0
+	for _, card := range cards {
+		handle := card.EvidenceHandle
+		if handle == "" || seen[handle] {
+			continue
+		}
+		seen[handle] = true
+		var findingID string
+		var evidence EvidenceReference
+		err := db.QueryRowContext(ctx, `SELECT finding_id,path,sha256,start_line,end_line,
+			object_key,source_run FROM finding_evidence WHERE handle=?`, handle).Scan(
+			&findingID, &evidence.Path, &evidence.SHA256, &evidence.StartLine,
+			&evidence.EndLine, &evidence.ObjectKey, &evidence.SourceRun,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("resolve %s: %w", handle, err)
+		}
+		if EvidenceHandle(findingID, evidence) != handle {
+			return 0, fmt.Errorf("indexed evidence handle %s is inconsistent", handle)
+		}
+		expanded, err := service.readEvidenceExact(
+			FindingRecord{ID: findingID}, evidence, perHandleBudget)
+		if err != nil {
+			return 0, fmt.Errorf("expand %s: %w", handle, err)
+		}
+		total += expanded.EstimatedTokens
+	}
+	return total, nil
+}
+
 func appendRelevantRank(ranks []int, expected []string, id string, rank int) []int {
 	if contains(expected, id) {
 		return append(ranks, rank)
@@ -240,8 +294,7 @@ func appendRelevantRank(ranks []int, expected []string, id string, rank int) []i
 
 func findingTraceRanks(
 	candidates []FindingCandidateTrace,
-	rerankDepth int,
-) (map[string]int, map[string]int, map[string]FindingCandidateTrace) {
+) (map[string]int, map[string]FindingCandidateTrace) {
 	fusionOrder := append([]FindingCandidateTrace(nil), candidates...)
 	sort.Slice(fusionOrder, func(i, j int) bool {
 		if fusionOrder[i].FusionScore != fusionOrder[j].FusionScore {
@@ -254,24 +307,7 @@ func findingTraceRanks(
 		fusionRanks[candidate.FindingID] = index + 1
 		traces[candidate.FindingID] = candidate
 	}
-	rerankOrder := append([]FindingCandidateTrace(nil), fusionOrder...)
-	if rerankDepth < 1 || rerankDepth > len(rerankOrder) {
-		rerankDepth = len(rerankOrder)
-	}
-	sort.SliceStable(rerankOrder[:rerankDepth], func(i, j int) bool {
-		if rerankOrder[i].RerankScore != rerankOrder[j].RerankScore {
-			return rerankOrder[i].RerankScore > rerankOrder[j].RerankScore
-		}
-		if rerankOrder[i].FusionScore != rerankOrder[j].FusionScore {
-			return rerankOrder[i].FusionScore > rerankOrder[j].FusionScore
-		}
-		return rerankOrder[i].FindingID < rerankOrder[j].FindingID
-	})
-	rerankRanks := map[string]int{}
-	for index, candidate := range rerankOrder {
-		rerankRanks[candidate.FindingID] = index + 1
-	}
-	return fusionRanks, rerankRanks, traces
+	return fusionRanks, traces
 }
 
 var findingEvalStopWords = map[string]bool{
@@ -314,6 +350,7 @@ func findingMetrics(
 	vocabularyApplicable, vocabularyDisjoint, replay := 0, 0, 0
 	var reciprocal float64
 	normalizedCosts, rawCosts := []int{}, []int{}
+	normalizedExpansionCosts, rawExpansionCosts := []int{}, []int{}
 	for _, eval := range cases {
 		outcome := byID[eval.ID]
 		foundIDs, foundPaths := map[string]bool{}, map[string]bool{}
@@ -380,6 +417,10 @@ func findingMetrics(
 		if len(eval.ExpectedFindingIDs) > 0 && len(eval.ExpectedRawPaths) > 0 {
 			normalizedCosts = append(normalizedCosts, outcome.NormalizedTokens)
 			rawCosts = append(rawCosts, outcome.RawTokens)
+			normalizedExpansionCosts = append(
+				normalizedExpansionCosts, outcome.NormalizedEvidenceExpansionTokens)
+			rawExpansionCosts = append(
+				rawExpansionCosts, outcome.RawDocumentExpansionTokens)
 		}
 	}
 	metrics.FindingRecall = safeRatio(foundFindings, expectedFindings, 1)
@@ -397,6 +438,8 @@ func findingMetrics(
 	}
 	metrics.NormalizedMedianTokens = medianInt(normalizedCosts)
 	metrics.RawMedianTokens = medianInt(rawCosts)
+	metrics.NormalizedMedianEvidenceExpansionTokens = medianInt(normalizedExpansionCosts)
+	metrics.RawMedianDocumentExpansionTokens = medianInt(rawExpansionCosts)
 	return metrics
 }
 

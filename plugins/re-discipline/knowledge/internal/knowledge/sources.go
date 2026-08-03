@@ -81,6 +81,10 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			Enabled: settings.Sources.HistoryFindings, ExcludePrefix: "docs/history/campaigns/",
 		},
 		{Path: "docs/backlog", Tier: "backlog", Recursive: true, Enabled: settings.Sources.Backlog},
+		// Closure-owned playbooks are durable procedural knowledge. They are
+		// indexed separately from truth because a procedure is not an empirical
+		// claim, but it must still be reachable after its source campaign retires.
+		{Path: "docs/playbooks", Tier: "playbook", Recursive: true, Enabled: true},
 		// Atomic finding files are indexed as a typed projection as well as
 		// ordinary Markdown provenance. Their review/validity fields determine
 		// the final retrieval class after strict parsing.
@@ -109,6 +113,9 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		{Path: ".re-discipline/memory/topics", Tier: "memory", Recursive: true, Enabled: settings.Sources.SharedMemory},
 	}
 	for _, additional := range settings.Sources.Additional {
+		// Measurement receipts are excluded again at candidate admission by
+		// IsForbiddenSource. That second boundary matters when an otherwise
+		// valid broad parent class contains a measurements/ descendant.
 		classes = append(classes, sourceClass{
 			Path: additional.Path, Tier: additional.Tier, Pattern: additional.Pattern,
 			AutoShape: true, Enabled: true,
@@ -360,8 +367,9 @@ func validFindingSourcePath(boundary Boundary, absolute string, cutoverCache map
 		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
 		parts[4] == "findings" {
 		destination := strings.Join(parts[:4], "/")
+		archiveRelative := strings.Join(parts[4:], "/")
 		return findingIDRE.MatchString(strings.TrimSuffix(parts[5], filepath.Ext(parts[5]))) &&
-			archiveCutoverPublished(boundary, destination, "", cutoverCache)
+			archiveCutoverPublished(boundary, destination, "", archiveRelative, cutoverCache)
 	}
 	return false
 }
@@ -381,7 +389,8 @@ func validRawReportSourcePath(boundary Boundary, absolute string, cutoverCache m
 		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
 		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
 		parts[6] == "report.md" {
-		return archiveCutoverPublished(boundary, strings.Join(parts[:4], "/"), "", cutoverCache)
+		return archiveCutoverPublished(
+			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
 	}
 	return false
 }
@@ -406,11 +415,15 @@ func activeCampaignSourcesVisible(boundary Boundary, slug string, cutoverCache m
 		campaign.Slug != slug || campaign.Status != "closed" {
 		return true
 	}
-	return !archiveCutoverPublished(boundary, campaign.ArchiveDestination, campaign.ID, cutoverCache)
+	return !archiveCutoverPublished(boundary, campaign.ArchiveDestination, campaign.ID, "", cutoverCache)
 }
 
-func archiveCutoverPublished(boundary Boundary, destination, campaignID string, cutoverCache map[string]bool) (published bool) {
-	cacheKey := destination + "\x00" + campaignID
+func archiveCutoverPublished(
+	boundary Boundary,
+	destination, campaignID, requiredRelative string,
+	cutoverCache map[string]bool,
+) (published bool) {
+	cacheKey := destination + "\x00" + campaignID + "\x00" + requiredRelative
 	if cached, present := cutoverCache[cacheKey]; present {
 		return cached
 	}
@@ -430,6 +443,11 @@ func archiveCutoverPublished(boundary Boundary, destination, campaignID string, 
 	if decodeStrictJSON(manifestBody, &manifest) != nil || ValidateArchiveManifest(manifest) != nil ||
 		(campaignID != "" && manifest.CampaignID != campaignID) {
 		return false
+	}
+	if requiredRelative != "" {
+		if _, included := manifest.Files[requiredRelative]; !included {
+			return false
+		}
 	}
 	for relative, digest := range manifest.Files {
 		absolute, resolveErr := boundary.Resolve(path.Join(destination, relative), true)
@@ -469,7 +487,18 @@ func archiveCutoverPublished(boundary Boundary, destination, campaignID string, 
 		return false
 	}
 	_, err = readSingleLinkRegularFile(readmePath)
-	return err == nil
+	if err != nil {
+		return false
+	}
+	allowed := map[string]bool{
+		"manifest.json": true, "closure/receipt.json": true, "README.md": true,
+		"finalization/campaign.json": true, "finalization/closure-job.json": true,
+		"finalization/request.json": true, "finalization/events/events.jsonl": true,
+	}
+	for relative := range manifest.Files {
+		allowed[relative] = true
+	}
+	return verifyArchiveDirectoryInventory(boundary, destination, allowed, false) == nil
 }
 
 func SensitiveContentReason(value string) string {
@@ -799,6 +828,8 @@ func BuildGraphEdges(documents []SourceDocument, chunks []Chunk) []GraphEdge {
 			switch {
 			case strings.HasPrefix(lower, "depends-on:"):
 				kind = "depends-on"
+			case strings.HasPrefix(lower, "contradicts:"):
+				kind = "contradicts"
 			case strings.HasPrefix(lower, "**superseded-by:**"),
 				strings.HasPrefix(lower, "superseded-by:"):
 				kind = "superseded-by"
@@ -816,7 +847,7 @@ func BuildGraphEdges(documents []SourceDocument, chunks []Chunk) []GraphEdge {
 			if target == "" {
 				continue
 			}
-			resolved := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(chunk.Path), filepath.FromSlash(target))))
+			resolved := resolveManagedReference(chunk.Path, target)
 			add(chunk.ID, firstByPath[resolved], kind)
 		}
 	}
@@ -830,6 +861,23 @@ func BuildGraphEdges(documents []SourceDocument, chunks []Chunk) []GraphEdge {
 		return edges[i].Kind < edges[j].Kind
 	})
 	return edges
+}
+
+// resolveManagedReference accepts both ordinary document-relative references
+// and canonical project-relative managed paths. Supersession metadata has
+// historically used both forms; joining `docs/truth/new.md` to the referring
+// document's directory would silently manufacture
+// `docs/truth/docs/truth/new.md` and sever the edge.
+func resolveManagedReference(sourcePath, target string) string {
+	target = filepath.ToSlash(filepath.Clean(filepath.FromSlash(target)))
+	for _, root := range []string{"docs/", "active/", ".re-discipline/"} {
+		if strings.HasPrefix(target, root) {
+			return target
+		}
+	}
+	return filepath.ToSlash(filepath.Clean(
+		filepath.Join(filepath.Dir(sourcePath), filepath.FromSlash(target)),
+	))
 }
 
 func extractTerms(chunk Chunk) []string {

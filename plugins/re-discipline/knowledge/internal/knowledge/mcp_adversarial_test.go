@@ -178,7 +178,7 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 	t.Logf("tool discovery payload: %d bytes", len(encodedDefinitions))
 	expected := []string{
 		"state", "query", "read", "trace", "context_pack_materialize",
-		"manager_apply", "curation_submit", "closure_apply",
+		"manager_apply", "curation_submit", "closure_apply", "normalization_queue", "migrate_project",
 	}
 	if len(definitions) != len(expected) {
 		t.Fatalf("tool count = %d, want %d", len(definitions), len(expected))
@@ -202,13 +202,14 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 		}
 		annotations := asObject(t, definition["annotations"])
 		if name == "context_pack_materialize" || name == "manager_apply" ||
-			name == "curation_submit" || name == "closure_apply" {
+			name == "curation_submit" || name == "closure_apply" || name == "normalization_queue" ||
+			name == "migrate_project" {
 			if annotations["readOnlyHint"] != false ||
 				annotations["idempotentHint"] != true ||
 				annotations["openWorldHint"] != false {
 				t.Fatalf("%s write annotations are unsafe: %#v", name, annotations)
 			}
-			wantDestructive := name == "closure_apply"
+			wantDestructive := name == "closure_apply" || name == "migrate_project"
 			if annotations["destructiveHint"] != wantDestructive {
 				t.Fatalf("%s destructive hint = %#v, want %t", name, annotations["destructiveHint"], wantDestructive)
 			}
@@ -223,6 +224,26 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 			budget := asObject(t, properties["tokenBudget"])
 			if budget["minimum"] != float64(128) && budget["minimum"] != 128 {
 				t.Fatalf("state schema permits a budget rejected by execution: %#v", budget)
+			}
+		}
+		if name == "query" {
+			leaseID := asObject(t, properties["contextLeaseId"])
+			if leaseID["type"] != "string" ||
+				leaseID["minLength"] != 1 && leaseID["minLength"] != float64(1) ||
+				leaseID["maxLength"] != 128 && leaseID["maxLength"] != float64(128) ||
+				leaseID["pattern"] != contextLeaseIDRE.String() {
+				t.Fatalf("query contextLeaseId schema is not safely bounded: %#v", leaseID)
+			}
+			resetLease := asObject(t, properties["resetContextLease"])
+			if resetLease["type"] != "boolean" {
+				t.Fatalf("query resetContextLease schema is not boolean: %#v", resetLease)
+			}
+			findingClasses := fmt.Sprint(asObject(t, asObject(t, properties["allowedSourceClasses"])["items"])["enum"])
+			provenanceTiers := fmt.Sprint(asObject(t, asObject(t, properties["allowedProvenanceTiers"])["items"])["enum"])
+			if strings.Contains(findingClasses, "backlog") ||
+				!strings.Contains(provenanceTiers, "backlog") || !strings.Contains(provenanceTiers, "navigation") {
+				t.Fatalf("query finding classes and provenance tiers are not independent: finding=%s provenance=%s",
+					findingClasses, provenanceTiers)
 			}
 		}
 		if name == "read" {
@@ -269,6 +290,81 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 					name, requiredPaths)
 			}
 		}
+		if name == "migrate_project" {
+			coverage := asObject(t, properties["coverage"])
+			findings := asObject(t, asObject(t, coverage["properties"])["findings"])
+			finding := asObject(t, findings["items"])
+			findingProperties := asObject(t, finding["properties"])
+			attestation := asObject(t, findingProperties["curatorAttestation"])
+			if attestation["additionalProperties"] != false {
+				t.Fatalf("migration curator attestation schema is open: %#v", attestation)
+			}
+			required := map[string]bool{}
+			for _, value := range attestation["required"].([]string) {
+				required[value] = true
+			}
+			for _, field := range []string{
+				"singleIndependentlyOverturnableClaim", "evidenceGradeAppliesToEntireClaim",
+				"entireSourceSpanRepresented", "semanticBoundariesVerified",
+				"legacyReviewLanguageProvenanceOnly",
+				"managerAttentionRequired", "rationale",
+			} {
+				if !required[field] {
+					t.Fatalf("migration curator attestation schema does not require %s: %#v", field, attestation)
+				}
+			}
+		}
+		if name == "curation_submit" {
+			if _, present := properties["workItems"]; present {
+				t.Fatalf("curation schema exposes manager-owned work-item writes")
+			}
+			candidates := asObject(t, properties["candidates"])
+			candidate := asObject(t, candidates["items"])
+			candidateProperties := asObject(t, candidate["properties"])
+			candidateRequired := map[string]bool{}
+			for _, field := range candidate["required"].([]string) {
+				candidateRequired[field] = true
+			}
+			for _, field := range []string{"record", "body", "path", "syntheticQuestions", "questionsReviewed"} {
+				if _, present := candidateProperties[field]; !present || !candidateRequired[field] {
+					t.Fatalf("curation candidate schema cannot transport canonical %s", field)
+				}
+			}
+			curatorRun := asObject(t, properties["curatorRun"])
+			curatorRunDescription, _ := curatorRun["description"].(string)
+			if !strings.Contains(curatorRunDescription, "exact copy") ||
+				!strings.Contains(curatorRunDescription, "never mutated") {
+				t.Fatalf("curation curatorRun schema does not advertise its proof-only boundary: %q", curatorRunDescription)
+			}
+			description, _ := definition["description"].(string)
+			if !strings.Contains(description, "proposals only") ||
+				!strings.Contains(description, "manager review") {
+				t.Fatalf("curation description does not explain proposal-only work-item authority: %q", description)
+			}
+		}
+		if name == "normalization_queue" {
+			action := asObject(t, properties["action"])
+			if fmt.Sprint(action["enum"]) != "[status request claim ack resolve]" {
+				t.Fatalf("normalization action schema omits a demand or lifecycle trigger: %#v", action)
+			}
+			if _, present := properties["rationale"]; present {
+				t.Fatal("normalization MCP exposes free-text rationale as resolution authority")
+			}
+			resolution := asObject(t, properties["resolution"])
+			if resolution["type"] != "object" || resolution["additionalProperties"] != false {
+				t.Fatalf("normalization resolution proof is not a closed object: %#v", resolution)
+			}
+			resolutionProperties := asObject(t, resolution["properties"])
+			for _, field := range []string{
+				"sourceReport", "curatorRunId", "curatorRunDigest", "curatorReport",
+				"intakeId", "intakeRevision", "intakeDigest", "coverageDigest",
+				"reviewId", "reviewRevision", "reviewDigest", "resolvedFindingIds", "digest",
+			} {
+				if _, present := resolutionProperties[field]; !present {
+					t.Fatalf("normalization resolution schema omits canonical proof field %s", field)
+				}
+			}
+		}
 	}
 	for _, forbidden := range []string{
 		"status", "orient", "search", "context_pack", "recall_propose",
@@ -279,6 +375,29 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 				t.Fatalf("general MCP surface exposes manager-only operation %q", forbidden)
 			}
 		}
+	}
+}
+
+func TestAdversarialMCPCurationRejectsManagerOwnedWorkItemField(t *testing.T) {
+	var input curationSubmitToolInput
+	err := decodeToolInput(json.RawMessage(`{"workItems":[]}`), &input)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("curation MCP accepted manager-owned workItems input: %v", err)
+	}
+}
+
+func TestAdversarialMCPNormalizationRejectsProseAsAuthority(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown rationale": `{"action":"resolve","rationale":"looks normalized"}`,
+		"string resolution": `{"action":"resolve","resolution":"looks normalized"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var input normalizationQueueToolInput
+			err := decodeToolInput(json.RawMessage(body), &input)
+			if err == nil {
+				t.Fatal("normalization MCP accepted prose in place of canonical proof")
+			}
+		})
 	}
 }
 
@@ -306,7 +425,6 @@ func TestAdversarialMCPProjectBudgetsAreEnforcedNotMerelyAdvertised(t *testing.T
 		t,
 		&MCPServer{
 			AssetRoot: adversarialAssetRoot(t), InitialRoot: root,
-			DisableDense: true, DisableRerank: true,
 		},
 		initializeMessage(1, false),
 		map[string]any{
@@ -356,7 +474,6 @@ func TestMCPV8RepresentativeRequestsAndStructuredResults(t *testing.T) {
 		t,
 		&MCPServer{
 			AssetRoot: adversarialAssetRoot(t), InitialRoot: root,
-			DisableDense: true, DisableRerank: true,
 		},
 		initializeMessage(1, false),
 		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -410,8 +527,8 @@ func TestMCPV8RepresentativeRequestsAndStructuredResults(t *testing.T) {
 	}
 	toolsResult := asObject(t, rpcResponseByID(t, messages, 2)["result"])
 	tools := asArray(t, toolsResult["tools"])
-	if len(tools) != 8 {
-		t.Fatalf("tools/list returned %d tools, want 8", len(tools))
+	if len(tools) != 10 {
+		t.Fatalf("tools/list returned %d tools, want 10", len(tools))
 	}
 	state := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
 	if state["mode"] != "resume" || state["campaignId"] != "C-TEST" || state["digest"] == "" {
@@ -1007,25 +1124,26 @@ func TestAdversarialReplayAcrossEveryEffectiveFallback(t *testing.T) {
 	root := makeAdversarialProject(t)
 	ctx := context.Background()
 	type capability struct {
-		name          string
-		disableDense  bool
-		disableRerank bool
-		effective     string
-		fallback      bool
+		name         string
+		disableDense bool
+		effective    string
+		fallback     bool
 	}
 	capabilities := []capability{
-		{name: "full", effective: "hybrid-local-v1"},
-		{name: "no-rerank", disableRerank: true, effective: "hybrid-no-rerank-v1", fallback: true},
-		{name: "model-free", disableDense: true, disableRerank: true, effective: "lexical-graph-v1", fallback: true},
+		{name: "dense", effective: "hybrid-no-rerank-v1"},
+		{name: "model-free", disableDense: true, effective: "lexical-graph-v1", fallback: true},
 	}
 	effectiveIdentities := map[string]bool{}
 	var requestedIdentity string
 	for _, capability := range capabilities {
 		t.Run(capability.name, func(t *testing.T) {
-			service := newAdversarialService(t, root, func(options *ServiceOptions) {
-				options.DisableDense = capability.disableDense
-				options.DisableRerank = capability.disableRerank
-			})
+			service := newAdversarialService(t, root, nil)
+			if capability.disableDense {
+				for _, model := range service.ModelManifest.Models {
+					delete(service.ModelManifest.ExecutableModels, model.ID)
+					service.ModelManifest.UnavailableModels[model.ID] = "test-unavailable"
+				}
+			}
 			options := SearchOptions{
 				Query: "engine frame serialization checksum", QueryClass: "conceptual",
 				AllowedTiers: []string{"truth"}, Limit: 12, TokenBudget: 1024,
@@ -1086,8 +1204,8 @@ func TestAdversarialReplayAcrossEveryEffectiveFallback(t *testing.T) {
 			}
 		})
 	}
-	if len(effectiveIdentities) != 3 {
-		t.Fatalf("fallback capability identities collapsed: %v", effectiveIdentities)
+	if len(effectiveIdentities) != 2 {
+		t.Fatalf("shipped dense-to-lexical identities were unstable: %v", effectiveIdentities)
 	}
 }
 
@@ -1195,7 +1313,7 @@ func TestAdversarialPackagedWindowsBinaryMCPProtocol(t *testing.T) {
 	toolRows := asArray(t, tools["tools"])
 	expected := []string{
 		"state", "query", "read", "trace", "context_pack_materialize",
-		"manager_apply", "curation_submit", "closure_apply",
+		"manager_apply", "curation_submit", "closure_apply", "normalization_queue", "migrate_project",
 	}
 	if len(toolRows) != len(expected) {
 		t.Fatalf("packaged binary exposed %d tools, want %d", len(toolRows), len(expected))

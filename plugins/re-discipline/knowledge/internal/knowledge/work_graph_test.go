@@ -1,6 +1,9 @@
 package knowledge
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func stateTestCampaignRecord() CampaignRecord {
 	return CampaignRecord{
@@ -67,7 +70,8 @@ func stateTestRatifiedFindingGraph() CampaignGraph {
 		Subject: "state.engine", Claim: "The state graph preserves review provenance.",
 		Scope: map[string]any{"component": "state"}, SourceRuns: []string{run.ID},
 		Evidence: []EvidenceReference{{
-			Path: run.Report.Path, SHA256: run.Report.SHA256, StartLine: 1, EndLine: 2, SourceRun: run.ID,
+			Path: run.Report.Path, SHA256: run.Report.SHA256, StartLine: 1, EndLine: 2,
+			ObjectKey: "path:" + run.Report.Path + "#L1-L2", SourceRun: run.ID,
 		}},
 		EvidenceGrade: "direct", ReviewState: "manager-ratified", Validity: "provisional", Projection: "campaign",
 	}
@@ -85,19 +89,33 @@ func TestWorkGraphRatificationRequiresImmutableReceipt(t *testing.T) {
 		RecordMeta: stateTestMeta("I-0001", 2), CampaignID: "C-TEST",
 		SourceRuns:          []FileHandle{*graph.Runs["R-20260802-0001"].Report},
 		CandidateFindingIDs: []string{"F-0001"},
-		Coverage:            []CoverageEntry{{SourceHandle: "report:1-2", Disposition: "candidate-finding", TargetID: "F-0001"}},
-		Triage:              map[string]string{"F-0001": "routine"},
-		Status:              "reviewed",
+		Coverage: []CoverageEntry{{
+			SourceHandle: "path:" + graph.Runs["R-20260802-0001"].Report.Path + "#L1-L2",
+			SourcePath:   graph.Runs["R-20260802-0001"].Report.Path,
+			SourceSHA256: graph.Runs["R-20260802-0001"].Report.SHA256,
+			StartLine:    1, EndLine: 2, SourceLineCount: 2,
+			Disposition: "candidate-finding", TargetID: "F-0001",
+		}},
+		Triage: map[string]string{"F-0001": "routine"},
+		Status: "reviewed",
 	}
 	graph.Intakes[intake.ID] = intake
 	review := ReviewRecord{
 		RecordMeta: stateTestMeta("V-0001", 1), CampaignID: "C-TEST", Reviewer: "manager", Authority: "manager",
 		IntakeID: intake.ID, IntakeRevision: intake.Revision - 1, PacketDigest: stateTestDigest("9"),
-		Decisions: []ReviewDecision{{FindingID: "F-0001", FindingRevision: 1, Action: "ratify", Rationale: "Direct evidence verified"}},
+		ReviewLoad: stateTestReviewLoad("V-0001", "C-TEST", stateTestDigest("9"), 1, 0),
+		Decisions:  []ReviewDecision{{FindingID: "F-0001", FindingRevision: 1, Action: "ratify", Rationale: "Direct evidence verified"}},
 	}
 	graph.Reviews[review.ID] = review
 	if err := graph.Validate(); err != nil {
 		t.Fatalf("graph with immutable ratification receipt rejected: %v", err)
+	}
+	delete(graph.Reviews, review.ID)
+	finding := graph.Findings["F-0001"]
+	finding.ReviewState, finding.Validity, finding.Projection = "curator-checked", "provisional", "campaign"
+	graph.Findings[finding.ID] = finding
+	if err := graph.Validate(); err == nil || !strings.Contains(err.Error(), "reviewed intake") {
+		t.Fatalf("reviewed intake without immutable receipt was accepted: %v", err)
 	}
 }
 

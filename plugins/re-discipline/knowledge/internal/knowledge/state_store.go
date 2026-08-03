@@ -22,15 +22,16 @@ var (
 // records reachable through this head; recovery repairs a prepared journal to
 // either this head or the fully published successor before another mutation.
 type StateHead struct {
-	SchemaVersion int    `json:"schemaVersion"`
-	Revision      int64  `json:"revision"`
-	EventID       string `json:"eventId,omitempty"`
-	EventDigest   string `json:"eventDigest,omitempty"`
-	StateDigest   string `json:"stateDigest"`
-	TransactionID string `json:"transactionId,omitempty"`
-	EventJournal  string `json:"eventJournal,omitempty"`
-	UpdatedAt     string `json:"updatedAt,omitempty"`
-	Digest        string `json:"digest"`
+	SchemaVersion   int    `json:"schemaVersion"`
+	Revision        int64  `json:"revision"`
+	EventID         string `json:"eventId,omitempty"`
+	EventDigest     string `json:"eventDigest,omitempty"`
+	StateDigest     string `json:"stateDigest"`
+	InventoryDigest string `json:"inventoryDigest"`
+	TransactionID   string `json:"transactionId,omitempty"`
+	EventJournal    string `json:"eventJournal,omitempty"`
+	UpdatedAt       string `json:"updatedAt,omitempty"`
+	Digest          string `json:"digest"`
 }
 
 // StateStore owns only canonical filesystem transactions. Derived indexes
@@ -63,9 +64,11 @@ func NewStateStoreWithBoundary(boundary Boundary) *StateStore {
 }
 
 func initialStateHead() StateHead {
+	inventory := emptyStateInventory(0)
 	head := StateHead{
-		SchemaVersion: CampaignSchemaVersion,
-		StateDigest:   "sha256:" + SHA256String("re-discipline-state-v2-empty"),
+		SchemaVersion:   CampaignSchemaVersion,
+		StateDigest:     "sha256:" + SHA256String("re-discipline-state-v2-empty"),
+		InventoryDigest: inventory.Digest,
 	}
 	_ = sealStateHead(&head)
 	return head
@@ -86,7 +89,8 @@ func sealStateHead(head *StateHead) error {
 
 func validateStateHead(head StateHead) error {
 	if head.SchemaVersion != CampaignSchemaVersion || head.Revision < 0 ||
-		!digestRE.MatchString(head.StateDigest) || !digestRE.MatchString(head.Digest) {
+		!digestRE.MatchString(head.StateDigest) || !digestRE.MatchString(head.InventoryDigest) ||
+		!digestRE.MatchString(head.Digest) {
 		return errors.New("state head schema, revision, or digest is invalid")
 	}
 	if head.Revision == 0 {

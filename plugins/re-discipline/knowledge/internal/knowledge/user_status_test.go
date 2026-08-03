@@ -84,3 +84,19 @@ func TestBuildUserStatusFailsClosedInPlainWords(t *testing.T) {
 		t.Fatalf("expected plain repair line, got %v", user.Attention)
 	}
 }
+
+func TestBuildUserStatusSurfacesDirtyCanonicalState(t *testing.T) {
+	user := BuildUserStatus(map[string]any{
+		"configuration": map[string]any{"valid": true, "memoryMode": "shared-only"},
+		"index":         map[string]any{"present": true, "integrity": true, "fresh": true},
+		"canonicalState": map[string]any{
+			"clean":      false,
+			"dirtyPaths": []string{"active/example/work-items/W-0001.json"},
+		},
+	})
+	joined := strings.ToLower(strings.Join(user.Attention, " "))
+	if !strings.Contains(joined, "outside the managed workflow") ||
+		!strings.Contains(joined, "paused") || !strings.Contains(joined, "reconciles or restores") {
+		t.Fatalf("dirty canonical state did not produce an actionable warning: %v", user.Attention)
+	}
+}

@@ -21,8 +21,6 @@ import (
 type MCPServer struct {
 	AssetRoot        string
 	InitialRoot      string
-	DisableDense     bool
-	DisableRerank    bool
 	services         map[string]*Service
 	serviceStamps    map[string]string
 	preflightedRoots map[string]bool
@@ -52,16 +50,20 @@ type stateToolInput struct {
 }
 
 type queryToolInput struct {
-	ProjectRoot          string   `json:"projectRoot,omitempty"`
-	Query                string   `json:"query"`
-	CampaignID           string   `json:"campaignId,omitempty"`
-	AllowedSourceClasses []string `json:"allowedSourceClasses,omitempty"`
-	AllowedReviewStates  []string `json:"allowedReviewStates,omitempty"`
-	AllowedValidities    []string `json:"allowedValidities,omitempty"`
-	Limit                int      `json:"limit,omitempty"`
-	TokenBudget          int      `json:"tokenBudget,omitempty"`
-	IncludeRaw           bool     `json:"includeRaw,omitempty"`
-	RequestID            string   `json:"requestId,omitempty"`
+	ProjectRoot            string   `json:"projectRoot,omitempty"`
+	Query                  string   `json:"query"`
+	QueryClass             string   `json:"queryClass,omitempty"`
+	CampaignID             string   `json:"campaignId,omitempty"`
+	AllowedSourceClasses   []string `json:"allowedSourceClasses,omitempty"`
+	AllowedProvenanceTiers []string `json:"allowedProvenanceTiers,omitempty"`
+	AllowedReviewStates    []string `json:"allowedReviewStates,omitempty"`
+	AllowedValidities      []string `json:"allowedValidities,omitempty"`
+	Limit                  int      `json:"limit,omitempty"`
+	TokenBudget            int      `json:"tokenBudget,omitempty"`
+	IncludeRaw             bool     `json:"includeRaw,omitempty"`
+	RequestID              string   `json:"requestId,omitempty"`
+	ContextLeaseID         string   `json:"contextLeaseId,omitempty"`
+	ResetContextLease      bool     `json:"resetContextLease,omitempty"`
 }
 
 type readToolInput struct {
@@ -94,24 +96,66 @@ type closureApplyToolInput struct {
 	ClosureApplyRequest
 }
 
+type normalizationQueueToolInput struct {
+	ProjectRoot string `json:"projectRoot,omitempty"`
+	NormalizationQueueRequest
+}
+
+type migrationProjectToolInput struct {
+	ProjectRoot                   string                              `json:"projectRoot,omitempty"`
+	Action                        string                              `json:"action"`
+	LiveCampaigns                 []string                            `json:"liveCampaigns,omitempty"`
+	ApprovedPlanDigest            string                              `json:"approvedPlanDigest,omitempty"`
+	TransactionID                 string                              `json:"transactionId,omitempty"`
+	CertificationDigest           string                              `json:"certificationDigest,omitempty"`
+	Actor                         string                              `json:"actor,omitempty"`
+	Coverage                      *MigrationCoverageReceipt           `json:"coverage,omitempty"`
+	Gate                          string                              `json:"gate,omitempty"`
+	GatePassed                    bool                                `json:"gatePassed,omitempty"`
+	Artifact                      string                              `json:"artifact,omitempty"`
+	ArtifactDigest                string                              `json:"artifactDigest,omitempty"`
+	Reviewer                      string                              `json:"reviewer,omitempty"`
+	Query                         string                              `json:"query,omitempty"`
+	Campaign                      string                              `json:"campaign,omitempty"`
+	Limit                         int                                 `json:"limit,omitempty"`
+	ProfileDecision               *MigrationProfileDecisionSubmission `json:"profileDecision,omitempty"`
+	ExpectedProfileDecisionDigest string                              `json:"expectedProfileDecisionDigest,omitempty"`
+	TruthReview                   *MigrationTruthReviewSubmission     `json:"truthReview,omitempty"`
+	ExpectedReviewDigest          string                              `json:"expectedReviewDigest,omitempty"`
+}
+
 func (server *MCPServer) Serve(ctx context.Context, input io.Reader, output io.Writer) error {
 	server.services = map[string]*Service{}
 	server.serviceStamps = map[string]string{}
 	server.preflightedRoots = map[string]bool{}
+	server.configuredRoots = nil
 	server.windowStart = time.Now()
 	if server.InitialRoot != "" {
-		root, err := server.preflightRoot(server.InitialRoot)
+		root, err := server.prepareConfiguredRoot(server.InitialRoot)
 		if err != nil {
 			return err
 		}
 		server.configuredRoots = []string{root}
 	}
-	if value := os.Getenv("CLAUDE_PROJECT_DIR"); value != "" {
-		root, err := server.preflightRoot(value)
+	for _, name := range []string{"CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR"} {
+		value := strings.TrimSpace(os.Getenv(name))
+		if value == "" {
+			continue
+		}
+		root, err := server.prepareConfiguredRoot(value)
 		if err != nil {
-			return err
+			return fmt.Errorf("%s: %w", name, err)
 		}
 		server.configuredRoots = SortedUnique(append(server.configuredRoots, root))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if projectRoot, findErr := FindProjectRoot(cwd); findErr == nil {
+			root, prepareErr := server.prepareConfiguredRoot(projectRoot)
+			if prepareErr != nil {
+				return fmt.Errorf("current working directory project root: %w", prepareErr)
+			}
+			server.configuredRoots = SortedUnique(append(server.configuredRoots, root))
+		}
 	}
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -284,11 +328,33 @@ func (server *MCPServer) handleClientResponse(message rpcMessage) {
 		if err != nil {
 			continue
 		}
-		if managed, err := server.preflightRoot(path); err == nil {
+		if managed, err := server.prepareConfiguredRoot(path); err == nil {
+			if err != nil {
+				continue
+			}
 			roots = append(roots, managed)
 		}
 	}
 	server.rootHints = SortedUnique(roots)
+}
+
+func (server *MCPServer) prepareConfiguredRoot(value string) (string, error) {
+	root, err := validateMigrationRoot(value)
+	if err != nil {
+		return "", err
+	}
+	version, err := DetectProjectStateVersion(root)
+	if err != nil {
+		return "", err
+	}
+	switch version {
+	case "0.7":
+		return root, nil
+	case "0.8":
+		return server.preflightRoot(root)
+	default:
+		return "", fmt.Errorf("unsupported re-discipline project state version %q", version)
+	}
 }
 
 func fileURIPath(value string) (string, error) {
@@ -334,9 +400,29 @@ func validateManagedRoot(value string) (string, error) {
 	return boundary.Root, nil
 }
 
+func validateMigrationRoot(value string) (string, error) {
+	root, err := FindProjectRoot(value)
+	if err != nil {
+		return "", err
+	}
+	boundary, err := NewBoundary(root)
+	if err != nil {
+		return "", err
+	}
+	marker := filepath.Join(boundary.Root, ".re-discipline", "project-profile.md")
+	info, err := os.Lstat(marker)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", errors.New("project root lacks a regular re-discipline project profile")
+	}
+	return boundary.Root, nil
+}
+
 func (server *MCPServer) validateRoot(value string) (string, error) {
 	root, err := FindProjectRoot(value)
 	if err != nil {
+		return "", err
+	}
+	if err := requireCompletedMigration(root); err != nil {
 		return "", err
 	}
 	return validateManagedRoot(root)
@@ -349,6 +435,14 @@ func (server *MCPServer) preflightRoot(value string) (string, error) {
 	}
 	if server.preflightedRoots == nil {
 		server.preflightedRoots = map[string]bool{}
+	}
+	// A physically activated but unratified project must remain reachable by
+	// migrate_project, while ordinary preflight recovery is forbidden from
+	// changing it. NewService applies the corresponding read/mutation guard.
+	if state, exists, stateErr := projectMigrationState(root); stateErr != nil {
+		return "", stateErr
+	} else if exists && state.State != "migrated" {
+		return validateManagedRoot(root)
 	}
 	if !server.preflightedRoots[root] {
 		if _, recoveryErr := RecoverProject(root, filepath.Dir(server.AssetRoot)); recoveryErr != nil {
@@ -450,6 +544,43 @@ func (server *MCPServer) resolveProject(explicit string) (string, error) {
 	return "", errors.New("no managed MCP root is available; pass projectRoot explicitly")
 }
 
+func (server *MCPServer) resolveMigrationProject(explicit string) (string, error) {
+	approved := append([]string(nil), server.configuredRoots...)
+	if server.rootsReceived {
+		approved = append(approved, server.rootHints...)
+	}
+	approved = SortedUnique(approved)
+	if explicit != "" {
+		root, err := validateMigrationRoot(explicit)
+		if err != nil {
+			return "", err
+		}
+		for _, allowed := range approved {
+			if root == allowed {
+				return root, nil
+			}
+		}
+		if len(approved) > 0 {
+			return "", errors.New("projectRoot was not granted by the launch configuration or MCP roots")
+		}
+		if server.sessionRoot == "" || server.sessionRoot == root {
+			server.sessionRoot = root
+			return root, nil
+		}
+		return "", errors.New("projectRoot does not match this MCP session shard")
+	}
+	if len(approved) == 1 {
+		return approved[0], nil
+	}
+	if len(approved) > 1 {
+		return "", errors.New("multiple managed MCP roots are available; pass projectRoot explicitly")
+	}
+	if server.sessionRoot != "" {
+		return server.sessionRoot, nil
+	}
+	return "", errors.New("no managed MCP root is available; pass projectRoot explicitly")
+}
+
 func (server *MCPServer) service(projectRoot string) (*Service, error) {
 	root, err := server.resolveProject(projectRoot)
 	if err != nil {
@@ -469,7 +600,6 @@ func (server *MCPServer) service(projectRoot string) (*Service, error) {
 	}
 	service, err := NewService(ServiceOptions{
 		ProjectRoot: root, AssetRoot: server.AssetRoot,
-		DisableDense: server.DisableDense, DisableRerank: server.DisableRerank,
 	})
 	if err != nil {
 		return nil, err
@@ -513,10 +643,6 @@ func (server *MCPServer) serviceConfigurationStamp(root string) string {
 		}
 		parts = append(parts, path+"@"+SHA256Bytes(body))
 	}
-	parts = append(parts,
-		fmt.Sprintf("disable-dense=%t", server.DisableDense),
-		fmt.Sprintf("disable-rerank=%t", server.DisableRerank),
-	)
 	return SHA256String(strings.Join(parts, "\x00"))
 }
 
@@ -542,12 +668,15 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 			return nil, err
 		}
 		return service.Query(ctx, FindingQueryOptions{
-			Query: input.Query, CampaignID: input.CampaignID,
-			AllowedSourceClasses: input.AllowedSourceClasses,
-			AllowedReviewStates:  input.AllowedReviewStates,
-			AllowedValidities:    input.AllowedValidities,
-			Limit:                input.Limit, TokenBudget: input.TokenBudget,
+			Query: input.Query, QueryClass: input.QueryClass, CampaignID: input.CampaignID,
+			AllowedSourceClasses:   input.AllowedSourceClasses,
+			AllowedProvenanceTiers: input.AllowedProvenanceTiers,
+			AllowedReviewStates:    input.AllowedReviewStates,
+			AllowedValidities:      input.AllowedValidities,
+			Limit:                  input.Limit, TokenBudget: input.TokenBudget,
 			IncludeRaw: input.IncludeRaw, RequestID: input.RequestID,
+			ContextLeaseID:    input.ContextLeaseID,
+			ResetContextLease: input.ResetContextLease,
 		})
 	case "read":
 		var input readToolInput
@@ -616,8 +745,132 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 			return nil, err
 		}
 		return service.ClosureApply(ctx, input.ClosureApplyRequest)
+	case "normalization_queue":
+		var input normalizationQueueToolInput
+		if err := decodeToolInput(body, &input); err != nil {
+			return nil, err
+		}
+		service, err := server.service(input.ProjectRoot)
+		if err != nil {
+			return nil, err
+		}
+		return service.NormalizationQueueApply(ctx, input.NormalizationQueueRequest)
+	case "migrate_project":
+		var input migrationProjectToolInput
+		if err := decodeToolInput(body, &input); err != nil {
+			return nil, err
+		}
+		root, err := server.resolveMigrationProject(input.ProjectRoot)
+		if err != nil {
+			return nil, err
+		}
+		return callMigrationProjectToolWithAssets(root, server.AssetRoot, input)
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
+	}
+}
+
+func callMigrationProjectToolWithAssets(
+	root string,
+	assetRoot string,
+	input migrationProjectToolInput,
+) (any, error) {
+	action := strings.TrimSpace(input.Action)
+	actor := strings.TrimSpace(input.Actor)
+	if actor == "" {
+		actor = "manager"
+	}
+	switch action {
+	case "preview":
+		return PreviewMigration(root, input.LiveCampaigns)
+	case "profile-conflict":
+		return ExportMigrationProfileConflict(root)
+	case "profile-decision":
+		if input.ProfileDecision == nil {
+			return nil, errors.New("migration profile-decision action requires profileDecision")
+		}
+		return SubmitMigrationProfileDecision(root, *input.ProfileDecision, input.ExpectedProfileDecisionDigest)
+	case "truth-conflicts":
+		return ExportMigrationTruthConflicts(root)
+	case "truth-review":
+		if input.TruthReview == nil {
+			return nil, errors.New("migration truth-review action requires truthReview")
+		}
+		return SubmitMigrationTruthReview(root, *input.TruthReview, input.ExpectedReviewDigest)
+	case "apply":
+		preview, err := PreviewMigration(root, input.LiveCampaigns)
+		if err != nil {
+			return nil, err
+		}
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		return engine.Start(preview.Plan, input.ApprovedPlanDigest, actor, "mcp")
+	case "status":
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		state, err := engine.Status()
+		if os.IsNotExist(err) {
+			return map[string]any{"schemaVersion": 1, "state": "legacy", "safeNextAction": "run migrate_project action=preview; no mutation occurred"}, nil
+		}
+		return state, err
+	case "resume":
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		return engine.Resume(input.TransactionID, actor, "mcp")
+	case "verify":
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		return engine.Verify()
+	case "ratify":
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		transactionID := input.TransactionID
+		if transactionID == "" {
+			state, statusErr := engine.Status()
+			if statusErr != nil {
+				return nil, statusErr
+			}
+			transactionID = state.TransactionID
+		}
+		return engine.Ratify(transactionID, input.CertificationDigest, actor, "mcp")
+	case "coverage":
+		if input.Coverage == nil {
+			return nil, errors.New("migration coverage action requires coverage")
+		}
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		return engine.SubmitCoverage(*input.Coverage)
+	case "gate":
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		reviewer := strings.TrimSpace(input.Reviewer)
+		if reviewer == "" {
+			reviewer = actor
+		}
+		return engine.RecordGate(MigrationGateReceipt{Gate: input.Gate, Passed: input.GatePassed,
+			Artifact: input.Artifact, ArtifactDigest: input.ArtifactDigest, Reviewer: reviewer})
+	case "shadow-query":
+		engine, err := NewMigrationEngineWithAssetRoot(root, assetRoot)
+		if err != nil {
+			return nil, err
+		}
+		return engine.QueryShadow(input.Query, input.Campaign, input.Limit)
+	default:
+		return nil, fmt.Errorf("unsupported migration action %q", action)
 	}
 }
 
@@ -670,27 +923,40 @@ func toolDefinitions() []map[string]any {
 	})
 
 	querySchema := reflectedToolSchema(queryToolInput{})
+	contextLeaseIDSchema := stringSchema(
+		"Caller-supplied process-local lease identifier for repeated-card deduplication.",
+		1,
+		128,
+	)
+	contextLeaseIDSchema["pattern"] = contextLeaseIDRE.String()
 	setSchemaProperties(querySchema, map[string]any{
 		"projectRoot": projectRoot,
 		"query":       stringSchema("Question or identifier to resolve to normalized finding cards.", 1, 1000),
-		"campaignId":  stringSchema("Optional campaign filter.", 0, 64),
+		"queryClass": enumSchema("Retrieval intent; contradiction returns bounded typed truth-memory disagreements.",
+			"auto", "exact", "conceptual", "orientation", "current", "provenance", "dependency", "contradiction"),
+		"campaignId": stringSchema("Optional campaign filter.", 0, 64),
 		"allowedSourceClasses": enumArraySchema("Permitted finding durability/source classes.", 5,
 			"truth", "campaign", "provisional", "history", "archive"),
+		"allowedProvenanceTiers": enumArraySchema("Permitted tiers for explicitly labeled ordinary managed-document provenance fallback.", 12,
+			"truth", "campaign", "provisional", "history", "backlog", "profile", "memory",
+			"intake", "state", "navigation", "playbook", "asset"),
 		"allowedReviewStates": enumArraySchema("Permitted independent review states.", 4,
 			"extracted", "curator-checked", "manager-ratified", "manager-rejected"),
 		"allowedValidities": enumArraySchema("Permitted independent validity states.", 6,
 			"provisional", "current", "challenged", "historical", "superseded", "invalid"),
-		"limit":       integerSchemaDescription(1, 5, "Maximum normalized cards before relation expansion."),
-		"tokenBudget": integerSchemaDescription(128, 8192, "Hard maximum estimated tokens for cards and trace metadata."),
-		"includeRaw":  map[string]any{"type": "boolean", "description": "Permit measured raw-report fallback when policy allows it."},
-		"requestId":   stringSchema("Stable request identifier used only for fallback serve accounting.", 0, 128),
+		"limit":             integerSchemaDescription(1, 5, "Maximum normalized cards before relation expansion."),
+		"tokenBudget":       integerSchemaDescription(128, 8192, "Hard maximum estimated tokens for cards and trace metadata."),
+		"includeRaw":        map[string]any{"type": "boolean", "description": "Permit measured raw-report fallback when policy allows it."},
+		"requestId":         stringSchema("Stable request identifier used only for fallback serve accounting.", 0, 128),
+		"contextLeaseId":    contextLeaseIDSchema,
+		"resetContextLease": map[string]any{"type": "boolean", "description": "Reset this lease after real context compaction before serving the query."},
 	})
 
 	readSchema := reflectedToolSchema(readToolInput{})
 	setSchemaProperties(readSchema, map[string]any{
 		"projectRoot": projectRoot,
 		"selector":    enumSchema("Kind of exact handle in value.", "record", "finding", "evidence", "report", "path", "chunk", "uri"),
-		"value":       stringSchema("Exact handle, canonical path, chunk ID, or generation URI to expand.", 1, 1000),
+		"value":       stringSchema("Exact handle returned by query, including path:<source>#L<start>-L<end> or #B<start>-B<end>; a canonical path, chunk ID, or generation URI is also accepted.", 1, 1000),
 		"campaignId":  stringSchema("Campaign required to disambiguate campaign-local handles.", 0, 64),
 		"startLine":   integerSchemaDescription(1, 10000000, "Optional first source line for path, chunk, or URI reads."),
 		"endLine":     integerSchemaDescription(1, 10000000, "Optional last source line for path, chunk, or URI reads."),
@@ -742,6 +1008,18 @@ func toolDefinitions() []map[string]any {
 			"description": "Canonical sources that must contribute a bounded card and exact handle or fail compilation.",
 			"items":       stringSchema("Canonical managed source path.", 1, 500),
 		},
+		"writeGrants": map[string]any{
+			"type": "array", "uniqueItems": true, "maxItems": maxRunWriteGrants,
+			"description": "Engine-registered project write grants for this active run. Run-local report.md and payload/** are implicit.",
+			"items": map[string]any{
+				"type": "object", "additionalProperties": false,
+				"required": []string{"mode", "path"},
+				"properties": map[string]any{
+					"mode": enumSchema("Exact file or bounded directory prefix.", "exact", "directory"),
+					"path": stringSchema("Canonical project-relative path outside engine-managed state.", 1, 500),
+				},
+			},
+		},
 		"expectedDigest": map[string]any{
 			"type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
 			"description": "Digest retained independently from the preview result; materialize only.",
@@ -753,23 +1031,35 @@ func toolDefinitions() []map[string]any {
 	})
 
 	managerSchema := reflectedToolSchema(managerApplyToolInput{})
+	archiveFallbackDecisionSchema := reflectedJSONSchema(reflect.TypeOf(ArchiveFallbackOptInDecision{}))
+	archiveFallbackDecisionSchema["description"] = "Exact manager ratification of one retained normalized-versus-raw candidate; valid only for knowledge.archive-fallback.opt-in."
+	setSchemaProperties(archiveFallbackDecisionSchema, map[string]any{
+		"candidateRunId":         stringSchema("Derived normalized-versus-raw run ID whose cache path the engine resolves.", 1, 96),
+		"candidateReportDigest":  map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Semantic digest independently retained from the candidate."},
+		"candidateContentDigest": map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact byte digest independently retained from the candidate."},
+		"ratifiedAt":             stringSchema("Explicit manager-supplied UTC RFC3339 ratification time.", 1, 64),
+		"expectedSettingsDigest": map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact current policy byte digest used for compare-and-swap publication."},
+	})
 	setSchemaProperties(managerSchema, map[string]any{
 		"projectRoot": projectRoot,
 		"action": enumSchema("Typed manager transition.",
 			"campaign.open", "campaign.update", "work.create", "work.update", "run.prepare", "run.start",
 			"run.return", "run.complete", "review.submit", "finding.challenge", "finding.update",
-			"decision.record", "reconcile.import"),
-		"actor":                stringSchema("Permitted manager identity recorded in the event.", 1, 128),
-		"campaignSlug":         stringSchema("Canonical campaign directory slug.", 3, 50),
-		"campaignId":           stringSchema("Canonical campaign ID bound by every submitted record.", 1, 64),
-		"correlationId":        stringSchema("Stable transaction correlation ID.", 1, 128),
-		"idempotencyKey":       stringSchema("Stable retry key for this semantic transition.", 1, 256),
-		"rationale":            stringSchema("Compact manager rationale or review reference.", 0, 2000),
-		"expectedHeadRevision": integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before the transition."),
-		"expectedHeadDigest":   map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before the transition."},
+			"decision.record", "reconcile.import", "knowledge.archive-fallback.opt-in"),
+		"actor":                   stringSchema("Permitted manager identity recorded in the event.", 1, 128),
+		"campaignSlug":            stringSchema("Canonical campaign directory slug.", 3, 50),
+		"campaignId":              stringSchema("Canonical campaign ID bound by every submitted record.", 1, 64),
+		"correlationId":           stringSchema("Stable transaction correlation ID.", 1, 128),
+		"idempotencyKey":          stringSchema("Stable retry key for this semantic transition.", 1, 256),
+		"rationale":               stringSchema("Compact manager rationale or review reference.", 0, 2000),
+		"expectedHeadRevision":    integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before the transition."),
+		"expectedHeadDigest":      map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before the transition."},
+		"archiveFallbackDecision": archiveFallbackDecisionSchema,
 	})
 
 	curationSchema := reflectedToolSchema(curationSubmitToolInput{})
+	curatorRunSchema := reflectedJSONSchema(reflect.TypeOf(RunRecord{}))
+	curatorRunSchema["description"] = "Optional exact copy of the caller's canonical returned curator run. It proves the binding and is never mutated by curation submission."
 	setSchemaProperties(curationSchema, map[string]any{
 		"projectRoot":          projectRoot,
 		"actor":                stringSchema("Curator identity recorded in the event.", 1, 128),
@@ -780,6 +1070,7 @@ func toolDefinitions() []map[string]any {
 		"rationale":            stringSchema("Compact extraction rationale.", 0, 2000),
 		"expectedHeadRevision": integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before submission."),
 		"expectedHeadDigest":   map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before submission."},
+		"curatorRun":           curatorRunSchema,
 	})
 
 	closureSchema := reflectedToolSchema(closureApplyToolInput{})
@@ -796,6 +1087,111 @@ func toolDefinitions() []map[string]any {
 		"timestamp":            stringSchema("UTC RFC3339 timestamp for mutating actions.", 0, 64),
 		"expectedHeadRevision": integerSchemaDescription(0, 2147483647, "Exact state-head revision for mutating actions."),
 		"expectedHeadDigest":   map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact state-head digest for mutating actions."},
+		"activeFileDispositions": map[string]any{
+			"type": "object", "maxProperties": 10000,
+			"additionalProperties": enumSchema("Explicit disposition for an otherwise unknown active-tree file.",
+				"retain", "destroy-approved", "ephemeral"),
+			"description": "Manager dispositions for active-tree files not already typed by canonical records or run inventory.",
+		},
+	})
+
+	normalizationQueueSchema := reflectedToolSchema(normalizationQueueToolInput{})
+	normalizationQueueSchema["required"] = []string{"action"}
+	normalizationResolutionSchema := reflectedJSONSchema(reflect.TypeOf(NormalizationResolution{}))
+	setSchemaProperties(normalizationResolutionSchema, map[string]any{
+		"disposition": enumSchema(
+			"Verified outcome of complete source coverage.", "normalized", "reviewed-non-claim"),
+		"curatorRunId":     map[string]any{"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4,}$"},
+		"curatorRunDigest": map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+		"intakeId":         map[string]any{"type": "string", "pattern": "^I-[A-Z0-9][A-Z0-9-]{0,62}$"},
+		"intakeDigest":     map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+		"coverageDigest":   map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+		"reviewId":         map[string]any{"type": "string", "pattern": "^V-[A-Z0-9][A-Z0-9-]{0,62}$"},
+		"reviewDigest":     map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+		"digest":           map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+	})
+	setSchemaProperties(normalizationQueueSchema, map[string]any{
+		"projectRoot": projectRoot,
+		"action": enumSchema("Inspect, explicitly request, or advance one demand-driven normalization item.",
+			"status", "request", "claim", "ack", "resolve"),
+		"actor":          stringSchema("Permitted source-campaign manager for mutations.", 0, 128),
+		"itemId":         stringSchema("Stable normalization item identifier.", 0, 64),
+		"expectedDigest": map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact item digest observed before mutation."},
+		"reportPath":     stringSchema("Canonical active or archived run report requested for normalization.", 0, 1000),
+		"reportDigest":   map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact source report digest; request action only."},
+		"timestamp":      stringSchema("UTC RFC3339 mutation timestamp.", 0, 64),
+		"resolution":     normalizationResolutionSchema,
+		"limit":          integerSchemaDescription(1, 100, "Maximum active queue items returned by status."),
+	})
+
+	migrationSchema := reflectedToolSchema(migrationProjectToolInput{})
+	migrationSchema["required"] = []string{"action"}
+	profileDecisionInputSchema := reflectedToolSchema(MigrationProfileDecisionSubmission{})
+	migrationDecisionDigest := func(description string) map[string]any {
+		return map[string]any{
+			"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": description,
+		}
+	}
+	setSchemaProperties(profileDecisionInputSchema, map[string]any{
+		"schemaVersion":             map[string]any{"type": "integer", "const": MigrationSchemaVersion},
+		"packetDigest":              migrationDecisionDigest("Exact exported profile-conflict packet digest."),
+		"sourceFingerprint":         migrationDecisionDigest("Exact current legacy migration source fingerprint."),
+		"sourcePath":                map[string]any{"type": "string", "const": migrationLegacyRetrievalProfilePath},
+		"sourceDigest":              migrationDecisionDigest("Exact legacy retrieval-profile source digest."),
+		"baselineProfileId":         map[string]any{"type": "string", "const": "plugin:balanced-v1"},
+		"baselineProfileDigest":     migrationDecisionDigest("Exact packaged baseline profile digest from the packet."),
+		"effectiveProfileName":      map[string]any{"type": "string", "const": migrationBaselineEffectiveProfile},
+		"effectiveProfileDigest":    migrationDecisionDigest("Exact primary effective-profile digest from the packet."),
+		"measurementEvidenceDigest": migrationDecisionDigest("Exact packaged measurement-evidence digest from the packet."),
+		"decision":                  map[string]any{"type": "string", "const": migrationProfileDecisionKind},
+		"explicitManagerApproval":   map[string]any{"type": "boolean", "const": true},
+		"projectProfileActivation":  map[string]any{"type": "boolean", "const": false},
+		"authority":                 map[string]any{"type": "string", "const": "manager"},
+		"reviewer":                  stringSchema("Manager identity making the explicit decision.", 1, 128),
+		"rationale":                 stringSchema("Manager rationale for retaining the packaged baseline without promotion.", 1, 4000),
+		"decidedAt": map[string]any{
+			"type": "string", "format": "date-time", "pattern": "Z$",
+			"description": "Explicit UTC RFC3339 manager decision timestamp; never inferred by the engine.",
+		},
+		"replacesDecisionDigest": map[string]any{
+			"type": "string", "pattern": "^(?:|sha256:[0-9a-f]{64})$",
+			"description": "Empty for the first decision; exact prior decision digest for replacement.",
+		},
+	})
+	setSchemaProperties(migrationSchema, map[string]any{
+		"projectRoot": projectRoot,
+		"action": enumSchema("Explicit 0.7-to-0.8 migration operation.",
+			"preview", "profile-conflict", "profile-decision", "truth-conflicts", "truth-review", "apply", "status", "resume", "verify", "ratify", "coverage", "gate", "shadow-query"),
+		"liveCampaigns": map[string]any{"type": "array", "uniqueItems": true, "maxItems": 100,
+			"items": stringSchema("Manager-designated live campaign slug.", 3, 50)},
+		"approvedPlanDigest":  map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact independently approved preview digest; apply only."},
+		"transactionId":       stringSchema("Exact active migration transaction ID for resume or ratify.", 0, 128),
+		"certificationDigest": map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact passing candidate certification digest; ratify only."},
+		"actor":               stringSchema("Manager identity recorded in migration receipts.", 0, 128),
+		"gate":                enumSchema("Independent certification gate; retrieval and host gates require strict gate-specific evidence.", "structural", "semantic-traversal", "retrieval-context", "host-parity"),
+		"gatePassed":          map[string]any{"type": "boolean", "description": "Measured gate result."},
+		"artifact":            stringSchema("Project-contained regular-file artifact handle. Retrieval and host artifacts must use the packaged strict evidence schemas.", 0, 1000),
+		"artifactDigest":      map[string]any{"type": "string", "pattern": "^(?:sha256:)?[0-9a-f]{64}$", "description": "Exact digest rederived from the gate artifact."},
+		"reviewer":            stringSchema("Reviewer identity for a gate receipt.", 0, 128),
+		"query":               stringSchema("Bounded query over digest-pinned shadow report provenance.", 0, 1000),
+		"campaign":            stringSchema("Optional shadow-query campaign slug.", 0, 50),
+		"limit":               integerSchemaDescription(1, 20, "Maximum shadow provenance matches."),
+		"profileDecision": map[string]any{
+			"description":          "Digest-bound explicit non-activating manager baseline decision; profile-decision action only.",
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties":           profileDecisionInputSchema["properties"],
+			"required":             profileDecisionInputSchema["required"],
+		},
+		"expectedProfileDecisionDigest": map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact prior sealed profile decision digest required only when replacing a decision."},
+		"truthReview": map[string]any{
+			"description":          "Digest-bound manager atomicization/split mapping; truth-review action only.",
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties":           reflectedToolSchema(MigrationTruthReviewSubmission{})["properties"],
+			"required":             reflectedToolSchema(MigrationTruthReviewSubmission{})["required"],
+		},
+		"expectedReviewDigest": map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact prior sealed review digest required only when replacing a review."},
 	})
 
 	return []map[string]any{
@@ -831,13 +1227,13 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name": "manager_apply", "title": "Apply typed manager transition",
-			"description": "Validate and atomically apply one typed campaign, work, run, review, finding, decision, or reconciliation transition with optimistic concurrency.",
+			"description": "Validate and atomically apply one typed campaign, work, run, review, finding, decision, reconciliation, or receipt-bound archive-policy transition with optimistic concurrency.",
 			"inputSchema": managerSchema,
 			"annotations": writeOnly,
 		},
 		{
 			"name": "curation_submit", "title": "Submit bounded curation packet",
-			"description": "Validate and atomically publish a curator intake, normalized candidate findings, coverage rows, and explicitly declared follow-up work.",
+			"description": "Validate and atomically publish a curator intake, normalized candidate findings, and exhaustive coverage rows. Spawned work-item IDs are proposals only; manager review is the sole path that may create their work records. An optional curatorRun is exact returned-run proof and is never mutated.",
 			"inputSchema": curationSchema,
 			"annotations": writeOnly,
 		},
@@ -845,6 +1241,18 @@ func toolDefinitions() []map[string]any {
 			"name": "closure_apply", "title": "Apply resumable closure transition",
 			"description": "Return closure status or apply one explicit start, advance, verify, reopen, or finalize transition with coverage and projection gates.",
 			"inputSchema": closureSchema,
+			"annotations": closureWrite,
+		},
+		{
+			"name": "normalization_queue", "title": "Manage archive normalization demand",
+			"description": "Inspect the durable normalization backlog, explicitly request an exact report, or claim, acknowledge, and proof-resolve source-bound work as a permitted campaign manager.",
+			"inputSchema": normalizationQueueSchema,
+			"annotations": writeOnly,
+		},
+		{
+			"name": "migrate_project", "title": "Migrate a legacy re-discipline project",
+			"description": "Preview, resolve digest-bound truth atomicization conflicts, apply, resume, inspect, verify, and ratify the explicit 0.7-to-0.8 conversion; shadow-query is the only legacy report reader.",
+			"inputSchema": migrationSchema,
 			"annotations": closureWrite,
 		},
 	}

@@ -17,6 +17,8 @@
     "idempotencyKey": {"type": "string", "minLength": 1, "maxLength": 128},
     "expectedHeadRevision": {"type": "integer", "minimum": 0},
     "expectedHeadDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "retireActiveTree": {"type": "string", "pattern": "^active/[a-z0-9][a-z0-9-]{2,49}$"},
+    "retiredEventJournal": {"type": "string", "pattern": "^docs/history/campaigns/[^/]+/finalization/events/events\\.jsonl$"},
     "writes": {
       "type": "array",
       "items": {

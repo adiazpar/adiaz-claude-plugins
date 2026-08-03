@@ -1,6 +1,7 @@
 # RFC 0001: re-discipline campaign state and knowledge engine
 
-**Status:** Draft. Accepted direction, not implemented behavior.
+**Status:** Implemented for re-discipline 0.8.0. Project conversion remains an
+explicit migrator operation.
 
 **Target:** re-discipline 0.8.0, shipped as one hard workflow and storage
 cutover from 0.7.x. The release contains a resumable legacy reader and
@@ -487,6 +488,20 @@ A work item cannot enter `deferred` without:
 - an owner or owning work item;
 - a decision about whether it blocks campaign closure.
 
+`revisitWhen` is evaluable rather than prose. It is exactly one of:
+
+- `date`, with a UTC RFC3339 `at` timestamp; dates are `near` during the
+  inclusive seven-day window before they become `due`;
+- `work-item-state`, with a different canonical `workItemId` and exact target
+  `state`;
+- `event`, with an event-journal `action` and optional exact `affectedId`.
+
+Every deferment also carries one closure disposition. A closure-blocking item
+uses `resolve-before-closure` and has no destination. A non-blocking item uses
+`export-backlog` and names a unique Markdown destination below
+`docs/backlog/`; closure stages and verifies that durable projection before
+the active campaign tree may be retired.
+
 A phase is represented as a milestone label over work items. Starting a
 tangent creates a child or spawned work item; it never replaces the original
 item by prose implication.
@@ -500,6 +515,8 @@ Each `run.json` contains:
 - status: `prepared`, `running`, `returned`, `completed`, `blocked`,
   `aborted`, or `invalidated`;
 - brief and context-pack handles and digests;
+- canonical exact-path and bounded-directory write grants, immutable after
+  preparation and sealed into the run, context pack, and brief digests;
 - start, return, review, and terminal timestamps;
 - registered payload inventory;
 - changed project paths;
@@ -742,9 +759,11 @@ truth.
 #### Curator review packets
 
 The manager reviews a coherent packet rather than receiving one interaction
-per finding or one all-or-nothing decision per report. A normal packet contains
-three to ten related atomic findings from one run or tightly coupled subsystem,
-plus its coverage map:
+per finding or one all-or-nothing decision per report. A packet contains zero
+to ten related atomic findings from one run or tightly coupled subsystem, plus
+its coverage map. Three to ten is the preferred review batch when claims exist;
+a zero-finding packet is valid when exhaustive coverage classifies the report
+without producing a candidate finding:
 
 ```text
 Intake I-0042 - source run R-0018
@@ -1062,12 +1081,23 @@ server may maintain SQLite, FTS, graph, vector, generation, and context-lease
 state under `.re-discipline/cache/knowledge/`. Deleting that cache and running
 reconciliation must reproduce the same public state and source digests.
 
-Direct manual edits are supported only as break-glass recovery. Reconciliation
-validates them, emits import events, and refuses ambiguous revision histories.
-Normal agent workflows mutate state through either adapter over the same
+Every committed state head binds a canonical byte inventory. Before a normal
+mutation, the engine verifies every tracked record, returned-run artifact,
+event journal, truth projection, and campaign archive and detects unexpected
+canonical records. Derived `STATE.md` views, caches, journals, and idempotency
+receipts are excluded because they are reproducible machinery rather than
+project truth.
+
+Direct manual edits are supported only as break-glass recovery. An explicit
+manager reconciliation may import a self-valid canonical record at its exact
+revision and digest; the transaction emits an import event and advances the
+head-bound inventory. Dirty event journals or other transaction-owned bytes
+must be restored, and a reconciliation cannot adopt them implicitly while
+importing an unrelated record. Unreconciled paths keep ordinary mutations
+paused. Normal workflows mutate state through either adapter over the same
 engine; the MCP process is not a single point of authority or availability.
 
-### 12.3 Proposed primary tool surface
+### 12.3 Primary tool surface
 
 The public surface should stay small and role-oriented.
 
@@ -1081,6 +1111,8 @@ The public surface should stay small and role-oriented.
 | `manager_apply` | Typed campaign, work-item, run, review, finding, and decision transitions | Manager only |
 | `curation_submit` | Write intake batches and coverage for granted runs | Scoped curator |
 | `closure_apply` | Start, advance, verify, reopen, or finalize a closure job | Manager only |
+| `normalization_queue` | Inspect or advance durable demand-driven archive normalization work | Manager only |
+| `migrate_project` | Preview, review, apply, resume, verify, and ratify the sole legacy conversion | Manager only |
 
 The schemas use discriminated action variants rather than free-form patch
 objects. Every mutation returns the resulting revisions, event IDs, generated
@@ -1161,8 +1193,8 @@ finding card rather than an arbitrary chunk:
 ```text
 question
   -> authority and validity filters
-  -> metadata/identifier, FTS, and dense candidate lanes
-  -> weighted fusion and optional reranking
+  -> metadata/identifier, FTS, relationship-graph, and pinned dense lanes
+  -> weighted fusion
   -> explicit relation expansion
   -> bounded finding cards
   -> handle-based evidence reads
@@ -1177,10 +1209,21 @@ the evidence policy remain hard gates outside calibration.
 The 0.7 numerical weights are not promoted into 0.8 merely because they once
 passed. The representation, fields, and expected targets have changed. They
 may seed candidate experiments, but a new finding-card development/holdout
-suite must select the accepted profile. Calibration initially tunes only
-metadata/exact, FTS, and dense fusion weights. Graph traversal, field boosts,
-candidate depths, reranker depth, and token budgets remain versioned policy
-until separate ablations justify tuning them.
+suite selects the accepted profile. Calibration tunes only metadata/exact,
+FTS, and graph fusion weights. The packaged holdout recorded no dense or
+reranker improvement but was underpowered for a dense-removal decision. A
+frozen pre-removal three-arm run over the expanded 64-case project corpus
+recorded two dense-only rescues, no added hard-gate regression, and no reranker
+contribution. Because the current runtime has no reranker implementation, its
+clean final-corpus measurement is exactly two arms: lexical-graph baseline and
+baseline plus dense. The rerank decision is bound separately to the immutable
+pre-removal dense-versus-rerank rows; cross-runtime arms are never combined.
+The 0.8 release candidate retains the checksum-pinned local dense lane pending
+the fresh two-arm result. Reranking was removed on the frozen historical layer
+plus the packaged holdout. The final receipt, historical archive, profile
+inventories, and model inventories must agree. Field boosts, candidate depths,
+and token budgets remain versioned policy until separate ablations justify
+tuning them.
 
 ### 12.6.3 Claude Code and Codex parity
 
@@ -1193,8 +1236,11 @@ treat host parity as a tested contract:
   response digests on supported operating systems and architectures;
 - use simple discriminated JSON schemas that both hosts render accurately,
   avoiding opaque `oneOf` tool declarations;
-- authenticate manager, investigator, and curator authority through scoped
-  capabilities rather than a self-declared role string;
+- enforce declared manager, investigator, and curator roles with structural
+  invariants and use symmetric `PreToolUse` hooks plus reconciliation as an
+  accident boundary. The hook applies one write-class decision to Claude Code
+  `Write`/`Edit` and Codex `apply_patch`. Current hosts do not attest caller
+  identity, so 0.8 does not claim adversarial capability authentication;
 - test mutation tools under each host's sandbox and approval model;
 - make correctness independent of host-specific compaction or subagent hooks;
 - provide the same operations through the CLI when MCP registration or process
@@ -1247,6 +1293,13 @@ The current path-only tier model expands to distinguish use, not just location:
 - `memory`: accepted operational recall;
 - `archive`: reports and provenance, opt-in;
 - `intake`: unratified curator proposals, manager-review only.
+
+Per RFC 0002 Amendment 3, `archive` does not become opt-in merely because a
+measurement reports a pass. The shared engine must recompute the exact
+ratified case-level evidence and atomically publish the durable report,
+authorization receipt, and compare-and-swap policy update after an explicit
+manager decision. Until that transaction succeeds, report provenance remains
+enabled as the lower-ranked fallback lane.
 
 Default manager work context includes profile, navigation, truth, campaign,
 relevant history, and accepted memory. A delegated investigator receives only
@@ -1487,13 +1540,21 @@ Update both PowerShell and POSIX hooks symmetrically.
 
 - **SessionStart:** validate/recover the server and inject only a bounded
   orientation instruction plus active campaign handles.
+- **PreToolUse:** apply the same write-class guard to Claude Code `Write`/`Edit`
+  and Codex `apply_patch`; deny direct writes to engine-owned state while
+  honoring only the exact report, payload, and project grants of a uniquely
+  resolved registered run.
 - **PreCompact:** emit current campaign, work-item, generation, and last-event
   handles; do not invoke checkpoint logic.
 - **PostCompact:** request bounded resume and delta context.
-- **SubagentStart:** inject run ID, work-item ID, brief path, context-pack
-  digest, payload policy, and capability scope.
-- **SubagentStop/return:** validate report presence and mark the run returned;
-  do not imply review or ratification.
+- **SubagentStart:** remain silent for ordinary host subagents. Only when
+  explicit dispatch metadata resolves one unique registered run and matches
+  its immutable context-pack identity, inject run ID, work-item ID, brief path,
+  context-pack digest, payload policy, and sealed write-grant scope.
+- **SubagentStop/return:** remain silent for ordinary host subagents. Under the
+  same unique-run and context-pack validation, check report presence and direct
+  the caller to the engine return operation; the hook itself does not mark the
+  run returned and does not imply review or ratification.
 - **Stop:** warn on an in-flight, unpersisted server transaction, not on an
   absent manual checkpoint.
 
@@ -1553,6 +1614,20 @@ subagent directories, truth records, retrieval profiles, and initialized
 project contracts; assigns stable proposed IDs; calculates source digests;
 estimates curator and storage work; and writes a read-only plan under the
 project cache. It changes no canonical file.
+
+If that inventory contains a runtime-incompatible accepted 0.7 retrieval
+profile, preview exposes one digest-bound conflict packet. The packet contains
+the exact legacy bytes and source snapshot together with the exact packaged
+0.8 baseline, primary effective-profile digest, and measurement evidence. The
+blocker can be cleared only by a sealed explicit manager decision that binds
+all of those identities and fixes project-profile activation to false. The
+manager supplies the UTC decision timestamp; replacements bind the exact
+prior decision digest and preserve a strictly ordered history rather than
+using an engine-generated wall-clock default. The
+decision is replayed during preview, apply, and every pre-activation resume;
+any source, baseline, evidence, or sealed-decision drift blocks again. The
+legacy profile and decision become audit provenance, not an accepted project
+profile.
 
 The manager approves the exact plan digest before `migrate-project --apply`.
 Apply creates shadow manifests while leaving legacy files in place, records the
@@ -1655,6 +1730,15 @@ improves project awareness. Certification requires:
 - identical MCP and CLI state/result digests and passing Claude Code/Codex
   conformance trials.
 
+Migration certification consumes strict, gate-specific evidence rather than
+generic assertions. The retrieval receipt re-hashes the exact final full
+project benchmark, non-activating calibration, unapproved candidate profile,
+and paired case-level blinded transcripts for every holdout case. The host
+receipt stores a complete captured MCP/CLI/Claude Code/Codex
+request-result-failure matrix and derives its semantic and per-host digests.
+Random fingerprints, omitted trials, aggregate-only blinded scores, and
+self-evaluation cannot satisfy either gate.
+
 Fully traversable does not mean every binary byte is indexed or injected into
 context. It means no substantive claim or registered evidence object is an
 orphan, and an agent can follow bounded handles from question to claim to
@@ -1670,7 +1754,13 @@ review to source and reproduction.
 - Report ambiguous phase/task reconstruction to the manager.
 - Validate retrieval before declaring a migrated finding reachable.
 - Never activate a stale or runtime-incompatible retrieval profile silently;
-  require an explicit migrated profile, measured fallback, or attention state.
+  require a digest-bound explicit manager decision over the exact legacy
+  profile, current source fingerprint, packaged baseline, effective profile,
+  and measurement evidence, or retain an attention state.
+- A migration profile decision may retain the packaged baseline for conversion
+  but must structurally deny project-profile activation or promotion. A stale
+  source, packet, profile, evidence digest, or tampered decision restores the
+  blocker; apply and resume must replay that check.
 
 ---
 
@@ -1752,15 +1842,22 @@ deferment recall, evidence-trace completeness, challenged/superseded safety,
 and context-card expansion rate.
 
 Calibration uses ratified development and frozen holdout splits. It may tune
-only the declared finding-card fusion weights and must benchmark every
-effective fallback profile. Tier/access filters, evidence authority, secret
-exclusion, citations, freshness, deterministic replay, relationship behavior,
-and the truth wall are hard gates and never tunable parameters. A candidate is
-not activated as a benchmark side effect.
+only the declared finding-card fusion weights and must benchmark the sole
+declared effective profile. Reintroducing a removed lane requires a new
+positive holdout decision and release-contract change, not an implicit
+fallback row. Tier/access filters, evidence authority, secret exclusion,
+citations, freshness, deterministic replay, relationship behavior, and the
+truth wall are hard gates and never tunable parameters. A candidate is not
+activated as a benchmark side effect.
 
 ### 17.3 Curation tests
 
 - compound report claims are split without losing qualifiers;
+- migration coverage rejects a missing atomicity, evidence-grade, whole-span,
+  semantic-boundary, legacy-authority, or manager-attention attestation, and an
+  attestation never bypasses individual manager attention;
+- candidate coverage cannot silently omit a trailing characterization or cut a
+  sentence at a whole-line boundary; the unsafe combined span stays unresolved;
 - every report span receives a coverage disposition;
 - duplicate findings merge without losing source runs;
 - curator uncertainty cannot become manager ratification;
@@ -1948,8 +2045,10 @@ These are accepted RFC choices, not claims about implemented behavior:
     navigation, never the only surviving representation.
 13. **Automatic curation:** every substantive returned run queues curation;
     trivial runs may be normalized inline by the manager.
-14. **Review packets:** curators group three to ten related atomic findings for
-    efficient review, while every finding receives its own decision receipt.
+14. **Review packets:** curators submit zero to ten related atomic findings
+    with exhaustive report coverage. Three to ten is the preferred non-empty
+    batch; coverage-only packets remain valid, and every finding receives its
+    own decision receipt.
 15. **Cross-campaign awareness:** manager-ratified active findings are visible
     to other managers with explicit campaign-provisional durability.
 16. **YAML-frontmatter records:** findings and truth projections keep typed
@@ -1970,28 +2069,34 @@ These are accepted RFC choices, not claims about implemented behavior:
 
 ---
 
-## 21. Open design questions
+## 21. Resolved decisions and remaining design questions
 
-The following implementation choices require prototype evidence:
+The 0.8 implementation resolves these former release questions:
 
-1. What signed or host-attested capability format can distinguish manager,
-   investigator, and curator mutations across both supported hosts without
-   trusting a caller-supplied role?
-2. Should context leases be process-local, persisted briefly across
-   compaction, or caller-supplied and stateless?
-3. What payload size thresholds, content-addressed storage, and external-object
+1. Current hosts provide no trustworthy caller-attestation primitive. Signed
+   capabilities are deferred; declared roles, structural engine invariants,
+   run-bound structured write grants, symmetric hooks, and reconciliation ship
+   as an explicitly non-adversarial accident boundary.
+2. Context leases are caller-named and process-local. They maintain only
+   in-memory deduplication and accounting and reset on request or process exit.
+3. The public MCP surface is exactly ten tools. Discriminated actions remain
+   within those tools, with the same operation contracts available through the
+   CLI.
+4. Finding frontmatter uses the implemented strict YAML subset and parser,
+   which rejects implicit scalar surprises and non-round-trippable shapes.
+5. Emergency reconciliation operates inside the same non-adversarial threat
+   model: it detects out-of-band bytes and requires an explicit manager import
+   with expected digests and rationale. It does not manufacture host-attested
+   actor identity.
+
+The following post-0.8 choices still require project evidence:
+
+1. What payload size thresholds, content-addressed storage, and external-object
    policy fit projects that produce large captures or binaries?
-4. Should all normalized history findings participate in default manager
+2. Should all normalized history findings participate in default manager
    context, or should older history require an explicit query class?
-5. Does the eight-tool MCP surface remain most reliable after both hosts render
-   its schemas, or do some discriminated actions need dedicated tools?
-6. Which YAML subset and parser provide strict, portable, round-trip-safe
-   frontmatter without surprising implicit scalar conversion?
-7. What fixed model, trial count, and variance rule make the mandatory blinded
+3. What fixed model, trial count, and variance rule make the mandatory blinded
    migration evaluation reproducible enough to certify context improvement?
-8. How should a reconciled emergency manual edit prove actor authority and
-   intent when no adapter-produced event existed at edit time?
 
-These questions do not reopen the accepted storage, authority, closure, or
-migration model. They become implementation work items with measured exit
-gates.
+These remaining questions do not reopen the accepted storage, authority,
+closure, or migration model.
