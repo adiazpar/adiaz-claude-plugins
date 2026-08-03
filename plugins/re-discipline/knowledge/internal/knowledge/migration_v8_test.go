@@ -383,3 +383,51 @@ func migrationInventoryDigest(root string) (string, error) {
 		Conflicts []MigrationConflict
 	}{sources, conflicts})
 }
+
+// reviewFixtureTruthConflicts supplies a manager review for every pending
+// truth conflict. Migration requires one per converted document because a
+// finding is invalid without reviewed retrieval questions, so a fixture that
+// converts truth must review it exactly as a manager would.
+func reviewFixtureTruthConflicts(t *testing.T, root string) {
+	t.Helper()
+	for attempt := 0; attempt < 64; attempt++ {
+		packet, err := ExportMigrationTruthConflicts(root)
+		if err != nil {
+			t.Fatalf("export truth conflicts: %v", err)
+		}
+		pending := []MigrationTruthConflict{}
+		for _, conflict := range packet.Conflicts {
+			if _, loadErr := loadMigrationTruthReview(root, conflict); loadErr != nil {
+				pending = append(pending, conflict)
+			}
+		}
+		if len(pending) == 0 {
+			return
+		}
+		conflict := pending[0]
+		title := strings.TrimSpace(conflict.Title)
+		if title == "" {
+			title = "Reviewed fixture truth"
+		}
+		claim := strings.TrimSpace(conflict.SourceCoverageText)
+		if len([]rune(claim)) > 500 {
+			claim = string([]rune(claim)[:480])
+		}
+		if _, err := SubmitMigrationTruthReview(root, MigrationTruthReviewSubmission{
+			SchemaVersion: 1, PacketDigest: packet.Digest, SourcePath: conflict.SourcePath,
+			SourceDigest: conflict.SourceDigest, Reviewer: "manager",
+			Rationale: "Confirmed the accepted claim and supplied reviewed retrieval questions.",
+			Claims: []MigrationTruthAtomicClaim{{
+				SourceText: conflict.SourceCoverageText, Title: title, Claim: claim,
+				SyntheticQuestions: []string{
+					"What does " + title + " establish?",
+					"Which accepted record covers " + title + "?",
+					"How is " + title + " verified?",
+				},
+			}},
+		}, ""); err != nil {
+			t.Fatalf("review fixture truth %s: %v", conflict.SourcePath, err)
+		}
+	}
+	t.Fatal("fixture truth conflicts did not converge")
+}

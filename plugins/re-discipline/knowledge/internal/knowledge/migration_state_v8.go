@@ -1997,9 +1997,16 @@ func (engine *MigrationEngine) verifyMigratedTruthCompatibility(
 }
 
 func verifyMigratedTruthReview(root string, source MigrationSource, legacyBody []byte, rows []MigrationTruthPlan) error {
+	// A review is mandatory only when conversion is blocked, but a manager may
+	// also review a document that would have converted in place in order to
+	// supply real retrieval questions. Verify whichever review the document
+	// actually cites.
 	conflict, required := migrationTruthConflictForSource(source, legacyBody)
 	if !required {
-		return fmt.Errorf("converted truth %s cites a review for a source that did not require atomicization", source.Path)
+		conflict = migrationTruthReviewCandidate(source, legacyBody)
+	}
+	if conflict.Digest == "" {
+		return fmt.Errorf("converted truth %s cites a review with no reviewable identity", source.Path)
 	}
 	body, err := readSingleLinkRegularFile(filepath.Join(root, filepath.FromSlash(migrationTruthAuditReviewPath(source.Path))))
 	if err != nil {

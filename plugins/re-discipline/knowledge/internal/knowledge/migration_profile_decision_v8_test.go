@@ -269,6 +269,7 @@ func TestMigrationProfileDecisionFailsClosedOnSourceOrDecisionDriftAndResume(t *
 		if err != nil {
 			t.Fatal(err)
 		}
+		reviewFixtureTruthConflicts(t, root)
 		approved, err := PreviewMigration(root, nil)
 		if err != nil {
 			t.Fatal(err)
