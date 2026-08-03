@@ -2050,10 +2050,23 @@ func migrationTruthSearchFinds(plan MigrationPlan, terms []string, targetID, roo
 			if err != nil {
 				return false
 			}
-			text := strings.ToLower(truth.Title + " " + truth.Claim + " " + string(body))
+			// Weight the field a term matches in. Counting containment
+			// anywhere in a document body ties every record that merely
+			// mentions the words -- an approved title of a few common terms
+			// then loses to unrelated documents on a lexicographic path
+			// tie-break, even though real retrieval boosts title and claim
+			// fields. This mirrors that ordering without weakening the gate.
+			title := strings.ToLower(truth.Title)
+			claim := strings.ToLower(truth.Claim)
+			text := strings.ToLower(string(body))
 			score := 0
 			for _, token := range queryTokens {
-				if strings.Contains(text, token) {
+				switch {
+				case strings.Contains(title, token):
+					score += 4
+				case strings.Contains(claim, token):
+					score += 2
+				case strings.Contains(text, token):
 					score++
 				}
 			}
