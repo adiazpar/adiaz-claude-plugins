@@ -171,10 +171,12 @@ func (engine *MigrationEngine) buildNormalizedStaging(plan MigrationPlan) (Migra
 	if err := engine.stageLegacyTruthConversions(plan, state, projectStagingRoot, campaigns, &manifest); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
-	if err := sealMigrationImportChain(projectStagingRoot, campaigns, plan, state, manifest.LegacySources); err != nil {
+	// Carried-forward bytes must exist before the import chain is sealed, so
+	// the events bind the complete activated snapshot.
+	if err := engine.carryForwardUnplannedFiles(plan, projectStagingRoot); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
-	if err := engine.carryForwardUnplannedFiles(plan, projectStagingRoot); err != nil {
+	if err := sealMigrationImportChain(projectStagingRoot, campaigns, plan, state, manifest.LegacySources); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
 	// The import head is not authoritative until ratification, but its complete
