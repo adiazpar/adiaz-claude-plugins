@@ -220,7 +220,12 @@ func buildMigrationProfileConflictPacket(
 			RequiredDecision: "Explicitly retain the exact packaged 0.8 baseline and its measured primary effective profile for conversion while leaving project-profile activation false.",
 		},
 	}
-	packet.SourceFingerprint, err = CanonicalDigest(sources)
+	// The packet is a function of the project's source bytes alone. Staging
+	// rebuilds it from the approved plan's sources, which already carry their
+	// planned truth destinations, while export builds it from sources as
+	// read; fingerprinting a destination-free projection keeps both callers
+	// on one identity so a sealed decision cannot appear to change.
+	packet.SourceFingerprint, err = CanonicalDigest(sourcesAsRead(sources))
 	if err != nil {
 		return MigrationProfileConflictPacket{}, err
 	}
@@ -518,4 +523,15 @@ func migrationProfileAuditDecisionPath(sourcePath string) string {
 		".re-discipline", "knowledge", "migration", "profile-decisions",
 		filepath.Base(migrationProfileDecisionPath("", sourcePath)),
 	))
+}
+
+// sourcesAsRead returns the inventory with planned destinations cleared, so a
+// fingerprint over it describes only what was discovered in the project.
+func sourcesAsRead(sources []MigrationSource) []MigrationSource {
+	projection := make([]MigrationSource, len(sources))
+	copy(projection, sources)
+	for index := range projection {
+		projection[index].Destination = ""
+	}
+	return projection
 }

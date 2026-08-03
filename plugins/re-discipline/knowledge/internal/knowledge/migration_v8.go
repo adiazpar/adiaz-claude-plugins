@@ -259,7 +259,7 @@ func PreviewMigration(projectRoot string, liveCampaigns []string) (MigrationPrev
 	// is stamped onto them. Deriving it after destination planning would make
 	// the fingerprint move whenever a manager submits a truth review, which
 	// no submission is allowed to do.
-	sourceFingerprint, err := CanonicalDigest(sources)
+	sourceFingerprint, err := CanonicalDigest(sourcesAsRead(sources))
 	if err != nil {
 		return MigrationPreview{}, err
 	}
