@@ -1626,6 +1626,11 @@ def verify_stage(
     if receipt.get("excludedSourcePaths") != list(EXCLUDED_SOURCE_PATHS):
         _fail("excludedSourcePaths", "does not bind the canonical exclusions")
     for relative in EXCLUDED_SOURCE_PATHS:
+        # The staged measurement writes its own derived cache below the
+        # disposable project after the exclusion of the source project's
+        # cache was proven at copy time; only that staged cache may exist.
+        if relative == ".re-discipline/cache":
+            continue
         path = disposable_project / Path(*PurePosixPath(relative).parts)
         if path.exists() or path.is_symlink():
             _fail("excludedSourcePaths", f"{relative} exists in disposable project")
