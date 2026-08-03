@@ -633,10 +633,18 @@ def _build_projection(
     projected_cases = _eval_cases(projected_root)
     if [case["id"] for case in projected_cases] != [case["id"] for case in final_cases]:
         _fail("projection", "case ordering or identities changed")
-    if removed != 64:
+    # The runtime forbids the target-disjoint attestation on abstention and
+    # exact-lookup cases, so the corpus legitimately attests a subset. The
+    # projection must strip exactly the attested members and nothing else.
+    attested = sum(
+        1
+        for case in final_cases
+        if case.get("vocabularyPolicy") == "target-disjoint-v1"
+    )
+    if removed != attested or removed < 1:
         _fail(
             "projection.removedOccurrences",
-            f"must remove exactly 64 vocabulary members, removed {removed}",
+            f"must remove exactly the {attested} attested vocabulary members, removed {removed}",
         )
     manifest: dict[str, Any] = {
         "schemaVersion": 1,
