@@ -16,6 +16,7 @@ import (
 func migrationFixtureToNormalized(t *testing.T, root string) (*MigrationEngine, MigrationPlan, MigrationState) {
 	t.Helper()
 	migrationCertificationEvalCases(t, root)
+	reviewFixtureTruthConflicts(t, root)
 	preview, err := PreviewMigration(root, []string{"live-campaign"})
 	if err != nil {
 		t.Fatal(err)

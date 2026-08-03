@@ -710,7 +710,28 @@ func migrationTruthPlans(boundary Boundary, sources []MigrationSource) ([]Migrat
 		}
 		claim := legacyTruthAtomicClaim(body)
 		questions := SortedUnique(legacyTruthSyntheticQuestions(title, claim))
-		row, rowErr := buildMigrationTruthPlan(source, prelude, dependencies, legacyScope, legacyExclusions, claim, title, claim, questions, "",
+		reviewDigest := ""
+		// A single-claim document upgrades in place, but a manager may still
+		// have supplied reviewed retrieval questions for it. Generated
+		// questions only restate the title and bridge none of the vocabulary a
+		// reader actually searches with, so an optional review is consumed
+		// when present and never waited for when absent.
+		candidate := migrationTruthReviewCandidate(source, body)
+		if optional, optionalErr := loadMigrationTruthReview(boundary.Root, candidate); optionalErr == nil &&
+			len(optional.Claims) == 1 {
+			reviewed := optional.Claims[0]
+			if len(reviewed.SyntheticQuestions) >= SyntheticQuestionMinimum {
+				questions = SortedUnique(reviewed.SyntheticQuestions)
+				reviewDigest = optional.Digest
+				if strings.TrimSpace(reviewed.Claim) != "" {
+					claim = reviewed.Claim
+				}
+				if strings.TrimSpace(reviewed.Title) != "" {
+					title = reviewed.Title
+				}
+			}
+		}
+		row, rowErr := buildMigrationTruthPlan(source, prelude, dependencies, legacyScope, legacyExclusions, claim, title, claim, questions, reviewDigest,
 			stableLegacyTruthFindingID(source.Path), 1, 1)
 		if rowErr != nil {
 			return nil, nil, rowErr

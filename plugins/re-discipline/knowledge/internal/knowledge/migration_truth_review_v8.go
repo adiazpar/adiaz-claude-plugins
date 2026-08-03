@@ -116,11 +116,12 @@ func ExportMigrationTruthConflicts(projectRoot string) (MigrationTruthConflictPa
 		if readErr != nil {
 			return MigrationTruthConflictPacket{}, readErr
 		}
-		conflict, required := migrationTruthConflictForSource(source, body)
-		if !required {
-			continue
-		}
-		packet.Conflicts = append(packet.Conflicts, conflict)
+		// Every truth document is offered for review. A blocking entry must be
+		// resolved before conversion; an optional one lets a manager supply
+		// reviewed retrieval questions for a document that would otherwise
+		// convert with generated questions that only restate its title.
+		packet.Conflicts = append(packet.Conflicts,
+			migrationTruthReviewCandidate(source, body))
 	}
 	sort.Slice(packet.Conflicts, func(i, j int) bool {
 		return packet.Conflicts[i].SourcePath < packet.Conflicts[j].SourcePath
@@ -337,11 +338,34 @@ func legacyTruthManualReviewReason(body []byte, sourcePath string) (string, stri
 	}
 }
 
+// migrationTruthReviewCandidate describes a document a manager may review
+// even when nothing blocks its conversion. A single-claim document upgrades
+// in place, but its generated retrieval questions only restate its title, so
+// a manager who wants the finding to be findable can still supply reviewed
+// questions. Conversion never waits for one.
+func migrationTruthReviewCandidate(source MigrationSource, body []byte) MigrationTruthConflict {
+	conflict, blocking := migrationTruthConflictForSource(source, body)
+	if blocking {
+		return conflict
+	}
+	return migrationTruthConflictWithCode(source, body,
+		"truth-questions-optional-review",
+		"Optionally confirm the atomic claim and supply manager-reviewed retrieval questions phrased as a reader would ask them.")
+}
+
 func migrationTruthConflictForSource(source MigrationSource, body []byte) (MigrationTruthConflict, bool) {
 	code, required := legacyTruthManualReviewReason(body, source.Path)
 	if code == "" {
 		return MigrationTruthConflict{}, false
 	}
+	return migrationTruthConflictWithCode(source, body, code, required), true
+}
+
+func migrationTruthConflictWithCode(
+	source MigrationSource,
+	body []byte,
+	code, required string,
+) MigrationTruthConflict {
 	conflict := MigrationTruthConflict{
 		Code: code, SourcePath: source.Path, SourceDigest: "sha256:" + source.SHA256,
 		Title:              normalizePreludeField(ExtractDocumentPrelude(string(body), source.Path).Title),
@@ -351,7 +375,7 @@ func migrationTruthConflictForSource(source MigrationSource, body []byte) (Migra
 		RequiredResolution: required,
 	}
 	conflict.Digest, _ = CanonicalDigest(conflict)
-	return conflict, true
+	return conflict
 }
 
 func migrationTruthSourceCoverageText(body []byte) string {
