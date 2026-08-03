@@ -448,7 +448,8 @@ func migrationStrictRetrievalEvidence(
 	trial := func(condition string, tokens int) MigrationBlindedAgentCaseOutcome {
 		outcome := MigrationBlindedAgentCaseOutcome{
 			CaseID: holdout.CaseID, Condition: condition, Agent: "claude-code-drafter",
-			Model: "fixed-blinded-agent-v1", BenchmarkOutcomeDigest: benchmarkOutcomeDigest,
+			Answerable: holdoutEval.Answerable == nil || *holdoutEval.Answerable,
+			Model:      "fixed-blinded-agent-v1", BenchmarkOutcomeDigest: benchmarkOutcomeDigest,
 			Request: MigrationBlindedAgentRequest{CaseID: holdout.CaseID,
 				Query: holdoutEval.Query, QueryClass: holdoutEval.QueryClass,
 				Role:         holdoutEval.Role,

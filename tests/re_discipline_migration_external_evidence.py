@@ -72,6 +72,36 @@ MAX_CAPTURE_BYTES = 16 * 1024 * 1024
 MAX_QUOTE_BYTES = 2048
 FORMAL_MIN_TIMEOUT = 60
 
+MCP_SERVER_NAME = "re-discipline-knowledge"
+MCP_PROTOCOL_VERSION = "2025-11-25"
+HOST_TRANSPORTS = {
+    "mcp": "mcp-stdio-jsonrpc",
+    "cli": "cli-process-json",
+    "claude": "claude-code-plugin",
+    "codex": "codex-plugin",
+}
+AGENT_IDENTITIES = {"claude": "claude-code", "codex": "codex-cli"}
+# The conformance surface is fixed so that every host issues byte-identical
+# tool arguments and the verifier can compare normalized semantic digests.
+CONFORMANCE_QUERY = (
+    "What does the project profile require before promoting a finding to durable truth?"
+)
+CONFORMANCE_LEASE = "migration-host-conformance-lease"
+CONFORMANCE_READ_PATH = ".re-discipline/project-profile.md"
+CONFORMANCE_TOKEN_BUDGET = 1024
+ROLE_BOUNDARY_ROLE = "curator"
+ROLE_BOUNDARY_SURFACE = "context_pack_materialize"
+ROLE_BOUNDARY_MESSAGE = "context pack role must be manager or drafter"
+MCP_UNAVAILABLE_MESSAGE = (
+    "re-discipline knowledge MCP server is unavailable in this session"
+)
+CLI_COMMANDS = {
+    "state": "state",
+    "query": "query",
+    "read": "read",
+    "context_pack_materialize": "context-pack-materialize",
+}
+
 HOST_MATRIX: dict[str, tuple[str, ...]] = {
     "mcp": (
         "discovery",
@@ -206,6 +236,113 @@ def _stable_bytes(value: Any) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+class RawJSON:
+    """Bytes already encoded exactly as the Go verifier will observe them.
+
+    A ``json.RawMessage`` struct field is re-emitted verbatim (after Go's
+    compaction) rather than re-encoded from a decoded value, so its digest
+    contribution is the artifact's own bytes, not a re-serialization.
+    """
+
+    __slots__ = ("body",)
+
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+
+_GO_SHORT_ESCAPES = {0x22: b'\\"', 0x5C: b"\\\\", 0x0A: b"\\n", 0x0D: b"\\r", 0x09: b"\\t"}
+_COMPACT_ESCAPES = (
+    (b"<", b"\\u003c"),
+    (b">", b"\\u003e"),
+    (b"&", b"\\u0026"),
+    ("\u2028".encode("utf-8"), b"\\u2028"),
+    ("\u2029".encode("utf-8"), b"\\u2029"),
+)
+
+
+def _go_string(value: str) -> bytes:
+    # encoding/json string encoding with the default escapeHTML setting.
+    out = bytearray(b'"')
+    for character in value:
+        point = ord(character)
+        short = _GO_SHORT_ESCAPES.get(point)
+        if short is not None:
+            out += short
+        elif character in "<>&" or point < 0x20 or point in (0x2028, 0x2029):
+            out += f"\\u{point:04x}".encode("ascii")
+        else:
+            out += character.encode("utf-8")
+    out += b'"'
+    return bytes(out)
+
+
+def _go_json_bytes(value: Any, *, sort_keys: bool = False) -> bytes:
+    """Reproduce Go ``json.Marshal`` for the values this module emits.
+
+    Go preserves struct-field order and sorts map keys, so callers pass an
+    already-ordered mapping for a struct and request ``sort_keys`` for a value
+    the verifier decodes into ``any`` before hashing.
+    """
+
+    if isinstance(value, RawJSON):
+        return value.body
+    if value is None:
+        return b"null"
+    if isinstance(value, bool):
+        return b"true" if value else b"false"
+    if isinstance(value, str):
+        return _go_string(value)
+    if isinstance(value, int):
+        return str(value).encode("ascii")
+    if isinstance(value, float):
+        if not value.is_integer():
+            _fail("digest", f"float {value!r} has no reproducible Go encoding here")
+        return str(int(value)).encode("ascii")
+    if isinstance(value, Mapping):
+        rows = list(value.items())
+        if sort_keys:
+            rows.sort(key=lambda row: str(row[0]))
+        return (
+            b"{"
+            + b",".join(
+                _go_string(str(key)) + b":" + _go_json_bytes(child, sort_keys=sort_keys)
+                for key, child in rows
+            )
+            + b"}"
+        )
+    if isinstance(value, (list, tuple)):
+        return (
+            b"["
+            + b",".join(_go_json_bytes(row, sort_keys=sort_keys) for row in value)
+            + b"]"
+        )
+    _fail("digest", f"unsupported value {value!r}")
+    raise AssertionError("unreachable")
+
+
+def _go_digest(value: Any, *, sort_keys: bool = False) -> str:
+    return _sha256(_go_json_bytes(value, sort_keys=sort_keys))
+
+
+def _raw_capture(value: Any) -> RawJSON:
+    """Encode a captured payload exactly as Go compaction will see our file."""
+
+    body = json.dumps(
+        value, ensure_ascii=False, sort_keys=False, separators=(",", ":")
+    ).encode("utf-8")
+    for needle, replacement in _COMPACT_ESCAPES:
+        body = body.replace(needle, replacement)
+    return RawJSON(body)
+
+
+def _go_number(value: float) -> Any:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _fail("score", f"{value!r} is not a measured number")
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def _go_struct_value(
     value: Mapping[str, Any], fields: Sequence[str], *, omit_empty: Iterable[str] = ()
 ) -> dict[str, Any]:
@@ -227,10 +364,7 @@ def _go_struct_digest(
     # Go encoding/json preserves struct-field order and sorts map keys.  Python
     # preserves insertion order; nested dictionaries are normalized separately.
     ordered = _go_struct_value(value, fields, omit_empty=omit_empty)
-    body = json.dumps(
-        ordered, ensure_ascii=False, sort_keys=False, separators=(",", ":")
-    ).encode("utf-8")
-    return _sha256(body)
+    return _go_digest(ordered)
 
 
 def _stable_id(prefix: str, *values: str) -> str:
@@ -1333,7 +1467,10 @@ def _agent_prompt(request: Mapping[str, Any], condition: str) -> str:
         "from an actual read result and return its canonical project path, half-open "
         "byte offsets, full-source SHA-256, returned source/finding handle, and every "
         "evidence handle supporting it. Do not paraphrase inside claims. If the allowed "
-        "corpus does not support an answer, return decision=abstain and claims=[]."
+        "corpus does not support an answer, return decision=abstain and claims=[]. "
+        "Declining is a correct, expected outcome for a question the corpus cannot "
+        "support: an abstention with no claims and no citations scores as correct, and "
+        "inventing a claim to avoid abstaining scores as wrong."
     )
 
 
@@ -1509,18 +1646,17 @@ def _check_authentication(
 
 
 def _mcp_config(runtime: Path, assets: Path, cache: Path, workspace: Path) -> dict[str, Any]:
+    # `serve` accepts --asset-root and --project-root only.  The runtime picks
+    # its cache root from the bound project, falling back to the machine cache
+    # base named by LOCALAPPDATA/XDG_CACHE_HOME; pinning both keeps a disposable
+    # run from touching the operator's real machine cache.
     return {
         "mcpServers": {
-            "re-discipline-knowledge": {
+            MCP_SERVER_NAME: {
                 "command": str(runtime),
-                "args": [
-                    "serve",
-                    "--asset-root",
-                    str(assets),
-                    "--cache-root",
-                    str(cache),
-                ],
+                "args": ["serve", "--asset-root", str(assets)],
                 "cwd": str(workspace),
+                "env": {"LOCALAPPDATA": str(cache), "XDG_CACHE_HOME": str(cache)},
             }
         }
     }
@@ -1607,17 +1743,13 @@ def _toml_literal(value: Any) -> str:
 def _codex_mcp_overrides(
     runtime: Path, assets: Path, cache: Path, workspace: Path
 ) -> list[str]:
-    prefix = 'mcp_servers."re-discipline-knowledge"'
+    prefix = f'mcp_servers."{MCP_SERVER_NAME}"'
     values = {
         f"{prefix}.command": str(runtime),
-        f"{prefix}.args": [
-            "serve",
-            "--asset-root",
-            str(assets),
-            "--cache-root",
-            str(cache),
-        ],
+        f"{prefix}.args": ["serve", "--asset-root", str(assets)],
         f"{prefix}.cwd": str(workspace),
+        f"{prefix}.env.LOCALAPPDATA": str(cache),
+        f"{prefix}.env.XDG_CACHE_HOME": str(cache),
         f"{prefix}.required": True,
         f"{prefix}.enabled_tools": ["query", "read"],
         "features.shell_tool": False,
@@ -1691,3 +1823,1854 @@ def _run_codex_trial(
         },
     }
     return capture, transcript, invocation
+
+
+# ---------------------------------------------------------------------------
+# Sealed artifact assembly
+# ---------------------------------------------------------------------------
+
+
+def _case_answerable(case: Mapping[str, Any]) -> bool:
+    """Read answerability from the canonical case exactly as the verifier does.
+
+    The Go verifier treats an absent ``answerable`` as answerable and rejects a
+    trial whose recorded value disagrees with the case, so this value is never
+    taken from what the agent chose to do.
+    """
+
+    value = case.get("answerable")
+    if value is None:
+        return True
+    if not isinstance(value, bool):
+        _fail("evalCase.answerable", "must be boolean when present")
+    return value
+
+
+def _answer_shape_correct(response: Mapping[str, Any], answerable: bool) -> bool:
+    """Mirror migrationBlindedAnswerShapeCorrect.
+
+    A correct abstention produces neither claims nor citations; scoring it by
+    the answerable rule would make a correct refusal indistinguishable from a
+    failure.
+    """
+
+    claims = len(response["answerClaims"])
+    citations = len(response["citations"])
+    if answerable:
+        return claims > 0 and citations > 0
+    return claims == 0 and citations == 0
+
+
+def _blinded_case_outcome(
+    *,
+    case_id: str,
+    condition: str,
+    answerable: bool,
+    agent: str,
+    model: str,
+    request: Mapping[str, Any],
+    response: Mapping[str, Any],
+    scores: Mapping[str, Any],
+    benchmark_outcome_digest: str,
+) -> dict[str, Any]:
+    """Rederive every identity the Go verifier recomputes for one trial."""
+
+    if not agent.strip() or not model.strip():
+        _fail("blindedCase.agent", "agent and model identity are required")
+    if not isinstance(answerable, bool):
+        _fail("blindedCase.answerable", "must be the canonical case's boolean")
+    agent_digest = _go_digest({"agent": agent, "model": model})
+    query_digest = _sha256(str(request["query"]).encode("utf-8"))
+    response_digest = _go_digest(response)
+    factual = _go_number(scores["factualAccuracy"])
+    decision = _go_number(scores["decisionAccuracy"])
+    unsupported = int(scores["unsupportedClaims"])
+    trace_passed = bool(scores["evidenceTracePassed"])
+    passed = (
+        unsupported == 0
+        and trace_passed
+        and factual >= 0.5
+        and decision >= 0.5
+        and _answer_shape_correct(response, answerable)
+    )
+    outcome: dict[str, Any] = {
+        "id": _stable_id("MBE", case_id, condition, agent_digest, query_digest),
+        "caseId": case_id,
+        "condition": condition,
+        "agent": agent,
+        "model": model,
+        "agentDigest": agent_digest,
+        "queryDigest": query_digest,
+        "benchmarkOutcomeDigest": benchmark_outcome_digest,
+        "answerable": answerable,
+        "request": dict(request),
+        "response": dict(response),
+        "responseDigest": response_digest,
+        "factualAccuracy": factual,
+        "decisionAccuracy": decision,
+        "unsupportedClaims": unsupported,
+        "evidenceTracePassed": trace_passed,
+        "passed": passed,
+        "digest": "",
+    }
+    outcome["digest"] = _go_digest(outcome)
+    return outcome
+
+
+def _seal_blinded_evaluation(
+    *,
+    transaction_id: str,
+    plan_digest: str,
+    benchmark_digest: str,
+    calibration_digest: str,
+    evaluator: str,
+    cases: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    if not cases:
+        _fail("blindedEvaluation.cases", "requires at least one measured trial")
+    if not evaluator.strip() or len(evaluator) > 128:
+        _fail("blindedEvaluation.evaluator", "must be a bounded non-empty identity")
+    for case in cases:
+        if case["agent"] == evaluator:
+            _fail(
+                "blindedEvaluation.evaluator",
+                "the evaluator identity may not equal a tested agent identity",
+            )
+    protocol_digest = _sha256(BLINDED_PROTOCOL.encode("utf-8"))
+    evaluation: dict[str, Any] = {
+        "schemaVersion": 1,
+        "suite": BLINDED_SUITE,
+        "transactionId": transaction_id,
+        "planDigest": plan_digest,
+        "benchmarkDigest": benchmark_digest,
+        "calibrationDigest": calibration_digest,
+        "protocolDigest": protocol_digest,
+        "evaluator": evaluator,
+        "evaluatorDigest": _go_digest(
+            {"evaluator": evaluator, "protocolDigest": protocol_digest}
+        ),
+        "cases": [dict(case) for case in cases],
+        "passed": all(bool(case["passed"]) for case in cases),
+        "resultDigest": "",
+    }
+    evaluation["resultDigest"] = _go_digest(evaluation)
+    return evaluation
+
+
+def _host_trial(
+    *,
+    host: str,
+    scenario: str,
+    request: Mapping[str, Any],
+    result: Any,
+    failure: Mapping[str, Any] | None,
+    exit_code: int,
+    semantic: Any,
+) -> dict[str, Any]:
+    """Build one host trial with verifier-derived identity and result."""
+
+    if host not in HOST_TRANSPORTS or scenario not in HOST_MATRIX.get(host, ()):
+        _fail("hostTrial", f"unsupported host/scenario pair {host}/{scenario}")
+    transport = (
+        f"{host}-cli-fallback"
+        if scenario == "local-fallback"
+        else HOST_TRANSPORTS[host]
+    )
+    if request.get("scenario") != scenario:
+        _fail("hostTrial.request", "captured request must name its exact scenario")
+    if semantic is None:
+        _fail("hostTrial.semanticResult", "a normalized semantic result is required")
+    request_digest = _go_digest(request, sort_keys=True)
+    semantic_digest = _go_digest(semantic, sort_keys=True)
+    if scenario == "role-boundary":
+        passed = bool(
+            failure
+            and failure.get("code") == "role-boundary-refused"
+            and str(failure.get("message", "")).strip()
+        )
+    elif scenario == "local-fallback":
+        passed = bool(
+            failure
+            and failure.get("code") == "mcp-unavailable"
+            and str(failure.get("message", "")).strip()
+            and exit_code == 0
+        )
+    else:
+        passed = result is not None and failure is None and exit_code == 0
+    trial: dict[str, Any] = {
+        "id": _stable_id("MHT", host, scenario, request_digest),
+        "host": host,
+        "scenario": scenario,
+        "transport": transport,
+        "request": dict(request),
+        "result": result,
+        "failure": dict(failure) if failure else None,
+        "exitCode": int(exit_code),
+        "semanticResult": semantic,
+        "semanticDigest": semantic_digest,
+        "passed": passed,
+        "digest": "",
+    }
+    digest_view = dict(trial)
+    digest_view["request"] = _raw_capture(trial["request"])
+    digest_view["result"] = _raw_capture(trial["result"])
+    digest_view["semanticResult"] = _raw_capture(trial["semanticResult"])
+    trial["digest"] = _go_digest(digest_view)
+    return trial
+
+
+def _seal_host_conformance(
+    *,
+    transaction_id: str,
+    plan_digest: str,
+    trials: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    seen: set[str] = set()
+    for trial in trials:
+        key = f"{trial['host']}:{trial['scenario']}"
+        if key in seen:
+            _fail("hostConformance", f"duplicates the {key} trial")
+        seen.add(key)
+    for host, scenarios in HOST_MATRIX.items():
+        for scenario in scenarios:
+            if f"{host}:{scenario}" not in seen:
+                _fail("hostConformance", f"omits {host}/{scenario}")
+    evidence: dict[str, Any] = {
+        "schemaVersion": 1,
+        "suite": HOST_SUITE,
+        "transactionId": transaction_id,
+        "planDigest": plan_digest,
+        "protocolDigest": _sha256(HOST_PROTOCOL.encode("utf-8")),
+        "trials": [dict(trial) for trial in trials],
+        "passed": all(bool(trial["passed"]) for trial in trials),
+        "resultDigest": "",
+    }
+    digest_view = dict(evidence)
+    digest_rows = []
+    for trial in evidence["trials"]:
+        row = dict(trial)
+        row["request"] = _raw_capture(trial["request"])
+        row["result"] = _raw_capture(trial["result"])
+        row["semanticResult"] = _raw_capture(trial["semanticResult"])
+        digest_rows.append(row)
+    digest_view["trials"] = digest_rows
+    evidence["resultDigest"] = _go_digest(digest_view)
+    return evidence
+
+
+def _assert_semantic_parity(trials: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    """Reproduce the verifier's cross-host parity requirements locally."""
+
+    by_key = {f"{row['host']}:{row['scenario']}": row for row in trials}
+    parity: dict[str, str] = {}
+    for scenario in ("status", "retrieval", "expansion", "bounded-recovery"):
+        want = by_key[f"mcp:{scenario}"]["semanticDigest"]
+        for host in ("cli", "claude", "codex"):
+            observed = by_key[f"{host}:{scenario}"]["semanticDigest"]
+            if observed != want:
+                _fail(
+                    "hostConformance.semanticParity",
+                    f"{host}/{scenario} returned {observed}, mcp returned {want}",
+                )
+        parity[scenario] = want
+    discovery = by_key["mcp:discovery"]["semanticDigest"]
+    for host in ("claude", "codex"):
+        if by_key[f"{host}:discovery"]["semanticDigest"] != discovery:
+            _fail(
+                "hostConformance.discovery",
+                f"{host} did not observe the current MCP tool schema",
+            )
+    parity["discovery"] = discovery
+    status = by_key["cli:status"]["semanticDigest"]
+    for host in ("claude", "codex"):
+        if by_key[f"{host}:local-fallback"]["semanticDigest"] != status:
+            _fail(
+                "hostConformance.localFallback",
+                f"{host} local fallback did not preserve CLI status semantics",
+            )
+    parity["local-fallback"] = status
+    return parity
+
+
+# ---------------------------------------------------------------------------
+# Real transport capture
+# ---------------------------------------------------------------------------
+
+
+PROXY_SOURCE = '''"""Transparent stdio proxy that records real host MCP traffic."""
+
+import argparse
+import json
+import subprocess
+import sys
+import threading
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--log", required=True)
+    parser.add_argument("--mode", choices=("proxy", "unavailable"), default="proxy")
+    parser.add_argument("--message", default="")
+    parser.add_argument("--runtime", default="")
+    parser.add_argument("--asset-root", default="")
+    parser.add_argument("--project-root", default="")
+    arguments = parser.parse_args()
+    log = open(arguments.log, "ab")
+    lock = threading.Lock()
+
+    def record(row):
+        with lock:
+            log.write(json.dumps(row, ensure_ascii=False).encode("utf-8") + b"\\n")
+            log.flush()
+
+    if arguments.mode == "unavailable":
+        record({"direction": "proxy", "event": "unavailable",
+                "message": arguments.message})
+        log.close()
+        sys.stderr.write(arguments.message + "\\n")
+        sys.stderr.flush()
+        return 3
+    child = subprocess.Popen(
+        [arguments.runtime, "serve", "--asset-root", arguments.asset_root,
+         "--project-root", arguments.project_root],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    )
+
+    def pump(source, sink, direction):
+        while True:
+            line = source.readline()
+            if not line:
+                break
+            record({"direction": direction,
+                    "line": line.decode("utf-8", errors="replace").rstrip("\\r\\n")})
+            sink.write(line)
+            sink.flush()
+        try:
+            sink.close()
+        except OSError:
+            pass
+
+    upstream = threading.Thread(
+        target=pump, args=(sys.stdin.buffer, child.stdin, "client"))
+    downstream = threading.Thread(
+        target=pump, args=(child.stdout, sys.stdout.buffer, "server"))
+    upstream.start()
+    downstream.start()
+    upstream.join()
+    downstream.join()
+    code = child.wait()
+    log.close()
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def _write_proxy(scratch: Path) -> Path:
+    path = scratch / "mcp-capture-proxy.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(PROXY_SOURCE.encode("utf-8"))
+    return path
+
+
+def _proxy_argv(
+    proxy: Path,
+    log: Path,
+    *,
+    runtime: Path | None = None,
+    assets: Path | None = None,
+    workspace: Path | None = None,
+    unavailable: bool = False,
+) -> list[str]:
+    if unavailable:
+        return [
+            sys.executable,
+            str(proxy),
+            "--log",
+            str(log),
+            "--mode",
+            "unavailable",
+            "--message",
+            MCP_UNAVAILABLE_MESSAGE,
+        ]
+    if runtime is None or assets is None or workspace is None:
+        _fail("proxy", "a proxied MCP server requires runtime, assets, and workspace")
+    return [
+        sys.executable,
+        str(proxy),
+        "--log",
+        str(log),
+        "--runtime",
+        str(runtime),
+        "--asset-root",
+        str(assets),
+        "--project-root",
+        str(workspace),
+    ]
+
+
+def _conformance_calls() -> tuple[tuple[str, str, dict[str, Any]], ...]:
+    """The exact tool arguments every host must issue for semantic parity."""
+
+    retrieval = {
+        "query": CONFORMANCE_QUERY,
+        "queryClass": "orientation",
+        "limit": 5,
+        "tokenBudget": CONFORMANCE_TOKEN_BUDGET,
+    }
+    recovery = dict(retrieval)
+    recovery["contextLeaseId"] = CONFORMANCE_LEASE
+    recovery["resetContextLease"] = True
+    return (
+        (
+            "status",
+            "state",
+            {"mode": "orient", "tokenBudget": CONFORMANCE_TOKEN_BUDGET, "maxCards": 5},
+        ),
+        ("retrieval", "query", retrieval),
+        (
+            "expansion",
+            "read",
+            {
+                "selector": "path",
+                "value": CONFORMANCE_READ_PATH,
+                "tokenBudget": CONFORMANCE_TOKEN_BUDGET,
+            },
+        ),
+        ("bounded-recovery", "query", recovery),
+        (
+            "role-boundary",
+            ROLE_BOUNDARY_SURFACE,
+            {
+                "action": "preview",
+                "target": {
+                    "kind": "recruiting-run",
+                    "candidateSlug": "migration-host-conformance",
+                    "recruitingRunId": "migration-host-conformance",
+                },
+                "task": (
+                    "Capture the role boundary enforced for a consumer role that is "
+                    "neither manager nor drafter."
+                ),
+                "role": ROLE_BOUNDARY_ROLE,
+            },
+        ),
+    )
+
+
+def _role_boundary_reason(text: str, *, field: str) -> str:
+    if ROLE_BOUNDARY_MESSAGE not in text:
+        _fail(field, f"no role-boundary refusal was observed in {text[:200]!r}")
+    return ROLE_BOUNDARY_MESSAGE
+
+
+def _normalized_semantic(scenario: str, payload: Any, *, field: str) -> Any:
+    """Reduce a transport-specific result to its host-independent meaning."""
+
+    if scenario == "discovery":
+        if not isinstance(payload, list) or not payload:
+            _fail(field, "discovery must return the real tool definition array")
+        return payload
+    if scenario == "role-boundary":
+        return {
+            "code": "role-boundary-refused",
+            "reason": _role_boundary_reason(str(payload), field=field),
+            "refused": True,
+            "role": ROLE_BOUNDARY_ROLE,
+            "surface": ROLE_BOUNDARY_SURFACE,
+        }
+    if not isinstance(payload, dict) or not payload:
+        _fail(field, "a normalized semantic result object is required")
+    return payload
+
+
+def _host_request(
+    *,
+    host: str,
+    scenario: str,
+    surface: Mapping[str, Any],
+    wire: bytes,
+) -> dict[str, Any]:
+    transport = (
+        f"{host}-cli-fallback"
+        if scenario == "local-fallback"
+        else HOST_TRANSPORTS[host]
+    )
+    return {
+        "scenario": scenario,
+        "host": host,
+        "transport": transport,
+        "surface": dict(surface),
+        "wire": wire.decode("utf-8", errors="strict"),
+        "wireSha256": _sha256(wire),
+        "wireBytes": len(wire),
+    }
+
+
+def _jsonrpc_lines(rows: Sequence[Mapping[str, Any]]) -> bytes:
+    return b"".join(
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+        for row in rows
+    )
+
+
+def _mcp_handshake() -> list[dict[str, Any]]:
+    return [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "re-discipline-migration-external-evidence",
+                    "version": "1",
+                },
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+    ]
+
+
+def _mcp_exchange(
+    *,
+    runtime: Path,
+    assets: Path,
+    workspace: Path,
+    request: Mapping[str, Any],
+    executor: Executor,
+    timeout_seconds: int,
+) -> tuple[ProcessCapture, dict[str, Any], bytes]:
+    """Drive one real MCP stdio session and return the matching response."""
+
+    body = _jsonrpc_lines([*_mcp_handshake(), request])
+    capture = executor.run(
+        [str(runtime), "serve", "--asset-root", str(assets), "--project-root", str(workspace)],
+        cwd=workspace,
+        stdin=body,
+        timeout_seconds=timeout_seconds,
+    )
+    if capture.exit_code != 0:
+        _fail(
+            "mcp",
+            f"server exited {capture.exit_code}: "
+            f"{capture.stderr.decode('utf-8', errors='replace')[:400]}",
+        )
+    responses = _json_lines(capture.stdout, field="mcp.stdout")
+    wanted = request["id"]
+    for row in responses:
+        if row.get("id") == wanted:
+            if "result" not in row or not isinstance(row["result"], dict):
+                _fail("mcp", f"request {wanted} returned no JSON-RPC result")
+            return capture, row, _jsonrpc_lines([request])
+    _fail("mcp", f"server returned no response for request {wanted}")
+    raise AssertionError("unreachable")
+
+
+def _tool_payload(response: Mapping[str, Any], *, field: str) -> tuple[Any, bool]:
+    """Return the structured tool payload and whether the tool reported error."""
+
+    result = response.get("result")
+    if not isinstance(result, dict):
+        _fail(field, "tool response has no result object")
+    is_error = bool(result.get("isError"))
+    if is_error:
+        return _unwrap_json(result.get("content")), True
+    structured = result.get("structuredContent")
+    if structured is None:
+        structured = _unwrap_json(result.get("content"))
+    return structured, False
+
+
+def _cli_invoke(
+    *,
+    runtime: Path,
+    assets: Path,
+    workspace: Path,
+    command: str,
+    request: Mapping[str, Any],
+    scratch: Path,
+    executor: Executor,
+    timeout_seconds: int,
+    label: str,
+) -> tuple[ProcessCapture, list[str], bytes]:
+    input_path = scratch / f"{label}-request.json"
+    _write_private_json(input_path, request)
+    argv = [
+        str(runtime),
+        command,
+        "--asset-root",
+        str(assets),
+        "--project-root",
+        str(workspace),
+        "--input",
+        str(input_path),
+    ]
+    capture = executor.run(argv, cwd=workspace, timeout_seconds=timeout_seconds)
+    wire = _canonical_bytes({"argv": argv, "input": request})
+    return capture, argv, wire
+
+
+# ---------------------------------------------------------------------------
+# Agent host capture
+# ---------------------------------------------------------------------------
+
+
+def _proxy_records(log: Path, *, field: str) -> list[dict[str, Any]]:
+    if log.is_symlink() or not log.is_file():
+        _fail(field, "the host never launched the instrumented MCP server")
+    rows = _json_lines(_regular_bytes(log, field=field), field=field)
+    return rows
+
+
+def _proxy_messages(rows: Sequence[Mapping[str, Any]], direction: str) -> list[Any]:
+    result: list[Any] = []
+    for row in rows:
+        if row.get("direction") != direction or not isinstance(row.get("line"), str):
+            continue
+        result.append(_strict_json(row["line"].encode("utf-8"), "proxy.line"))
+    return result
+
+
+def _proxy_tools_list(rows: Sequence[Mapping[str, Any]], *, field: str) -> Any:
+    for message in _proxy_messages(rows, "server"):
+        if not isinstance(message, dict):
+            continue
+        result = message.get("result")
+        if isinstance(result, dict) and isinstance(result.get("tools"), list):
+            return result["tools"]
+    _fail(field, "the host never performed a real tools/list discovery")
+    raise AssertionError("unreachable")
+
+
+def _proxy_tool_call(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    tool: str,
+    arguments: Mapping[str, Any],
+    field: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Locate the host's real call for exactly these arguments and its reply."""
+
+    wanted = _canonical_digest(arguments)
+    call: dict[str, Any] | None = None
+    observed: list[str] = []
+    for message in _proxy_messages(rows, "client"):
+        if not isinstance(message, dict) or message.get("method") != "tools/call":
+            continue
+        params = message.get("params")
+        if not isinstance(params, dict) or params.get("name") != tool:
+            continue
+        sent = params.get("arguments")
+        if not isinstance(sent, dict):
+            continue
+        observed.append(_canonical_digest(sent))
+        if _canonical_digest(sent) == wanted:
+            call = message
+            break
+    if call is None:
+        _fail(
+            field,
+            f"the host issued no {tool} call with the exact conformance arguments "
+            f"(observed argument digests {observed})",
+        )
+    for message in _proxy_messages(rows, "server"):
+        if isinstance(message, dict) and message.get("id") == call.get("id"):
+            if not isinstance(message.get("result"), dict):
+                _fail(field, f"the {tool} call returned no JSON-RPC result")
+            return call, message
+    _fail(field, f"the host received no reply for its {tool} call")
+    raise AssertionError("unreachable")
+
+
+def _embedded_objects(text: str) -> Iterable[dict[str, Any]]:
+    decoder = json.JSONDecoder()
+    index = 0
+    while True:
+        index = text.find("{", index)
+        if index < 0:
+            return
+        try:
+            value, end = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            index += 1
+            continue
+        if isinstance(value, dict):
+            yield value
+        index = max(end, index + 1)
+
+
+def _event_strings(events: Sequence[Mapping[str, Any]]) -> list[str]:
+    result: list[str] = []
+    for event in events:
+        for row in _walk(event):
+            if isinstance(row, str) and row:
+                result.append(row)
+    return result
+
+
+def _agent_events(capture: ProcessCapture, *, field: str) -> list[dict[str, Any]]:
+    return _json_lines(capture.stdout, field=field)
+
+
+def _claude_conformance_argv(
+    *,
+    executable: Path,
+    model: str,
+    prompt: str,
+    config: Path,
+    allowed_tools: str,
+    disallowed_tools: str,
+) -> list[str]:
+    return [
+        str(executable),
+        "--print",
+        prompt,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--model",
+        model,
+        "--no-session-persistence",
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(config),
+        "--permission-mode",
+        "dontAsk",
+        "--allowedTools",
+        allowed_tools,
+        "--disallowedTools",
+        disallowed_tools,
+    ]
+
+
+def _codex_host_overrides(
+    *,
+    command: Sequence[str],
+    workspace: Path,
+    enabled_tools: Sequence[str],
+    required: bool,
+    shell_tool: bool,
+) -> list[str]:
+    prefix = f'mcp_servers."{MCP_SERVER_NAME}"'
+    values: dict[str, Any] = {
+        f"{prefix}.command": str(command[0]),
+        f"{prefix}.args": [str(value) for value in command[1:]],
+        f"{prefix}.cwd": str(workspace),
+        f"{prefix}.required": required,
+        "tools.web_search": False,
+        "agents.enabled": False,
+        "features.shell_tool": shell_tool,
+    }
+    if enabled_tools:
+        values[f"{prefix}.enabled_tools"] = list(enabled_tools)
+    result: list[str] = []
+    for key, value in values.items():
+        result.extend(["-c", f"{key}={_toml_literal(value)}"])
+    return result
+
+
+def _codex_conformance_argv(
+    *,
+    executable: Path,
+    model: str,
+    prompt: str,
+    workspace: Path,
+    overrides: Sequence[str],
+    sandbox: str,
+) -> list[str]:
+    return [
+        str(executable),
+        "exec",
+        prompt,
+        "--json",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--sandbox",
+        sandbox,
+        "--ask-for-approval",
+        "never",
+        "--cd",
+        str(workspace),
+        "--model",
+        model,
+        *overrides,
+    ]
+
+
+def _conformance_prompt(calls: Sequence[tuple[str, str, Mapping[str, Any]]]) -> str:
+    lines = [
+        "This is a read-only host-conformance capture for a re-discipline knowledge "
+        "migration. Call the listed re-discipline-knowledge MCP tools once each, in "
+        "order, passing exactly the JSON arguments shown. Do not add, remove, rename, "
+        "or reorder any argument. Do not call any other tool and do not run shell "
+        "commands. One listed call is expected to be refused by the runtime; record "
+        "that refusal and continue. When every call has been attempted, reply with "
+        "the single word done."
+    ]
+    for index, (scenario, tool, arguments) in enumerate(calls, start=1):
+        payload = json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
+        lines.append(f"{index}. scenario {scenario}: call tool {tool} with {payload}")
+    return "\n".join(lines)
+
+
+def _fallback_prompt(command: Sequence[str]) -> str:
+    rendered = " ".join(f'"{value}"' for value in command)
+    return (
+        "The re-discipline-knowledge MCP server is unavailable in this session. Do not "
+        "retry it. Recover locally by running exactly this read-only command once and "
+        "reporting its complete stdout verbatim, with no commentary before or after "
+        f"the JSON: {rendered}"
+    )
+
+
+def _unavailable_failure(
+    events: Sequence[Mapping[str, Any]], capture: ProcessCapture, *, field: str
+) -> dict[str, str]:
+    """Bind the mcp-unavailable failure to something the host actually said."""
+
+    for event in events:
+        for row in _walk(event):
+            if not isinstance(row, dict):
+                continue
+            name = row.get("name") or row.get("server") or row.get("id")
+            if not isinstance(name, str) or MCP_SERVER_NAME not in name:
+                continue
+            for key in ("status", "state", "error", "message", "reason"):
+                value = row.get(key)
+                if isinstance(value, str) and any(
+                    token in value.lower()
+                    for token in ("fail", "error", "unavailable", "disconnect")
+                ):
+                    return {
+                        "code": "mcp-unavailable",
+                        "message": json.dumps(row, ensure_ascii=False)[:2000],
+                    }
+    combined = (capture.stdout + b"\n" + capture.stderr).decode(
+        "utf-8", errors="replace"
+    )
+    if MCP_UNAVAILABLE_MESSAGE in combined:
+        return {"code": "mcp-unavailable", "message": MCP_UNAVAILABLE_MESSAGE}
+    _fail(field, "the host never reported the MCP server as unavailable")
+    raise AssertionError("unreachable")
+
+
+def _fallback_payload(
+    events: Sequence[Mapping[str, Any]], *, expected_digest: str, field: str
+) -> dict[str, Any]:
+    for text in _event_strings(events):
+        for candidate in _embedded_objects(text):
+            if _go_digest(candidate, sort_keys=True) == expected_digest:
+                return candidate
+    _fail(
+        field,
+        "the host's local CLI fallback did not return the exact CLI status payload",
+    )
+    raise AssertionError("unreachable")
+
+
+# ---------------------------------------------------------------------------
+# Host conformance drivers
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Arm:
+    """One measured combination of runtime, packaged assets, and workspace."""
+
+    name: str
+    runtime: Path
+    assets: Path
+    workspace: Path
+    cache: Path
+
+
+@dataclass(frozen=True)
+class Harness:
+    store: ArtifactStore
+    executor: Executor
+    scratch: Path
+    timeout_seconds: int
+
+
+def _stage_capture(
+    harness: Harness, prefix: str, capture: ProcessCapture
+) -> dict[str, Any]:
+    argv_ref, stdout_ref, stderr_ref = _capture_ref_set(
+        harness.store, prefix=prefix, capture=capture
+    )
+    return {
+        "argv": argv_ref.json(),
+        "stdout": stdout_ref.json(),
+        "stderr": stderr_ref.json(),
+        "exitCode": capture.exit_code,
+        "startedAt": capture.started_at,
+        "finishedAt": capture.finished_at,
+    }
+
+
+def _run_mcp_host(arm: Arm, harness: Harness) -> tuple[list[dict[str, Any]], list[Any]]:
+    trials: list[dict[str, Any]] = []
+    captures: list[Any] = []
+    discovery_request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+    capture, response, wire = _mcp_exchange(
+        runtime=arm.runtime,
+        assets=arm.assets,
+        workspace=arm.workspace,
+        request=discovery_request,
+        executor=harness.executor,
+        timeout_seconds=harness.timeout_seconds,
+    )
+    captures.append(_stage_capture(harness, "host/mcp/discovery", capture))
+    tools = response["result"].get("tools")
+    trials.append(
+        _host_trial(
+            host="mcp",
+            scenario="discovery",
+            request=_host_request(
+                host="mcp",
+                scenario="discovery",
+                surface={"method": "tools/list"},
+                wire=wire,
+            ),
+            result=response,
+            failure=None,
+            exit_code=capture.exit_code,
+            semantic=_normalized_semantic(
+                "discovery", tools, field="mcp.discovery"
+            ),
+        )
+    )
+    for scenario, tool, arguments in _conformance_calls():
+        request = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
+        capture, response, wire = _mcp_exchange(
+            runtime=arm.runtime,
+            assets=arm.assets,
+            workspace=arm.workspace,
+            request=request,
+            executor=harness.executor,
+            timeout_seconds=harness.timeout_seconds,
+        )
+        captures.append(_stage_capture(harness, f"host/mcp/{scenario}", capture))
+        payload, is_error = _tool_payload(response, field=f"mcp.{scenario}")
+        failure = None
+        if scenario == "role-boundary":
+            if not is_error:
+                _fail("mcp.role-boundary", "the runtime did not refuse the role")
+            failure = {
+                "code": "role-boundary-refused",
+                "message": _role_boundary_reason(
+                    str(payload), field="mcp.role-boundary"
+                ),
+            }
+        elif is_error:
+            _fail(f"mcp.{scenario}", f"tool call reported an error: {str(payload)[:300]}")
+        trials.append(
+            _host_trial(
+                host="mcp",
+                scenario=scenario,
+                request=_host_request(
+                    host="mcp",
+                    scenario=scenario,
+                    surface={"tool": tool, "arguments": arguments},
+                    wire=wire,
+                ),
+                result=response,
+                failure=failure,
+                exit_code=capture.exit_code,
+                semantic=_normalized_semantic(
+                    scenario, payload, field=f"mcp.{scenario}"
+                ),
+            )
+        )
+    return trials, captures
+
+
+def _cli_status_request() -> tuple[str, str, dict[str, Any]]:
+    for row in _conformance_calls():
+        if row[0] == "status":
+            return row
+    _fail("cli.status", "the conformance matrix lost its status scenario")
+    raise AssertionError("unreachable")
+
+
+def _run_cli_host(arm: Arm, harness: Harness) -> tuple[list[dict[str, Any]], list[Any]]:
+    trials: list[dict[str, Any]] = []
+    captures: list[Any] = []
+    for scenario, tool, arguments in _conformance_calls():
+        capture, argv, wire = _cli_invoke(
+            runtime=arm.runtime,
+            assets=arm.assets,
+            workspace=arm.workspace,
+            command=CLI_COMMANDS[tool],
+            request=arguments,
+            scratch=harness.scratch,
+            executor=harness.executor,
+            timeout_seconds=harness.timeout_seconds,
+            label=f"cli-{scenario}",
+        )
+        captures.append(_stage_capture(harness, f"host/cli/{scenario}", capture))
+        stdout_text = capture.stdout.decode("utf-8", errors="replace")
+        stderr_text = capture.stderr.decode("utf-8", errors="replace")
+        failure = None
+        if scenario == "role-boundary":
+            if capture.exit_code == 0:
+                _fail("cli.role-boundary", "the CLI did not refuse the role")
+            failure = {
+                "code": "role-boundary-refused",
+                "message": _role_boundary_reason(
+                    stderr_text, field="cli.role-boundary"
+                ),
+            }
+            payload: Any = stderr_text
+            result: Any = {
+                "exitCode": capture.exit_code,
+                "stdout": stdout_text,
+                "stderr": stderr_text,
+            }
+        else:
+            if capture.exit_code != 0:
+                _fail(
+                    f"cli.{scenario}",
+                    f"exited {capture.exit_code}: {stderr_text[:300]}",
+                )
+            payload = _strict_json(capture.stdout, f"cli.{scenario}")
+            result = payload
+        trials.append(
+            _host_trial(
+                host="cli",
+                scenario=scenario,
+                request=_host_request(
+                    host="cli",
+                    scenario=scenario,
+                    surface={"command": CLI_COMMANDS[tool], "argv": argv, "input": arguments},
+                    wire=wire,
+                ),
+                result=result,
+                failure=failure,
+                exit_code=capture.exit_code,
+                semantic=_normalized_semantic(
+                    scenario, payload, field=f"cli.{scenario}"
+                ),
+            )
+        )
+    return trials, captures
+
+
+def _run_agent_host(
+    host: str,
+    *,
+    executable: Path,
+    model: str,
+    arm: Arm,
+    harness: Harness,
+    proxy: Path,
+) -> tuple[list[dict[str, Any]], list[Any]]:
+    calls = _conformance_calls()
+    prompt = _conformance_prompt(calls)
+    log = harness.scratch / f"{host}-conformance-proxy.jsonl"
+    if log.exists():
+        _fail("hostProxy", f"refuses an existing capture log {log}")
+    command = _proxy_argv(
+        proxy, log, runtime=arm.runtime, assets=arm.assets, workspace=arm.workspace
+    )
+    tools = sorted({tool for _, tool, _ in calls})
+    if host == "claude":
+        config = harness.scratch / f"{host}-conformance-mcp.json"
+        _write_private_json(
+            config,
+            {
+                "mcpServers": {
+                    MCP_SERVER_NAME: {
+                        "command": command[0],
+                        "args": command[1:],
+                        "cwd": str(arm.workspace),
+                        "env": {
+                            "LOCALAPPDATA": str(arm.cache),
+                            "XDG_CACHE_HOME": str(arm.cache),
+                        },
+                    }
+                }
+            },
+        )
+        argv = _claude_conformance_argv(
+            executable=executable,
+            model=model,
+            prompt=prompt,
+            config=config,
+            allowed_tools=",".join(f"mcp__{MCP_SERVER_NAME}__{tool}" for tool in tools),
+            disallowed_tools="Bash,Write,Edit,Read,Glob,Grep,WebFetch,WebSearch,Task",
+        )
+        environment: Mapping[str, str] | None = {
+            **os.environ,
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+    else:
+        argv = _codex_conformance_argv(
+            executable=executable,
+            model=model,
+            prompt=prompt,
+            workspace=arm.workspace,
+            overrides=_codex_host_overrides(
+                command=command,
+                workspace=arm.workspace,
+                enabled_tools=tools,
+                required=True,
+                shell_tool=False,
+            ),
+            sandbox="read-only",
+        )
+        environment = None
+    capture = harness.executor.run(
+        argv,
+        cwd=arm.workspace,
+        env=environment,
+        timeout_seconds=harness.timeout_seconds,
+    )
+    captures = [_stage_capture(harness, f"host/{host}/session", capture)]
+    if capture.exit_code != 0:
+        _fail(host, f"conformance session exited {capture.exit_code}")
+    rows = _proxy_records(log, field=f"{host}.proxy")
+    captures.append(
+        harness.store.write_bytes(
+            f"host/{host}/mcp-traffic.jsonl", _regular_bytes(log, field="proxy.log")
+        ).json()
+    )
+    trials: list[dict[str, Any]] = []
+    discovery = _proxy_tools_list(rows, field=f"{host}.discovery")
+    trials.append(
+        _host_trial(
+            host=host,
+            scenario="discovery",
+            request=_host_request(
+                host=host,
+                scenario="discovery",
+                surface={"method": "tools/list", "server": MCP_SERVER_NAME},
+                wire=_canonical_bytes(
+                    {"method": "tools/list", "server": MCP_SERVER_NAME, "host": host}
+                ),
+            ),
+            result={"tools": discovery},
+            failure=None,
+            exit_code=capture.exit_code,
+            semantic=_normalized_semantic(
+                "discovery", discovery, field=f"{host}.discovery"
+            ),
+        )
+    )
+    for scenario, tool, arguments in calls:
+        call, response = _proxy_tool_call(
+            rows, tool=tool, arguments=arguments, field=f"{host}.{scenario}"
+        )
+        payload, is_error = _tool_payload(response, field=f"{host}.{scenario}")
+        failure = None
+        if scenario == "role-boundary":
+            if not is_error:
+                _fail(f"{host}.role-boundary", "the host did not observe a refusal")
+            failure = {
+                "code": "role-boundary-refused",
+                "message": _role_boundary_reason(
+                    str(payload), field=f"{host}.role-boundary"
+                ),
+            }
+        elif is_error:
+            _fail(
+                f"{host}.{scenario}",
+                f"tool call reported an error: {str(payload)[:300]}",
+            )
+        trials.append(
+            _host_trial(
+                host=host,
+                scenario=scenario,
+                request=_host_request(
+                    host=host,
+                    scenario=scenario,
+                    surface={"tool": tool, "arguments": arguments},
+                    wire=_jsonrpc_lines([call]),
+                ),
+                result=response,
+                failure=failure,
+                exit_code=capture.exit_code,
+                semantic=_normalized_semantic(
+                    scenario, payload, field=f"{host}.{scenario}"
+                ),
+            )
+        )
+    return trials, captures
+
+
+def _run_agent_fallback(
+    host: str,
+    *,
+    executable: Path,
+    model: str,
+    arm: Arm,
+    harness: Harness,
+    proxy: Path,
+    status_digest: str,
+) -> tuple[dict[str, Any], list[Any]]:
+    _scenario, tool, arguments = _cli_status_request()
+    input_path = harness.scratch / f"{host}-fallback-request.json"
+    _write_private_json(input_path, arguments)
+    command = [
+        str(arm.runtime),
+        CLI_COMMANDS[tool],
+        "--asset-root",
+        str(arm.assets),
+        "--project-root",
+        str(arm.workspace),
+        "--input",
+        str(input_path),
+    ]
+    prompt = _fallback_prompt(command)
+    log = harness.scratch / f"{host}-fallback-proxy.jsonl"
+    if log.exists():
+        _fail("hostProxy", f"refuses an existing capture log {log}")
+    broken = _proxy_argv(proxy, log, unavailable=True)
+    if host == "claude":
+        config = harness.scratch / f"{host}-fallback-mcp.json"
+        _write_private_json(
+            config,
+            {
+                "mcpServers": {
+                    MCP_SERVER_NAME: {
+                        "command": broken[0],
+                        "args": broken[1:],
+                        "cwd": str(arm.workspace),
+                    }
+                }
+            },
+        )
+        argv = _claude_conformance_argv(
+            executable=executable,
+            model=model,
+            prompt=prompt,
+            config=config,
+            allowed_tools="Bash",
+            disallowed_tools="Write,Edit,WebFetch,WebSearch,Task",
+        )
+        environment: Mapping[str, str] | None = {
+            **os.environ,
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+    else:
+        argv = _codex_conformance_argv(
+            executable=executable,
+            model=model,
+            prompt=prompt,
+            workspace=arm.workspace,
+            overrides=_codex_host_overrides(
+                command=broken,
+                workspace=arm.workspace,
+                enabled_tools=(),
+                required=False,
+                shell_tool=True,
+            ),
+            sandbox="workspace-write",
+        )
+        environment = None
+    capture = harness.executor.run(
+        argv,
+        cwd=arm.workspace,
+        env=environment,
+        timeout_seconds=harness.timeout_seconds,
+    )
+    captures = [_stage_capture(harness, f"host/{host}/local-fallback", capture)]
+    if capture.exit_code != 0:
+        _fail(f"{host}.local-fallback", f"session exited {capture.exit_code}")
+    events = _agent_events(capture, field=f"{host}.fallback.stdout")
+    failure = _unavailable_failure(events, capture, field=f"{host}.local-fallback")
+    payload = _fallback_payload(
+        events, expected_digest=status_digest, field=f"{host}.local-fallback"
+    )
+    trial = _host_trial(
+        host=host,
+        scenario="local-fallback",
+        request=_host_request(
+            host=host,
+            scenario="local-fallback",
+            surface={"command": command, "input": arguments},
+            wire=_canonical_bytes({"argv": command, "input": arguments}),
+        ),
+        result={"exitCode": 0, "stdout": payload},
+        failure=failure,
+        exit_code=capture.exit_code,
+        semantic=_normalized_semantic(
+            "local-fallback", payload, field=f"{host}.local-fallback"
+        ),
+    )
+    return trial, captures
+
+
+def _run_host_conformance(
+    *,
+    arm: Arm,
+    harness: Harness,
+    claude: Path,
+    codex: Path,
+    claude_model: str,
+    codex_model: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    proxy = _write_proxy(harness.scratch)
+    proxy_digest, proxy_bytes = _hash_file(proxy)
+    harness.store.write_bytes("host/mcp-capture-proxy.py", proxy.read_bytes())
+    trials: list[dict[str, Any]] = []
+    captures: dict[str, Any] = {
+        "proxy": {"sha256": proxy_digest, "byteCount": proxy_bytes}
+    }
+    mcp_trials, mcp_captures = _run_mcp_host(arm, harness)
+    trials.extend(mcp_trials)
+    captures["mcp"] = mcp_captures
+    cli_trials, cli_captures = _run_cli_host(arm, harness)
+    trials.extend(cli_trials)
+    captures["cli"] = cli_captures
+    status_digest = next(
+        row["semanticDigest"]
+        for row in cli_trials
+        if row["scenario"] == "status"
+    )
+    for host, executable, model in (
+        ("claude", claude, claude_model),
+        ("codex", codex, codex_model),
+    ):
+        host_trials, host_captures = _run_agent_host(
+            host, executable=executable, model=model, arm=arm, harness=harness, proxy=proxy
+        )
+        trials.extend(host_trials)
+        fallback, fallback_captures = _run_agent_fallback(
+            host,
+            executable=executable,
+            model=model,
+            arm=arm,
+            harness=harness,
+            proxy=proxy,
+            status_digest=status_digest,
+        )
+        trials.append(fallback)
+        captures[host] = list(host_captures) + list(fallback_captures)
+    return trials, captures
+
+
+# ---------------------------------------------------------------------------
+# Blinded paired evaluation
+# ---------------------------------------------------------------------------
+
+
+def _safe_component(value: str, *, field: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", value):
+        _fail(field, f"{value!r} is not a safe artifact path component")
+    return value
+
+
+def _prepare_arm(
+    *,
+    name: str,
+    source: Path,
+    runtime: Path,
+    assets: Path,
+    workspace_root: Path,
+    required_paths: Sequence[str],
+) -> Arm:
+    workspace = workspace_root / name / "project"
+    cache = workspace_root / name / "cache"
+    cache.mkdir(parents=True, exist_ok=False)
+    _copy_managed_workspace(source, workspace, required_paths=required_paths)
+    return Arm(name, runtime, assets, workspace, cache)
+
+
+def _assert_evals_withheld(arm: Arm, inventory: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Prove no evaluation byte reached a workspace an agent can read."""
+
+    withheld = {str(row["digest"]) for row in inventory}
+    rows = _inventory(arm.workspace)
+    for row in rows:
+        path = str(row["path"])
+        if path == EVAL_ROOT or path.startswith(EVAL_ROOT + "/"):
+            _fail("evalIsolation", f"{arm.name} retained {path}")
+        if str(row["digest"]) in withheld:
+            _fail("evalIsolation", f"{arm.name} retained evaluation bytes at {path}")
+    return {
+        "arm": arm.name,
+        "fileCount": len(rows),
+        "inventoryDigest": _inventory_digest(rows),
+    }
+
+
+def _blinded_trial(
+    *,
+    host: str,
+    executable: Path,
+    model: str,
+    case: Mapping[str, Any],
+    condition: str,
+    arm: Arm,
+    benchmark_outcome: Mapping[str, Any],
+    harness: Harness,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    case_id = _safe_component(str(case["id"]), field="evalCase.id")
+    request = _blinded_request(case)
+    agent = AGENT_IDENTITIES[host]
+    agent_digest = _go_digest({"agent": agent, "model": model})
+    query_digest = _sha256(str(request["query"]).encode("utf-8"))
+    trial_id = _stable_id("MBE", case_id, condition, agent_digest, query_digest)
+    prefix = f"blinded/{host}/{condition}/{case_id}"
+    scratch = harness.scratch / "blinded" / host / condition / case_id
+    scratch.mkdir(parents=True, exist_ok=False)
+    runner = _run_claude_trial if host == "claude" else _run_codex_trial
+    capture, transcript, invocation = runner(
+        executable=executable,
+        model=model,
+        request=request,
+        condition=condition,
+        workspace=arm.workspace,
+        runtime=arm.runtime,
+        assets=arm.assets,
+        cache=arm.cache,
+        scratch=scratch,
+        executor=harness.executor,
+        timeout_seconds=harness.timeout_seconds,
+    )
+    judgment, scores = _derive_judgment(
+        trial_id=trial_id,
+        eval_case=case,
+        benchmark_outcome=benchmark_outcome,
+        transcript=transcript,
+        workspace=arm.workspace,
+    )
+    outcome = _blinded_case_outcome(
+        case_id=case_id,
+        condition=condition,
+        answerable=_case_answerable(case),
+        agent=agent,
+        model=model,
+        request=request,
+        response=scores["response"],
+        scores=scores,
+        benchmark_outcome_digest=_benchmark_outcome_digest(benchmark_outcome),
+    )
+    if outcome["id"] != trial_id:
+        _fail("blindedCase.id", "trial identity is not reproducible")
+    refs = _stage_capture(harness, prefix, capture)
+    refs["invocation"] = harness.store.write_json(
+        f"{prefix}/invocation.json", invocation
+    ).json()
+    refs["judgment"] = harness.store.write_json(f"{prefix}/judgment.json", judgment).json()
+    refs["trialId"] = trial_id
+    refs["arm"] = arm.name
+    return outcome, judgment, refs
+
+
+def _run_blinded_suite(
+    *,
+    cases: Sequence[Mapping[str, Any]],
+    outcomes: Mapping[str, Mapping[str, Any]],
+    arms: Mapping[str, Arm],
+    harness: Harness,
+    claude: Path,
+    codex: Path,
+    claude_model: str,
+    codex_model: str,
+    tested_host: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    tested: list[dict[str, Any]] = []
+    cross: list[dict[str, Any]] = []
+    refs: list[dict[str, Any]] = []
+    hosts = {
+        "claude": (claude, claude_model),
+        "codex": (codex, codex_model),
+    }
+    for case in cases:
+        case_id = str(case["id"])
+        if case_id not in outcomes:
+            _fail(
+                "blindedEvaluation",
+                f"holdout case {case_id} has no primary-profile benchmark outcome",
+            )
+        for condition in ("legacy", "compiled"):
+            for host, (executable, model) in hosts.items():
+                outcome, _judgment, row = _blinded_trial(
+                    host=host,
+                    executable=executable,
+                    model=model,
+                    case=case,
+                    condition=condition,
+                    arm=arms[condition],
+                    benchmark_outcome=outcomes[case_id],
+                    harness=harness,
+                )
+                row["host"] = host
+                row["condition"] = condition
+                row["caseId"] = case_id
+                refs.append(row)
+                if host == tested_host:
+                    tested.append(outcome)
+                else:
+                    cross.append(outcome)
+    return tested, cross, refs
+
+
+# ---------------------------------------------------------------------------
+# Command line
+# ---------------------------------------------------------------------------
+
+
+def _existing_directory(value: str) -> Path:
+    path = Path(value).expanduser()
+    if path.is_symlink() or not path.is_dir():
+        raise argparse.ArgumentTypeError(f"{value!r} is not a real directory")
+    return path.resolve(strict=True)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="re_discipline_migration_external_evidence",
+        description=(
+            "Capture strict external evidence for a re-discipline 0.7-to-0.8 "
+            "migration: a blinded paired agent evaluation and the host "
+            "conformance matrix."
+        ),
+    )
+    parser.add_argument(
+        "--plugin-repository",
+        required=True,
+        type=_existing_directory,
+        help="clean checkout of the plugin repository holding both runtimes",
+    )
+    parser.add_argument(
+        "--plugin-revision",
+        required=True,
+        help="exact 40-character commit the plugin repository is checked out at",
+    )
+    parser.add_argument(
+        "--project",
+        required=True,
+        type=_existing_directory,
+        help="disposable, already-activated migrated project",
+    )
+    parser.add_argument(
+        "--legacy-project",
+        required=True,
+        type=_existing_directory,
+        help="disposable pre-migration 0.7 checkout of the same project",
+    )
+    parser.add_argument(
+        "--benchmark",
+        required=True,
+        help="project-relative path to the final full project-benchmark-v1 report",
+    )
+    parser.add_argument(
+        "--calibration",
+        required=True,
+        help="project-relative path to the final non-activating calibration report",
+    )
+    parser.add_argument(
+        "--output",
+        required=True,
+        help="evidence output root; the path must not already exist",
+    )
+    parser.add_argument(
+        "--destination-prefix",
+        default=".re-discipline/migration/0.8/evidence",
+        help="project-relative prefix the staged artifacts will occupy",
+    )
+    parser.add_argument("--claude-executable", required=True)
+    parser.add_argument("--codex-executable", required=True)
+    parser.add_argument("--claude-model", required=True)
+    parser.add_argument("--codex-model", required=True)
+    parser.add_argument(
+        "--tested-host",
+        choices=("claude", "codex"),
+        default="claude",
+        help="host whose paired trials become the blinded evaluation cases",
+    )
+    parser.add_argument(
+        "--workspace-root",
+        default="",
+        help="disposable workspace root; a temporary directory is used when empty",
+    )
+    parser.add_argument("--timeout-seconds", type=int, default=900)
+    return parser
+
+
+def _execution_manifest(
+    *,
+    arguments: argparse.Namespace,
+    plugin_binding: Mapping[str, Any],
+    legacy_binding: Mapping[str, Any],
+    executables: Mapping[str, Any],
+    authentication: Mapping[str, Any],
+    eval_inventory: Sequence[Mapping[str, Any]],
+    isolation: Sequence[Mapping[str, Any]],
+    blinded_refs: Sequence[Mapping[str, Any]],
+    cross_cases: Sequence[Mapping[str, Any]],
+    host_captures: Mapping[str, Any],
+    parity: Mapping[str, str],
+    blinded_ref: ArtifactRef,
+    host_ref: ArtifactRef,
+    started_at: str,
+    elapsed_seconds: int,
+) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "suite": EXECUTION_SUITE,
+        "startedAt": started_at,
+        "finishedAt": _utc_now(),
+        "elapsedSeconds": elapsed_seconds,
+        "formal": True,
+        "testedHost": arguments.tested_host,
+        "pluginRepository": dict(plugin_binding),
+        "legacyPluginRevision": dict(legacy_binding),
+        "executables": dict(executables),
+        "authentication": dict(authentication),
+        "withheldEvaluationFiles": [dict(row) for row in eval_inventory],
+        "withheldEvaluationDigest": _inventory_digest(eval_inventory),
+        "workspaceIsolation": [dict(row) for row in isolation],
+        "blindedTrials": [dict(row) for row in blinded_refs],
+        "crossHostCases": [dict(row) for row in cross_cases],
+        "hostCaptures": dict(host_captures),
+        "semanticParity": dict(parity),
+        "artifacts": {
+            "blindedEvaluation": blinded_ref.json(),
+            "hostConformance": host_ref.json(),
+        },
+    }
+
+
+def _execute(arguments: argparse.Namespace) -> int:
+    started_at = _utc_now()
+    started = time.monotonic()
+    if arguments.timeout_seconds < FORMAL_MIN_TIMEOUT:
+        _fail("timeoutSeconds", f"formal mode requires at least {FORMAL_MIN_TIMEOUT}")
+    if not REVISION_RE.fullmatch(arguments.plugin_revision):
+        _fail("pluginRevision", "must be a full lowercase 40-character Git commit")
+    executor: Executor = SubprocessExecutor()
+    _require_formal_executor(executor, formal=True)
+    store = ArtifactStore(Path(arguments.output).expanduser(), arguments.destination_prefix)
+
+    claude = _resolve_executable(arguments.claude_executable, expected="claude")
+    codex = _resolve_executable(arguments.codex_executable, expected="codex")
+    authentication = _check_authentication(
+        claude=claude,
+        codex=codex,
+        executor=executor,
+        cwd=arguments.project,
+        store=store,
+        timeout_seconds=arguments.timeout_seconds,
+    )
+
+    plugin = arguments.plugin_repository
+    plugin_binding = _repo_binding(plugin, arguments.plugin_revision, label="pluginRepository")
+    transaction_id, plan_digest, _state = _migration_identity(arguments.project)
+
+    # The evaluation corpus is read, fingerprinted, and then withheld: no
+    # workspace an agent can reach receives any of these bytes.
+    holdout, eval_inventory = _load_eval_cases(arguments.project)
+    benchmark_path = _contained(arguments.project, arguments.benchmark, field="benchmark")
+    _report, outcomes, benchmark_body = _load_benchmark(benchmark_path)
+    benchmark_digest = _sha256(benchmark_body)
+    calibration_path = _contained(
+        arguments.project, arguments.calibration, field="calibration"
+    )
+    calibration_digest = _sha256(_regular_bytes(calibration_path, field="calibration"))
+    for case in holdout:
+        if str(case["id"]) not in outcomes:
+            _fail("benchmark", f"omits current holdout case {case['id']}")
+    for case_id in outcomes:
+        if case_id not in {str(case["id"]) for case in holdout}:
+            _fail("evalRoot", f"benchmark holdout {case_id} is not in the corpus")
+
+    workspace_root = (
+        Path(arguments.workspace_root).expanduser()
+        if arguments.workspace_root
+        else Path(tempfile.mkdtemp(prefix="re-discipline-external-evidence-"))
+    )
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    scratch = workspace_root / "scratch"
+    scratch.mkdir(parents=True, exist_ok=False)
+
+    legacy_revision = _find_legacy_plugin_revision(plugin, arguments.plugin_revision)
+    legacy_plugin = workspace_root / "legacy-plugin"
+    legacy_binding = _clone_exact(
+        plugin, legacy_revision, legacy_plugin, timeout_seconds=arguments.timeout_seconds
+    )
+    current_runtime = _runtime_path(plugin)
+    legacy_runtime = _runtime_path(legacy_plugin)
+    current_assets = plugin / Path(*PurePosixPath(CURRENT_ASSETS).parts)
+    legacy_assets = legacy_plugin / Path(*PurePosixPath(CURRENT_ASSETS).parts)
+
+    compiled = _prepare_arm(
+        name="compiled",
+        source=arguments.project,
+        runtime=current_runtime,
+        assets=current_assets,
+        workspace_root=workspace_root,
+        required_paths=_workspace_required_paths(holdout),
+    )
+    legacy = _prepare_arm(
+        name="legacy",
+        source=arguments.legacy_project,
+        runtime=legacy_runtime,
+        assets=legacy_assets,
+        workspace_root=workspace_root,
+        required_paths=(),
+    )
+    isolation = [
+        _assert_evals_withheld(compiled, eval_inventory),
+        _assert_evals_withheld(legacy, eval_inventory),
+    ]
+
+    harness = Harness(store, executor, scratch, arguments.timeout_seconds)
+    executables = {
+        "claude": _executable_identity(
+            key="claude",
+            path=claude,
+            version_argv=[str(claude), "--version"],
+            executor=executor,
+            cwd=compiled.workspace,
+            store=store,
+            timeout_seconds=arguments.timeout_seconds,
+        ),
+        "codex": _executable_identity(
+            key="codex",
+            path=codex,
+            version_argv=[str(codex), "--version"],
+            executor=executor,
+            cwd=compiled.workspace,
+            store=store,
+            timeout_seconds=arguments.timeout_seconds,
+        ),
+        "current-runtime": _executable_identity(
+            key="current-runtime",
+            path=current_runtime,
+            version_argv=[
+                str(current_runtime),
+                "status",
+                "--asset-root",
+                str(current_assets),
+                "--project-root",
+                str(compiled.workspace),
+            ],
+            executor=executor,
+            cwd=compiled.workspace,
+            store=store,
+            timeout_seconds=arguments.timeout_seconds,
+        ),
+        "legacy-runtime": _executable_identity(
+            key="legacy-runtime",
+            path=legacy_runtime,
+            version_argv=[
+                str(legacy_runtime),
+                "status",
+                "--asset-root",
+                str(legacy_assets),
+                "--project-root",
+                str(legacy.workspace),
+            ],
+            executor=executor,
+            cwd=legacy.workspace,
+            store=store,
+            timeout_seconds=arguments.timeout_seconds,
+        ),
+    }
+
+    tested_cases, cross_cases, blinded_refs = _run_blinded_suite(
+        cases=holdout,
+        outcomes=outcomes,
+        arms={"compiled": compiled, "legacy": legacy},
+        harness=harness,
+        claude=claude,
+        codex=codex,
+        claude_model=arguments.claude_model,
+        codex_model=arguments.codex_model,
+        tested_host=arguments.tested_host,
+    )
+    cross_host = "codex" if arguments.tested_host == "claude" else "claude"
+    cross_model = (
+        arguments.codex_model if cross_host == "codex" else arguments.claude_model
+    )
+    evaluator = f"{AGENT_IDENTITIES[cross_host]}:{cross_model}"
+    evaluation = _seal_blinded_evaluation(
+        transaction_id=transaction_id,
+        plan_digest=plan_digest,
+        benchmark_digest=benchmark_digest,
+        calibration_digest=calibration_digest,
+        evaluator=evaluator,
+        cases=tested_cases,
+    )
+    store.write_json("blinded/cross-host-trials.json", cross_cases)
+
+    trials, host_captures = _run_host_conformance(
+        arm=compiled,
+        harness=harness,
+        claude=claude,
+        codex=codex,
+        claude_model=arguments.claude_model,
+        codex_model=arguments.codex_model,
+    )
+    parity = _assert_semantic_parity(trials)
+    conformance = _seal_host_conformance(
+        transaction_id=transaction_id, plan_digest=plan_digest, trials=trials
+    )
+
+    blinded_ref = store.write_json(
+        "migration-blinded-agent-evaluation.json", evaluation
+    )
+    host_ref = store.write_json("migration-host-conformance.json", conformance)
+    manifest = _execution_manifest(
+        arguments=arguments,
+        plugin_binding=plugin_binding,
+        legacy_binding={"revision": legacy_revision, **legacy_binding},
+        executables=executables,
+        authentication=authentication,
+        eval_inventory=eval_inventory,
+        isolation=isolation,
+        blinded_refs=blinded_refs,
+        cross_cases=cross_cases,
+        host_captures=host_captures,
+        parity=parity,
+        blinded_ref=blinded_ref,
+        host_ref=host_ref,
+        started_at=started_at,
+        elapsed_seconds=int(time.monotonic() - started),
+    )
+    manifest_ref = store.write_json("execution-manifest.json", manifest)
+    store.write_json("copy-map.json", store.copy_map())
+
+    for label, reference in (
+        ("blindedEvaluation", blinded_ref),
+        ("hostConformance", host_ref),
+        ("executionManifest", manifest_ref),
+    ):
+        print(f"{label} destination {reference.path}")
+        print(f"{label} staged {store.physical_path(reference)}")
+        print(f"{label} sha256 {reference.digest}")
+    if not evaluation["passed"] or not conformance["passed"]:
+        _fail(
+            "certification",
+            "measured evidence does not support a passing gate; the artifacts "
+            "record exactly what was observed",
+        )
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = _parser().parse_args(list(argv) if argv is not None else None)
+    try:
+        return _execute(arguments)
+    except EvidenceError as error:
+        print(f"external evidence failed: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

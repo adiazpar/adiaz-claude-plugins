@@ -76,6 +76,7 @@ type MigrationBlindedAgentCaseOutcome struct {
 	AgentDigest            string                        `json:"agentDigest"`
 	QueryDigest            string                        `json:"queryDigest"`
 	BenchmarkOutcomeDigest string                        `json:"benchmarkOutcomeDigest"`
+	Answerable             bool                          `json:"answerable"`
 	Request                MigrationBlindedAgentRequest  `json:"request"`
 	Response               MigrationBlindedAgentResponse `json:"response"`
 	ResponseDigest         string                        `json:"responseDigest"`
@@ -164,6 +165,23 @@ func migrationCanonicalRawDigest(body json.RawMessage) (string, any, error) {
 // SealMigrationBlindedAgentCaseOutcome derives every identity and digest in a
 // captured blinded trial. It does not judge comparative non-inferiority; the
 // gate verifier performs that check over the complete paired suite.
+
+// migrationBlindedAnswerShapeCorrect reports whether a trial's answer shape
+// matches what the case asks for. An answerable case must produce claims and
+// citations. An abstention case is correct precisely when it produces neither:
+// scoring abstentions by the answerable rule made a correct refusal
+// indistinguishable from a failure, so a corpus with abstention holdouts could
+// never satisfy the gate.
+func migrationBlindedAnswerShapeCorrect(
+	response MigrationBlindedAgentResponse,
+	answerable bool,
+) bool {
+	if answerable {
+		return len(response.AnswerClaims) > 0 && len(response.Citations) > 0
+	}
+	return len(response.AnswerClaims) == 0 && len(response.Citations) == 0
+}
+
 func SealMigrationBlindedAgentCaseOutcome(
 	outcome *MigrationBlindedAgentCaseOutcome,
 ) error {
@@ -187,7 +205,7 @@ func SealMigrationBlindedAgentCaseOutcome(
 		outcome.AgentDigest, outcome.QueryDigest)
 	outcome.Passed = outcome.UnsupportedClaims == 0 && outcome.EvidenceTracePassed &&
 		outcome.FactualAccuracy >= 0.5 && outcome.DecisionAccuracy >= 0.5 &&
-		len(outcome.Response.AnswerClaims) > 0 && len(outcome.Response.Citations) > 0
+		migrationBlindedAnswerShapeCorrect(outcome.Response, outcome.Answerable)
 	outcome.Digest = ""
 	outcome.Digest, err = CanonicalDigest(*outcome)
 	return err
@@ -857,9 +875,13 @@ func validateMigrationBlindedCaseOutcome(
 	queryDigest := "sha256:" + SHA256String(outcome.Request.Query)
 	responseDigest, _ := CanonicalDigest(outcome.Response)
 	wantID := StableID("MBE", outcome.CaseID, outcome.Condition, agentDigest, queryDigest)
+	answerable := eval.Answerable == nil || *eval.Answerable
+	if outcome.Answerable != answerable {
+		return errors.New("trial answerability does not match its canonical evaluation case")
+	}
 	derivedPass := outcome.UnsupportedClaims == 0 && outcome.EvidenceTracePassed &&
 		outcome.FactualAccuracy >= 0.5 && outcome.DecisionAccuracy >= 0.5 &&
-		len(outcome.Response.AnswerClaims) > 0 && len(outcome.Response.Citations) > 0
+		migrationBlindedAnswerShapeCorrect(outcome.Response, answerable)
 	if outcome.ID != wantID || outcome.AgentDigest != agentDigest || outcome.QueryDigest != queryDigest ||
 		outcome.BenchmarkOutcomeDigest != benchmarkOutcomeDigest ||
 		outcome.ResponseDigest != responseDigest || outcome.Passed != derivedPass {
