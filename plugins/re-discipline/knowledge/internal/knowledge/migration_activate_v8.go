@@ -1054,14 +1054,34 @@ func (engine *MigrationEngine) stageLegacyTruthConversions(
 		}
 		rows := plans[source.Path]
 		if len(rows) == 0 {
-			return fmt.Errorf("legacy truth %s lacks an exact manager-approved conversion plan", source.Path)
+			return fmt.Errorf(
+				"legacy truth %s lacks an exact manager-approved conversion plan (planRows=%d mappedSources=%d)",
+				source.Path, len(plan.TruthConversions), len(plans))
 		}
 		for index, truthPlan := range rows {
-			if truthPlan.SourceDigest != "sha256:"+source.SHA256 || truthPlan.SplitIndex != index+1 ||
-				truthPlan.SplitCount != len(rows) || truthPlan.Claim == "" || len([]rune(truthPlan.Claim)) > 500 ||
-				!reflect.DeepEqual(truthPlan.LegacyDependencies, legacyTruthDependencyPaths(body, source.Path)) ||
-				len(truthPlan.SyntheticQuestions) < SyntheticQuestionMinimum {
-				return fmt.Errorf("legacy truth %s lacks an exact manager-approved conversion plan", source.Path)
+			// Name the exact field that diverged. A generic "lacks a plan"
+			// message sent readers hunting for a missing review when the plan
+			// was present and one bound value disagreed.
+			mismatch := ""
+			switch {
+			case truthPlan.SourceDigest != "sha256:"+source.SHA256:
+				mismatch = "source digest"
+			case truthPlan.SplitIndex != index+1:
+				mismatch = "split index"
+			case truthPlan.SplitCount != len(rows):
+				mismatch = "split count"
+			case truthPlan.Claim == "" || len([]rune(truthPlan.Claim)) > 500:
+				mismatch = "atomic claim bound"
+			case !reflect.DeepEqual(
+				truthPlan.LegacyDependencies, legacyTruthDependencyPaths(body, source.Path)):
+				mismatch = "legacy dependency set"
+			case len(truthPlan.SyntheticQuestions) < SyntheticQuestionMinimum:
+				mismatch = "reviewed question count"
+			}
+			if mismatch != "" {
+				return fmt.Errorf(
+					"legacy truth %s conversion row %d does not match its manager-approved plan: %s",
+					source.Path, index+1, mismatch)
 			}
 		}
 	}
@@ -1212,6 +1232,10 @@ func normalizeRunFiles(files []RunFile) []RunFile {
 }
 
 func legacyTruthAtomicClaim(body []byte) string {
+	// Match the reviewed claim extractor, which normalizes line endings
+	// before parsing; a CRLF checkout otherwise yields a longer claim here
+	// than the conflict detector measured.
+	body = []byte(normalizeDocumentLineEndings(string(body)))
 	if match := preludeClaimRE.FindSubmatch(body); len(match) > 1 {
 		claim := normalizePreludeField(string(match[1]))
 		if claim != "" {

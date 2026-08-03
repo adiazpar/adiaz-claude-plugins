@@ -142,6 +142,11 @@ func ExtractReportPrelude(body, path string) DocumentPrelude {
 // no Claim block, and degrade to a title-only prelude of 8-15 tokens. path is
 // the title fallback for a document with no heading.
 func ExtractDocumentPrelude(body, path string) DocumentPrelude {
+	// Every prelude pattern below anchors on LF paragraph and line breaks. A
+	// CRLF checkout -- the Windows default -- would otherwise defeat the
+	// blank-line terminators and let a claim run far past its paragraph,
+	// disagreeing with the reviewed claim extractor, which normalizes first.
+	body = normalizeDocumentLineEndings(body)
 	prelude := DocumentPrelude{Title: normalizePreludeField(titleFromMarkdown(body, path))}
 
 	if match := preludeSupersededByRE.FindStringSubmatch(body); match != nil {
@@ -245,4 +250,13 @@ func (prelude DocumentPrelude) Render() string {
 			return cut
 		}
 	}
+}
+
+// normalizeDocumentLineEndings converts CRLF and lone CR to LF so
+// line-anchored document parsing is identical on every checkout.
+func normalizeDocumentLineEndings(body string) string {
+	if !strings.ContainsRune(body, '\r') {
+		return body
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\r", "\n")
 }
