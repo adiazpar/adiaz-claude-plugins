@@ -735,7 +735,6 @@ def _validate_current_matrix(
         "schemaVersion": 1,
         "mode": "full",
         "suite": "project-benchmark-v1",
-        "requestedProfile": "plugin:balanced-v1",
         "complete": True,
         "unsupportedProfiles": [],
         "evalFingerprint": eval_fingerprint,
@@ -743,6 +742,17 @@ def _validate_current_matrix(
     for field, value in expected.items():
         if raw.get(field) != value:
             _fail(f"rawBenchmark.{field}", f"must equal {value!r}")
+    # The runtime reports the requested identity as the catalog id plus its
+    # semantic digest; the catalog bytes themselves are captured beside the
+    # receipt, so the digest suffix is validated by shape here.
+    requested_profile = str(raw.get("requestedProfile"))
+    if not re.fullmatch(
+        r"plugin:balanced-v1@sha256:[0-9a-f]{64}", requested_profile
+    ):
+        _fail(
+            "rawBenchmark.requestedProfile",
+            "must be plugin:balanced-v1 with its semantic catalog digest",
+        )
     generation = raw.get("generation")
     if not isinstance(generation, dict):
         _fail("rawBenchmark.generation", "must be an object")
