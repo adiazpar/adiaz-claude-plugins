@@ -55,6 +55,11 @@ type sourceClass struct {
 	Enabled       bool
 	SourceKind    string
 	ExcludePrefix string
+	// RequireSegment restricts a class to paths containing this exact
+	// slash-delimited segment sequence. Migration preserves legacy documents
+	// under a run's payload, where a filename pattern cannot distinguish them
+	// from unrelated payload.
+	RequireSegment string
 }
 
 func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInventory, error) {
@@ -108,6 +113,23 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		{
 			Path: "docs/history/campaigns", Tier: "archive", Recursive: true, BaseOnly: "report.md",
 			SourceKind: "raw-report", Enabled: settings.Sources.ReportFallback,
+		},
+		// Migration preserves each converted truth document verbatim under its
+		// import run. A finding carries the reviewed claim and a handful of
+		// reviewed questions, which is far less text than the document it
+		// replaced, so a question phrased against the original prose loses its
+		// only match. The preserved bytes stay searchable at archive tier for
+		// the same reason run reports do: provenance ranks below normalized
+		// findings but must never become unreachable.
+		{
+			Path: "active", Tier: "archive", Recursive: true,
+			RequireSegment: "/payload/legacy/truth/",
+			SourceKind:     "raw-report", Enabled: settings.Sources.ReportFallback,
+		},
+		{
+			Path: "docs/history/campaigns", Tier: "archive", Recursive: true,
+			RequireSegment: "/payload/legacy/truth/",
+			SourceKind:     "raw-report", Enabled: settings.Sources.ReportFallback,
 		},
 		{Path: ".re-discipline/memory/INDEX.md", Tier: "navigation", Enabled: settings.Sources.SharedMemory},
 		{Path: ".re-discipline/memory/topics", Tier: "memory", Recursive: true, Enabled: settings.Sources.SharedMemory},
@@ -212,6 +234,13 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			}
 			if class.BaseOnly != "" && !strings.EqualFold(entry.Name(), class.BaseOnly) {
 				return nil
+			}
+			if class.RequireSegment != "" {
+				relative, relErr := filepath.Rel(boundary.Root, path)
+				if relErr != nil ||
+					!strings.Contains(filepath.ToSlash(relative), class.RequireSegment) {
+					return nil
+				}
 			}
 			if class.Pattern != "" {
 				matches, matchErr := filepath.Match(class.Pattern, entry.Name())
