@@ -441,6 +441,11 @@ def _package_entry_path(
 
 
 def _verify_package(plugin: Path) -> dict[str, Any]:
+    # Contained paths are built on the resolved root, so every relative
+    # projection below must use the same resolved form; an unresolved
+    # temporary directory differs through macOS /var symlinks and Windows
+    # 8.3 short names.
+    plugin = plugin.resolve(strict=True)
     manifest_path = _contained(plugin, PACKAGE_MANIFEST, field="package.manifest")
     sums_path = _contained(plugin, PACKAGE_SUMS, field="package.sums")
     manifest = _read_json(manifest_path)
