@@ -8,3 +8,4 @@ plugins/re-discipline/knowledge/bin/**/*.exe binary
 plugins/re-discipline/knowledge/bin/re-discipline-knowledge text eol=lf
 plugins/re-discipline/knowledge/bin/*/re-discipline-knowledge binary
 plugins/re-discipline/knowledge/bin/SHA256SUMS text eol=lf
+plugins/re-discipline/knowledge/evals/conformance/evidence/*.zip binary
