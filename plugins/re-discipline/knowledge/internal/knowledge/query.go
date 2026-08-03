@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Query is the 0.8 finding-card retrieval entry point shared by MCP and CLI.
@@ -32,10 +33,53 @@ func (service *Service) Query(ctx context.Context, options FindingQueryOptions) 
 	// an explicit raw expansion through IncludeRaw, but cannot supply or bypass
 	// the receipt that decides whether raw is the default lane.
 	options.ArchivePolicy = policy
-	return (Retriever{
+	tracker := service.archiveTracker
+	if strings.TrimSpace(options.ContextLeaseID) != "" {
+		// A lease decides which raw cards actually reach the caller. Delay
+		// fallback serve accounting until after dedup so a suppressed repeat
+		// cannot falsely advance the normalization threshold.
+		tracker = nil
+	}
+	response, err := (Retriever{
 		Boundary: service.Boundary, Generation: generation, Profile: selected,
-		ArchiveTracker: service.archiveTracker,
+		ArchiveTracker: tracker,
 	}).QueryFindingCards(ctx, options)
+	if err != nil {
+		return FindingQueryResponse{}, err
+	}
+	response, err = service.applyContextLease(response, options, generation.ID)
+	if err != nil {
+		return FindingQueryResponse{}, err
+	}
+	if tracker == nil && service.archiveTracker != nil {
+		for _, card := range response.Cards {
+			if card.CardType != "raw-report" {
+				continue
+			}
+			digest := card.Metadata["digest"]
+			requestID := options.RequestID
+			if requestID == "" {
+				requestID = StableID("query", generation.ID, options.Query)
+			}
+			source, sourceErr := normalizationSourceForReport(
+				service.Boundary, card.Metadata["path"], digest)
+			if sourceErr != nil {
+				return FindingQueryResponse{}, sourceErr
+			}
+			event, recordErr := service.archiveTracker.RecordSource(digest, requestID, source)
+			if recordErr != nil {
+				return FindingQueryResponse{}, recordErr
+			}
+			response.Trace.ArchiveServes = append(response.Trace.ArchiveServes, event)
+			if event.NormalizationSuggested {
+				response.Trace.NormalizationSuggestions = append(
+					response.Trace.NormalizationSuggestions, event.ReportDigest)
+			}
+		}
+		response.Trace.NormalizationSuggestions = SortedUnique(
+			response.Trace.NormalizationSuggestions)
+	}
+	return response, nil
 }
 
 func (service *Service) configuredArchiveFallbackPolicy() (ArchiveFallbackPolicy, error) {
@@ -48,7 +92,7 @@ func (service *Service) configuredArchiveFallbackPolicy() (ArchiveFallbackPolicy
 	if mode != "opt-in" {
 		return policy, nil
 	}
-	receipt, err := LoadNormalizedBeatsRawReceipt(
+	receipt, report, err := LoadNormalizedBeatsRawReceipt(
 		service.Boundary, settings.Archive.NormalizedBeatsRawReceipt)
 	if err != nil {
 		return ArchiveFallbackPolicy{}, fmt.Errorf(
@@ -73,7 +117,12 @@ func (service *Service) configuredArchiveFallbackPolicy() (ArchiveFallbackPolicy
 	if err := validateArchiveReceiptSuiteBinding(receipt, *boundSuite); err != nil {
 		return ArchiveFallbackPolicy{}, err
 	}
+	if err := validateNormalizedRawGateReportForSuite(report, *boundSuite); err != nil {
+		return ArchiveFallbackPolicy{}, fmt.Errorf(
+			"validate receipt-bound normalized-vs-raw report: %w", err)
+	}
 	policy.Receipt = &receipt
+	policy.Report = &report
 	return policy, nil
 }
 

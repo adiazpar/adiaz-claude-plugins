@@ -16,6 +16,8 @@ const (
 	denseExpandedMinimum  = 100
 )
 
+// modelTokens is the shared lexical tokenizer used by FTS-adjacent ranking,
+// bounded provenance admission, and deterministic embedding preprocessing.
 func modelTokens(value string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
 		return !(unicode.IsLetter(r) || unicode.IsDigit(r) ||
@@ -36,6 +38,9 @@ func modelTokens(value string) []string {
 	return out
 }
 
+// The feature-hash implementation remains available only for package-internal
+// diagnostic fixtures. Production selects the exact bundled GloVe identity
+// declared in models/manifest.json.
 func featureHashVector(value string) [featureDimensions]int32 {
 	var vector [featureDimensions]int32
 	for _, token := range modelTokens(value) {
@@ -116,45 +121,4 @@ func signatureNeighbors(signature uint16, distance int) []uint16 {
 		}
 	}
 	return values
-}
-
-func linearRerank(query string, chunk Chunk) int64 {
-	queryLower := strings.ToLower(strings.TrimSpace(query))
-	contentLower := strings.ToLower(chunk.Content)
-	headingLower := strings.ToLower(chunk.Heading)
-	pathLower := strings.ToLower(chunk.Path)
-	var score int64
-	if queryLower != "" {
-		score += int64(strings.Count(contentLower, queryLower)) * 10000
-		score += int64(strings.Count(headingLower, queryLower)) * 6000
-		score += int64(strings.Count(pathLower, queryLower)) * 4000
-	}
-	queryTokens := SortedUnique(modelTokens(query))
-	if len(queryTokens) == 0 {
-		return score
-	}
-	contentTokens := make(map[string]bool)
-	for _, token := range modelTokens(chunk.Content) {
-		contentTokens[token] = true
-	}
-	headingTokens := make(map[string]bool)
-	for _, token := range modelTokens(chunk.Heading) {
-		headingTokens[token] = true
-	}
-	pathTokens := make(map[string]bool)
-	for _, token := range modelTokens(chunk.Path) {
-		pathTokens[token] = true
-	}
-	for _, token := range queryTokens {
-		if contentTokens[token] {
-			score += 1000
-		}
-		if headingTokens[token] {
-			score += 1500
-		}
-		if pathTokens[token] {
-			score += 1200
-		}
-	}
-	return score
 }

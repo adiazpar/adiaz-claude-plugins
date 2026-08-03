@@ -1,0 +1,832 @@
+{
+    "schemaVersion":  2,
+    "suite":  "packaged-conformance-v1",
+    "evaluatedAt":  "2026-08-03T05:05:27Z",
+    "sourceRevision":  "215964342378678eaba3249fe0ae284c3a0622a4",
+    "evalFingerprint":  "sha256:ff013336e932a13c1f4a1c10324bc7fe73b65621df668e01852e003a42cef7c2",
+    "corpusFingerprint":  "sha256:1d3eecd4438609628e0ffe734f5579f1678a844daee23f9af0e7da9db85686ac",
+    "runtimeFingerprint":  "sha256:09a0a5e3723bc26e772a22720e40896d1218077210f8b62ca1299a10c6d9c8c1",
+    "parserVersion":  "markdown-finding-v2-identifier-v1",
+    "chunkerVersion":  "section-block-v5-1400-byte-safe",
+    "profiles":  [
+                     {
+                         "role":  "baseline",
+                         "name":  "lexical-graph-v1",
+                         "lanes":  [
+                                       "exact",
+                                       "fts",
+                                       "graph"
+                                   ],
+                         "benchmarkDigest":  "sha256:e1c8e7cbd28f347b422a8a90d09d0d50356c220374718c59480f08b7a1d95606",
+                         "modelFingerprint":  "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                     },
+                     {
+                         "role":  "dense",
+                         "name":  "hybrid-no-rerank-v1",
+                         "lanes":  [
+                                       "exact",
+                                       "fts",
+                                       "graph",
+                                       "dense"
+                                   ],
+                         "benchmarkDigest":  "sha256:05067d7a87cfb77474d7b5824db8655cd8a2292e82119e0fa7a0af6876e92870",
+                         "modelFingerprint":  "sha256:f8654dc6bc0274fcc627476617fdd445626ca9e17c7d1717669e6deccaecb7be"
+                     },
+                     {
+                         "role":  "rerank",
+                         "name":  "hybrid-local-v1",
+                         "lanes":  [
+                                       "exact",
+                                       "fts",
+                                       "graph",
+                                       "dense",
+                                       "rerank"
+                                   ],
+                         "benchmarkDigest":  "sha256:24d472d97fd5490ad9046acec439d9feb18c9f1a27ddc5071f2738e6a1e6a3fa",
+                         "modelFingerprint":  "sha256:3f17d9c1525d5412b21302ac021dbbde2ceae029c49226cfa7bcbf2a7111f700"
+                     }
+                 ],
+    "models":  [
+                   {
+                       "id":  "builtin:glove-6b-50d-top50k-q8-v1",
+                       "role":  "embedding",
+                       "revision":  "1",
+                       "implementation":  "bundled-local",
+                       "specSha256":  "2cdb94f94891907db8bdba40148dc6052b7d2cddacf868bb563092255ef1319a",
+                       "artifactSha256":  "fb108eef095f00bcc06a38e10d7f9671d9e6664ab79ae8a2c1cef5b31375b2ab"
+                   },
+                   {
+                       "id":  "builtin:linear-reranker-v1",
+                       "role":  "reranker",
+                       "revision":  "1",
+                       "implementation":  "builtin",
+                       "specSha256":  "4deaafbfeb3aaa7c90b466cf20d7c206c735260e898f8d739ad98c281f6acdd1"
+                   }
+               ],
+    "cases":  [
+                  {
+                      "caseId":  "finding-0201-01",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0201"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0201"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0201"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0201-02",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0201"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0201"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0201"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0201-03",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0201"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0201"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0201"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0201-04",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0201"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0201"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0201"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0202-01",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0202"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0202"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0202"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0202-02",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0202"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0202"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0202"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0202-03",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0202"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0202"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0202"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0202-04",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0202"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0202"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0202"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0203-01",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0203"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0203"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0203"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0203-02",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0203"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0203"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0203"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0203-03",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0203"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0203"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0203"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0203-04",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0203"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0203"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0203"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0204-01",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0204"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0204"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0204"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0204-02",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0204"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0204"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0204"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0204-03",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0204"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0204"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0204"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0204-04",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0204"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0204"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0204"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0205-01",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0205"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0205"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0205"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0205-02",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0205"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0205"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0205"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0205-03",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0205"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0205"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0205"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-0205-04",
+                      "baseline":  {
+                                       "relevantHit":  true,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  1,
+                                       "findingIds":  [
+                                                          "F-0205"
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  true,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  1,
+                                    "findingIds":  [
+                                                       "F-0205"
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  true,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  1,
+                                     "findingIds":  [
+                                                        "F-0205"
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-holdout-abstain-01",
+                      "baseline":  {
+                                       "relevantHit":  false,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  0,
+                                       "findingIds":  [
+
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  false,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  0,
+                                    "findingIds":  [
+
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  false,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  0,
+                                     "findingIds":  [
+
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-holdout-abstain-02",
+                      "baseline":  {
+                                       "relevantHit":  false,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  0,
+                                       "findingIds":  [
+
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  false,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  0,
+                                    "findingIds":  [
+
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  false,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  0,
+                                     "findingIds":  [
+
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-holdout-abstain-03",
+                      "baseline":  {
+                                       "relevantHit":  false,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  0,
+                                       "findingIds":  [
+
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  false,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  0,
+                                    "findingIds":  [
+
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  false,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  0,
+                                     "findingIds":  [
+
+                                                    ]
+                                 }
+                  },
+                  {
+                      "caseId":  "finding-holdout-abstain-04",
+                      "baseline":  {
+                                       "relevantHit":  false,
+                                       "uniqueFirst":  false,
+                                       "relevantRank":  0,
+                                       "findingIds":  [
+
+                                                      ]
+                                   },
+                      "dense":  {
+                                    "relevantHit":  false,
+                                    "uniqueFirst":  false,
+                                    "relevantRank":  0,
+                                    "findingIds":  [
+
+                                                   ]
+                                },
+                      "rerank":  {
+                                     "relevantHit":  false,
+                                     "uniqueFirst":  false,
+                                     "relevantRank":  0,
+                                     "findingIds":  [
+
+                                                    ]
+                                 }
+                  }
+              ],
+    "projectEvidence":  {
+                            "suite":  "project-benchmark-v1",
+                            "project":  "snaphak-re",
+                            "status":  "preliminary-final-corpus-rerun-required",
+                            "evaluatedAt":  "2026-08-03T05:26:23Z",
+                            "frozenSourceRevision":  "215964342378678eaba3249fe0ae284c3a0622a4",
+                            "rawBenchmarkSha256":  "sha256:dba42def35dd17cc6061431744aacb51f2d6964d65803d80093119c27e9d07d3",
+                            "rawBenchmarkRunId":  "benchmark-20260803T052623.839151600Z",
+                            "complete":  true,
+                            "armCount":  3,
+                            "casesPerArm":  64,
+                            "corpusFingerprint":  "sha256:5390b6c857d9d9ec3f441634b924aadad4d101de437ac887e18429095fa35a72",
+                            "evalFingerprint":  "sha256:c9fc3157b2a38a430a0d0fd6ddd7a76c9cdae4611d5b419d0c3eef665270a878",
+                            "projectionTransformDigest":  "sha256:17f10bb715977044382618f1e67351161fc708956f8fc9b1bccaf301f0487f37",
+                            "indexedSourceBytesUnchanged":  true,
+                            "sharedHardGateFailures":  1,
+                            "denseAddedHardGateRegressions":  0,
+                            "rerankAddedHardGateRegressions":  0,
+                            "dense":  {
+                                          "rescues":  2,
+                                          "losses":  0,
+                                          "rankImprovements":  2,
+                                          "rankDegradations":  1,
+                                          "overallRecallDelta":  0.0344827586206897,
+                                          "holdoutRecallDelta":  0.0689655172413793,
+                                          "overallCompleteEvidenceDelta":  0.03125,
+                                          "holdoutCompleteEvidenceDelta":  0.0625
+                                      },
+                            "rerank":  {
+                                           "rescues":  0,
+                                           "losses":  0,
+                                           "rankImprovements":  0,
+                                           "rankDegradations":  0,
+                                           "pathsChanged":  4
+                                       },
+                            "rescueCases":  [
+                                                {
+                                                    "caseId":  "history-md6-authored-geometry-live-proof",
+                                                    "split":  "holdout",
+                                                    "topic":  "history-validation",
+                                                    "targetPath":  "docs/history/chronicles/2026-07-18-md6-encoder.md",
+                                                    "baselineRelevantRank":  0,
+                                                    "denseRelevantRank":  1,
+                                                    "targetDisjoint":  true,
+                                                    "sourceClass":  "history",
+                                                    "addedHardGateRegressions":  0
+                                                },
+                                                {
+                                                    "caseId":  "history-retrieval-budget-gate-debugging",
+                                                    "split":  "holdout",
+                                                    "topic":  "history-validation",
+                                                    "targetPath":  "docs/history/chronicles/2026-07-27-retrieval-calibration.md",
+                                                    "baselineRelevantRank":  0,
+                                                    "denseRelevantRank":  3,
+                                                    "targetDisjoint":  true,
+                                                    "sourceClass":  "history",
+                                                    "addedHardGateRegressions":  0
+                                                }
+                                            ],
+                            "uncertainty":  {
+                                                "wilsonIntervals":  [
+                                                                         {
+                                                                             "slice":  "all-cases",
+                                                                             "successes":  2,
+                                                                             "trials":  64,
+                                                                             "estimate":  0.03125,
+                                                                             "lower":  0.008612138346171874,
+                                                                             "upper":  0.10697291770958313
+                                                                         },
+                                                                         {
+                                                                             "slice":  "answerable-cases",
+                                                                             "successes":  2,
+                                                                             "trials":  58,
+                                                                             "estimate":  0.034482758620689655,
+                                                                             "lower":  0.009507928331165413,
+                                                                             "upper":  0.11729145464312694
+                                                                         },
+                                                                         {
+                                                                             "slice":  "holdout-cases",
+                                                                             "successes":  2,
+                                                                             "trials":  32,
+                                                                             "estimate":  0.0625,
+                                                                             "lower":  0.017310567031640967,
+                                                                             "upper":  0.2014712314415458
+                                                                         },
+                                                                         {
+                                                                             "slice":  "target-disjoint-holdout",
+                                                                             "successes":  2,
+                                                                             "trials":  10,
+                                                                             "estimate":  0.2,
+                                                                             "lower":  0.05668215145437519,
+                                                                             "upper":  0.5098375284633583
+                                                                         },
+                                                                         {
+                                                                             "slice":  "rerank-all-cases",
+                                                                             "successes":  0,
+                                                                             "trials":  64,
+                                                                             "estimate":  0,
+                                                                             "lower":  0,
+                                                                             "upper":  0.05662405979280534
+                                                                         }
+                                                                     ],
+                                                "topicBootstrap":  {
+                                                                       "replicates":  10000,
+                                                                       "pointEstimate":  0.0344827586206897,
+                                                                       "lower":  0,
+                                                                       "upper":  0.1224,
+                                                                       "zeroOrLowerFraction":  0.3532
+                                                                   },
+                                                "leaveOneTopicOutZeroWhenOmitting":  [
+                                                                                        "history-validation"
+                                                                                    ],
+                                                "clusterFragile":  true,
+                                                "finalCorpusRerunRequired":  true
+                                            }
+                        }
+}

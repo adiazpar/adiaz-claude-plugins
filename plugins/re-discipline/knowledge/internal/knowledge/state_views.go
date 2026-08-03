@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type StateRequest struct {
@@ -74,17 +75,18 @@ func compileStateView(
 		Cards: []ContextCard{}, Omissions: []string{}, Expansions: []string{},
 		Status: "ok",
 	}
+	asOf := store.Now().UTC()
 	switch request.Mode {
 	case "orient":
-		err = compileOrientState(store, configuration, warnings, head, &view)
+		err = compileOrientState(store, configuration, warnings, head, asOf, &view)
 	case "resume":
-		err = compileResumeState(store, request.CampaignID, &view)
+		err = compileResumeState(store, request.CampaignID, asOf, &view)
 	case "work":
-		err = compileWorkState(store, request.CampaignID, request.WorkItemID, &view)
+		err = compileWorkState(store, request.CampaignID, request.WorkItemID, asOf, &view)
 	case "delta":
 		err = compileDeltaState(store, request.CampaignID, request.SinceEventID, &view)
 	case "closure":
-		err = compileClosureState(store, request.CampaignID, &view)
+		err = compileClosureState(store, request.CampaignID, asOf, &view)
 	}
 	if err != nil {
 		return StateView{}, err
@@ -113,6 +115,7 @@ func compileOrientState(
 	configuration Configuration,
 	warnings []string,
 	head StateHead,
+	asOf time.Time,
 	view *StateView,
 ) error {
 	health := ContextCard{
@@ -152,10 +155,22 @@ func compileOrientState(
 			card.Metadata["graph"] = "invalid: " + graphErr.Error()
 			view.Status = "attention"
 		} else {
-			blocked, pending := 0, 0
+			evaluations, evaluationErr := loadCampaignDefermentEvaluations(store, graph, asOf)
+			if evaluationErr != nil {
+				return evaluationErr
+			}
+			blocked, pending, due, near := 0, 0, 0, 0
 			for _, item := range graph.WorkItems {
 				if item.State == "blocked" || (item.State == "deferred" && item.Deferment != nil && item.Deferment.BlocksClosure) {
 					blocked++
+				}
+			}
+			for _, evaluation := range evaluations {
+				switch evaluation.Status {
+				case DefermentStatusDue:
+					due++
+				case DefermentStatusNear:
+					near++
 				}
 			}
 			for _, run := range graph.Runs {
@@ -165,9 +180,23 @@ func compileOrientState(
 			}
 			card.Metadata["blockers"] = strconv.Itoa(blocked)
 			card.Metadata["pendingReturns"] = strconv.Itoa(pending)
-			if blocked > 0 || pending > 0 {
+			card.Metadata["dueDeferments"] = strconv.Itoa(due)
+			card.Metadata["nearDeferments"] = strconv.Itoa(near)
+			if blocked > 0 || pending > 0 || due > 0 || near > 0 {
 				view.Status = "attention"
 			}
+			transitions := RecommendedDefermentTransitions(graph, evaluations)
+			view.Cards = append(view.Cards, card)
+			for _, id := range dueOrNearDefermentIDs(evaluations) {
+				itemCard := applyDefermentEvaluation(workStateCard(graph.Campaign.Slug, graph.WorkItems[id]), evaluations[id])
+				itemCard.WhyMatched = []string{"typed deferment trigger is " + evaluations[id].Status}
+				view.Cards = append(view.Cards, itemCard)
+				for _, transition := range recommendedTransitionsForWork(transitions, id) {
+					view.Cards = append(view.Cards, defermentTransitionCard(transition))
+				}
+			}
+			view.Expansions = append(view.Expansions, "state:resume:"+campaign.ID)
+			continue
 		}
 		view.Cards = append(view.Cards, card)
 		view.Expansions = append(view.Expansions, "state:resume:"+campaign.ID)
@@ -175,7 +204,7 @@ func compileOrientState(
 	return nil
 }
 
-func compileResumeState(store *StateStore, campaignID string, view *StateView) error {
+func compileResumeState(store *StateStore, campaignID string, asOf time.Time, view *StateView) error {
 	if campaignID == "" {
 		return errors.New("resume state requires campaignId")
 	}
@@ -186,7 +215,12 @@ func compileResumeState(store *StateStore, campaignID string, view *StateView) e
 	view.CampaignID = graph.Campaign.ID
 	view.EventHead = graph.Campaign.LastEventID
 	view.Cards = append(view.Cards, campaignStateCard(*graph.Campaign))
-	priority := map[string]int{"blocked": 0, "active": 1, "ready": 2, "deferred": 3, "proposed": 4}
+	evaluations, err := loadCampaignDefermentEvaluations(store, graph, asOf)
+	if err != nil {
+		return err
+	}
+	transitions := RecommendedDefermentTransitions(graph, evaluations)
+	priority := map[string]int{"blocked": 1, "active": 2, "ready": 3, "deferred": 5, "proposed": 6}
 	items := make([]WorkItemRecord, 0, len(graph.WorkItems))
 	for _, item := range graph.WorkItems {
 		if _, ok := priority[item.State]; ok || containsString(graph.Campaign.CurrentFocus, item.ID) {
@@ -199,15 +233,40 @@ func compileResumeState(store *StateStore, campaignID string, view *StateView) e
 		if leftFocus != rightFocus {
 			return leftFocus
 		}
-		if priority[items[i].State] != priority[items[j].State] {
-			return priority[items[i].State] < priority[items[j].State]
+		leftPriority, rightPriority := priority[items[i].State], priority[items[j].State]
+		if evaluation, ok := evaluations[items[i].ID]; ok {
+			if evaluation.Status == DefermentStatusDue {
+				leftPriority = 0
+			} else if evaluation.Status == DefermentStatusNear {
+				leftPriority = 4
+			}
+		}
+		if evaluation, ok := evaluations[items[j].ID]; ok {
+			if evaluation.Status == DefermentStatusDue {
+				rightPriority = 0
+			} else if evaluation.Status == DefermentStatusNear {
+				rightPriority = 4
+			}
+		}
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
 		}
 		return items[i].ID < items[j].ID
 	})
 	for _, item := range items {
-		view.Cards = append(view.Cards, workStateCard(graph.Campaign.Slug, item))
+		card := workStateCard(graph.Campaign.Slug, item)
+		if evaluation, ok := evaluations[item.ID]; ok {
+			card = applyDefermentEvaluation(card, evaluation)
+		}
+		view.Cards = append(view.Cards, card)
+		for _, transition := range recommendedTransitionsForWork(transitions, item.ID) {
+			view.Cards = append(view.Cards, defermentTransitionCard(transition))
+		}
 		view.Expansions = append(view.Expansions, "state:work:"+item.ID)
 		if item.State == "blocked" || (item.State == "deferred" && item.Deferment != nil && item.Deferment.BlocksClosure) {
+			view.Status = "attention"
+		}
+		if evaluation, ok := evaluations[item.ID]; ok && validOne(evaluation.Status, DefermentStatusDue, DefermentStatusNear) {
 			view.Status = "attention"
 		}
 	}
@@ -245,10 +304,12 @@ func compileResumeState(store *StateStore, campaignID string, view *StateView) e
 		review := graph.Reviews[id]
 		view.Cards = append(view.Cards, reviewStateCard(graph.Campaign.Slug, review))
 	}
+	appendFindingStalenessState(graph, view)
+	appendReviewLoadState(graph, view)
 	return nil
 }
 
-func compileWorkState(store *StateStore, campaignID, workItemID string, view *StateView) error {
+func compileWorkState(store *StateStore, campaignID, workItemID string, asOf time.Time, view *StateView) error {
 	if campaignID == "" || !workItemIDRE.MatchString(workItemID) {
 		return errors.New("work state requires campaignId and a valid workItemId")
 	}
@@ -261,7 +322,19 @@ func compileWorkState(store *StateStore, campaignID, workItemID string, view *St
 		return fmt.Errorf("work item %s does not exist in campaign %s", workItemID, graph.Campaign.ID)
 	}
 	view.CampaignID, view.WorkItemID, view.EventHead = graph.Campaign.ID, item.ID, graph.Campaign.LastEventID
-	view.Cards = append(view.Cards, workStateCard(graph.Campaign.Slug, item))
+	evaluations, err := loadCampaignDefermentEvaluations(store, graph, asOf)
+	if err != nil {
+		return err
+	}
+	selectedCard := workStateCard(graph.Campaign.Slug, item)
+	if evaluation, ok := evaluations[item.ID]; ok {
+		selectedCard = applyDefermentEvaluation(selectedCard, evaluation)
+	}
+	view.Cards = append(view.Cards, selectedCard)
+	for _, transition := range recommendedTransitionsForWork(
+		RecommendedDefermentTransitions(graph, evaluations), item.ID) {
+		view.Cards = append(view.Cards, defermentTransitionCard(transition))
+	}
 	relatedWork := append([]string{}, item.Relations.DependsOn...)
 	relatedWork = append(relatedWork, item.Relations.BlockedBy...)
 	relatedWork = append(relatedWork, item.Relations.ParentIDs...)
@@ -269,13 +342,19 @@ func compileWorkState(store *StateStore, campaignID, workItemID string, view *St
 	for _, id := range SortedUnique(relatedWork) {
 		if related, ok := graph.WorkItems[id]; ok {
 			card := workStateCard(graph.Campaign.Slug, related)
+			if evaluation, ok := evaluations[id]; ok {
+				card = applyDefermentEvaluation(card, evaluation)
+				if validOne(evaluation.Status, DefermentStatusDue, DefermentStatusNear) {
+					view.Status = "attention"
+				}
+			}
 			card.WhyMatched = []string{"explicit work-graph relation to " + item.ID}
 			view.Cards = append(view.Cards, card)
 		}
 	}
 	for _, id := range SortedUnique(item.FindingIDs) {
 		if finding, ok := graph.Findings[id]; ok {
-			card := findingStateCard(finding)
+			card := findingStateCardInGraph(graph, finding)
 			card.WhyMatched = []string{"linked from work item " + item.ID}
 			view.Cards = append(view.Cards, card)
 		}
@@ -287,6 +366,9 @@ func compileWorkState(store *StateStore, campaignID, workItemID string, view *St
 		}
 	}
 	if item.State == "blocked" || len(item.Relations.BlockedBy) > 0 {
+		view.Status = "attention"
+	}
+	if evaluation, ok := evaluations[item.ID]; ok && validOne(evaluation.Status, DefermentStatusDue, DefermentStatusNear) {
 		view.Status = "attention"
 	}
 	return nil
@@ -330,7 +412,7 @@ func compileDeltaState(store *StateStore, campaignID, sinceEventID string, view 
 	return nil
 }
 
-func compileClosureState(store *StateStore, campaignID string, view *StateView) error {
+func compileClosureState(store *StateStore, campaignID string, asOf time.Time, view *StateView) error {
 	if campaignID == "" {
 		return errors.New("closure state requires campaignId")
 	}
@@ -340,6 +422,24 @@ func compileClosureState(store *StateStore, campaignID string, view *StateView) 
 	}
 	view.CampaignID, view.EventHead = graph.Campaign.ID, graph.Campaign.LastEventID
 	view.Cards = append(view.Cards, campaignStateCard(*graph.Campaign))
+	evaluations, err := loadCampaignDefermentEvaluations(store, graph, asOf)
+	if err != nil {
+		return err
+	}
+	transitions := RecommendedDefermentTransitions(graph, evaluations)
+	for _, id := range sortedDefermentEvaluationIDs(evaluations) {
+		card := applyDefermentEvaluation(workStateCard(graph.Campaign.Slug, graph.WorkItems[id]), evaluations[id])
+		card.WhyMatched = []string{"deferment has an explicit closure disposition"}
+		view.Cards = append(view.Cards, card)
+		for _, transition := range recommendedTransitionsForWork(transitions, id) {
+			view.Cards = append(view.Cards, defermentTransitionCard(transition))
+		}
+		if graph.WorkItems[id].Deferment.BlocksClosure ||
+			validOne(evaluations[id].Status, DefermentStatusDue, DefermentStatusNear) ||
+			(graph.ClosureCoverage == nil || graph.ClosureCoverage.WorkItemCoverage[id] != "exported-backlog") {
+			view.Status = "attention"
+		}
+	}
 	if graph.ClosureJob == nil {
 		view.Cards = append(view.Cards, ContextCard{
 			SchemaVersion: CampaignSchemaVersion, ID: "closure-not-started", CardType: "blocker",
@@ -382,7 +482,85 @@ func compileClosureState(store *StateStore, campaignID string, view *StateView) 
 		})
 		view.Status = "attention"
 	}
+	appendFindingStalenessState(graph, view)
+	appendReviewLoadState(graph, view)
 	return nil
+}
+
+func appendFindingStalenessState(graph CampaignGraph, view *StateView) {
+	stale := StaleFindingDependents(graph.Findings)
+	ids := staleDependentIDs(stale)
+	if len(ids) == 0 {
+		return
+	}
+	dependencies := 0
+	for _, targets := range stale {
+		dependencies += len(targets)
+	}
+	paths := staleFindingPathStrings(graph.Findings)
+	visibleIDs, visiblePaths := ids, paths
+	if len(visibleIDs) > 20 {
+		visibleIDs = visibleIDs[:20]
+	}
+	if len(visiblePaths) > 20 {
+		visiblePaths = visiblePaths[:20]
+	}
+	view.Cards = append(view.Cards, ContextCard{
+		SchemaVersion: CampaignSchemaVersion, ID: "stale-finding-dependents", CardType: "blocker",
+		Title:       "Finding dependents require re-verification",
+		Claim:       "A dependency was verified after its dependent; the dependent must be re-verified before closure.",
+		SourceClass: "state", Handle: "state:stale-dependents:" + graph.Campaign.ID,
+		RelationAlerts: []string{"stale"}, ExpansionTokens: 260,
+		Metadata: map[string]string{
+			"dependentCount": strconv.Itoa(len(ids)), "dependencyCount": strconv.Itoa(dependencies),
+			"findingIds": strings.Join(visibleIDs, ","), "paths": strings.Join(visiblePaths, ";"),
+			"omittedFindingIds": strconv.Itoa(len(ids) - len(visibleIDs)),
+			"omittedPaths":      strconv.Itoa(len(paths) - len(visiblePaths)),
+		},
+	})
+	view.Status = "attention"
+}
+
+func appendReviewLoadState(graph CampaignGraph, view *StateView) {
+	aggregate := AggregateReviewLoad(graph.Reviews)
+	if aggregate.PacketCount == 0 {
+		return
+	}
+	average := int64(0)
+	if aggregate.MeasuredPackets > 0 {
+		average = aggregate.TotalSeconds / int64(aggregate.MeasuredPackets)
+	}
+	card := ContextCard{
+		SchemaVersion: CampaignSchemaVersion, ID: "review-load", CardType: "health",
+		Title: "Manager review load", SourceClass: "state",
+		Handle: "state:review-load:" + graph.Campaign.ID, ExpansionTokens: 220,
+		Metadata: map[string]string{
+			"packetCount":          strconv.Itoa(aggregate.PacketCount),
+			"measuredPackets":      strconv.Itoa(aggregate.MeasuredPackets),
+			"unmeasuredPackets":    strconv.Itoa(aggregate.UnmeasuredPackets),
+			"sessionCount":         strconv.Itoa(aggregate.SessionCount),
+			"averageSeconds":       strconv.FormatInt(average, 10),
+			"maximumSeconds":       strconv.FormatInt(aggregate.MaximumSeconds, 10),
+			"maximumPacketOrdinal": strconv.Itoa(aggregate.MaximumOrdinal),
+			"overTargetPackets":    strconv.Itoa(aggregate.OverTargetPackets),
+			"coarsenDecisions":     strconv.Itoa(aggregate.CoarsenDecisions),
+		},
+	}
+	if aggregate.OverTargetPackets > 0 {
+		card.Claim = "Measured manager review load exceeded its configured ceiling; each affected receipt records a required coarsen decision."
+		visible := aggregate.OverTargetReviewIDs
+		if len(visible) > 20 {
+			visible = visible[:20]
+		}
+		card.Metadata["overTargetReviewIds"] = strings.Join(visible, ",")
+		card.Metadata["omittedOverTargetReviewIds"] = strconv.Itoa(len(aggregate.OverTargetReviewIDs) - len(visible))
+		view.Status = "attention"
+	} else if aggregate.UnmeasuredPackets > 0 {
+		card.Claim = "Legacy review evidence includes no contemporaneous load measurement; no timing was inferred."
+	} else {
+		card.Claim = "Measured manager review load remains within its configured ceiling."
+	}
+	view.Cards = append(view.Cards, card)
 }
 
 func campaignStateCard(campaign CampaignRecord) ContextCard {
@@ -418,8 +596,12 @@ func workStateCard(slug string, item WorkItemRecord) ContextCard {
 		card.RelationAlerts = []string{"conflict"}
 	}
 	if item.State == "deferred" && item.Deferment != nil {
-		card.Metadata["revisitWhen"] = item.Deferment.RevisitWhen
+		card.Metadata["revisitWhen"] = summarizeDefermentTrigger(item.Deferment.RevisitWhen)
 		card.Metadata["blocksClosure"] = strconv.FormatBool(item.Deferment.BlocksClosure)
+		card.Metadata["closureDisposition"] = item.Deferment.ClosureDisposition
+		if item.Deferment.ClosureDestination != "" {
+			card.Metadata["closureDestination"] = item.Deferment.ClosureDestination
+		}
 	}
 	return card
 }
@@ -437,7 +619,7 @@ func runStateCard(slug string, run RunRecord) ContextCard {
 }
 
 func reviewStateCard(slug string, review ReviewRecord) ContextCard {
-	return ContextCard{
+	card := ContextCard{
 		SchemaVersion: CampaignSchemaVersion, ID: review.ID, CardType: "decision",
 		Title: "Review " + review.ID, Claim: summarizeReviewDecisions(review.Decisions),
 		SourceClass: "state", Handle: "record:active/" + slug + "/reviews/" + review.ID + ".json",
@@ -446,6 +628,16 @@ func reviewStateCard(slug string, review ReviewRecord) ContextCard {
 			"intakeId": review.IntakeID, "decisionCount": strconv.Itoa(len(review.Decisions)),
 		},
 	}
+	if ValidateReviewLoadReceipt(review.ReviewLoad) == nil {
+		card.Metadata["measurementStatus"] = review.ReviewLoad.MeasurementStatus
+		card.Metadata["packetOrdinal"] = strconv.Itoa(review.ReviewLoad.PacketOrdinal)
+		card.Metadata["granularityDecision"] = review.ReviewLoad.GranularityDecision
+		if review.ReviewLoad.OverTargetKnown {
+			card.Metadata["reviewSeconds"] = strconv.FormatInt(review.ReviewLoad.DurationSeconds, 10)
+			card.Metadata["overTarget"] = strconv.FormatBool(review.ReviewLoad.OverTarget)
+		}
+	}
+	return card
 }
 
 func findingStateCard(finding FindingRecord) ContextCard {
@@ -457,6 +649,14 @@ func findingStateCard(finding FindingRecord) ContextCard {
 		RelationAlerts: relationAlerts(finding), Handle: FindingHandle(finding.ID),
 		EvidenceHandle: strongestFindingEvidence(finding), ExpansionTokens: EstimateTokens(finding.Body) + 200,
 	}
+}
+
+func findingStateCardInGraph(graph CampaignGraph, finding FindingRecord) ContextCard {
+	card := findingStateCard(finding)
+	paths := FindingStalenessPaths(graph.Findings)
+	card.RelationAlerts = append(card.RelationAlerts, findingStalenessRelationAlerts(paths, finding.ID)...)
+	card.RelationAlerts = SortedUnique(card.RelationAlerts)
+	return card
 }
 
 func strongestFindingEvidence(finding FindingRecord) string {
@@ -475,6 +675,105 @@ func summarizeReviewDecisions(decisions []ReviewDecision) string {
 	return strings.Join(parts, "; ")
 }
 
+func loadCampaignDefermentEvaluations(
+	store *StateStore,
+	graph CampaignGraph,
+	asOf time.Time,
+) (map[string]DefermentEvaluation, error) {
+	events := []StateEvent{}
+	pending := defermentEventTriggerKeys(graph)
+	if len(pending) != 0 {
+		var err error
+		events, err = readMatchingDefermentEvents(store.Boundary, graph.Campaign.Slug, pending)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return EvaluateDeferments(graph, asOf, events)
+}
+
+func readMatchingDefermentEvents(
+	boundary Boundary,
+	slug string,
+	pending map[string]bool,
+) ([]StateEvent, error) {
+	relative := "active/" + slug + "/events/events.jsonl"
+	absolute, err := boundary.Resolve(relative, true)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(absolute)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	result := []StateEvent{}
+	seen := map[string]bool{}
+	var previousRevision int64 = -1
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		var event StateEvent
+		if err := decodeStrictJSON(scanner.Bytes(), &event); err != nil {
+			return nil, err
+		}
+		if err := verifyJournalEvent(event); err != nil {
+			return nil, err
+		}
+		if seen[event.ID] || (previousRevision >= 0 && event.PreviousRevision <= previousRevision) {
+			return nil, errors.New("campaign event journal order is broken")
+		}
+		seen[event.ID] = true
+		previousRevision = event.PreviousRevision
+		if consumeMatchingDefermentEvent(event, pending) {
+			result = append(result, event)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func sortedDefermentEvaluationIDs(evaluations map[string]DefermentEvaluation) []string {
+	ids := make([]string, 0, len(evaluations))
+	for id := range evaluations {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func dueOrNearDefermentIDs(evaluations map[string]DefermentEvaluation) []string {
+	ids := []string{}
+	for id, evaluation := range evaluations {
+		if validOne(evaluation.Status, DefermentStatusDue, DefermentStatusNear) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		left, right := evaluations[ids[i]], evaluations[ids[j]]
+		if left.Status != right.Status {
+			return left.Status == DefermentStatusDue
+		}
+		return ids[i] < ids[j]
+	})
+	return ids
+}
+
+func recommendedTransitionsForWork(
+	transitions []RecommendedTransition,
+	workItemID string,
+) []RecommendedTransition {
+	result := []RecommendedTransition{}
+	for _, transition := range transitions {
+		if transition.WorkItemID == workItemID {
+			result = append(result, transition)
+		}
+	}
+	return result
+}
+
 func stateCardByID(graph CampaignGraph, id string) (ContextCard, bool) {
 	if id == graph.Campaign.ID {
 		return campaignStateCard(*graph.Campaign), true
@@ -486,7 +785,7 @@ func stateCardByID(graph CampaignGraph, id string) (ContextCard, bool) {
 		return runStateCard(graph.Campaign.Slug, run), true
 	}
 	if finding, ok := graph.Findings[id]; ok {
-		return findingStateCard(finding), true
+		return findingStateCardInGraph(graph, finding), true
 	}
 	if review, ok := graph.Reviews[id]; ok {
 		return reviewStateCard(graph.Campaign.Slug, review), true
@@ -508,8 +807,9 @@ func readCampaignEvents(boundary Boundary, slug, since string) ([]StateEvent, bo
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	result := []StateEvent{}
-	found := false
-	previous := ""
+	found := since == ""
+	seen := map[string]bool{}
+	var previousRevision int64 = -1
 	for scanner.Scan() {
 		var event StateEvent
 		if err := decodeStrictJSON(scanner.Bytes(), &event); err != nil {
@@ -518,10 +818,15 @@ func readCampaignEvents(boundary Boundary, slug, since string) ([]StateEvent, bo
 		if err := verifyJournalEvent(event); err != nil {
 			return nil, false, err
 		}
-		if previous != "" && event.PreviousEventID != previous {
-			return nil, false, errors.New("campaign event journal chain is broken")
+		// PreviousEventID is the project-wide chain, whose predecessor may be
+		// in another campaign journal. A campaign-local journal therefore
+		// verifies uniqueness and strictly increasing global revisions rather
+		// than incorrectly requiring local adjacency.
+		if seen[event.ID] || (previousRevision >= 0 && event.PreviousRevision <= previousRevision) {
+			return nil, false, errors.New("campaign event journal order is broken")
 		}
-		previous = event.ID
+		seen[event.ID] = true
+		previousRevision = event.PreviousRevision
 		if found {
 			result = append(result, event)
 		}

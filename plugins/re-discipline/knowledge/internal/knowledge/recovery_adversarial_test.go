@@ -553,7 +553,6 @@ func TestAdversarialRecoveryRestoresMCPOnlyRequiredTopology(t *testing.T) {
 		".re-discipline/knowledge/evals",
 		".re-discipline/cache/knowledge",
 		".re-discipline/cache/knowledge/generations",
-		".re-discipline/cache/knowledge/vectors",
 		".re-discipline/cache/calibration",
 	} {
 		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative)))

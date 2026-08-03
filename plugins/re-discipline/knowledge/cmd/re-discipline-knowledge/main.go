@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,8 +30,6 @@ func run(ctx context.Context, args []string) error {
 		flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 		assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
 		projectRoot := flags.String("project-root", "", "optional initial managed project root")
-		disableDense := flags.Bool("disable-dense", false, "select predefined no-embedding fallback")
-		disableRerank := flags.Bool("disable-rerank", false, "select predefined no-reranker fallback")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -38,10 +37,7 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		server := &knowledge.MCPServer{
-			AssetRoot: asset, InitialRoot: *projectRoot,
-			DisableDense: *disableDense, DisableRerank: *disableRerank,
-		}
+		server := &knowledge.MCPServer{AssetRoot: asset, InitialRoot: *projectRoot}
 		return server.Serve(ctx, os.Stdin, os.Stdout)
 	case "verify-pack":
 		flags := flag.NewFlagSet("verify-pack", flag.ContinueOnError)
@@ -125,6 +121,32 @@ func run(ctx context.Context, args []string) error {
 			}
 		}
 		return nil
+	case "normalized-vs-raw":
+		flags := flag.NewFlagSet("normalized-vs-raw", flag.ContinueOnError)
+		assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
+		projectRoot := flags.String("project-root", "", "initialized project root")
+		cacheRoot := flags.String("cache-root", "", "optional project cache root")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if strings.TrimSpace(*projectRoot) == "" {
+			return errors.New("normalized-vs-raw requires --project-root")
+		}
+		asset, err := filepath.Abs(*assetRoot)
+		if err != nil {
+			return err
+		}
+		service, err := knowledge.NewService(knowledge.ServiceOptions{
+			ProjectRoot: *projectRoot, AssetRoot: asset, CacheRoot: *cacheRoot,
+		})
+		if err != nil {
+			return err
+		}
+		result, err := service.RunNormalizedRawGate(ctx)
+		if err != nil {
+			return err
+		}
+		return printJSON(result)
 	case "pin-evals":
 		flags := flag.NewFlagSet("pin-evals", flag.ContinueOnError)
 		assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
@@ -162,6 +184,12 @@ func run(ctx context.Context, args []string) error {
 			return fmt.Errorf(
 				"%d pinned document(s) changed what they claim; re-answer each case before re-stamping",
 				len(report.ClaimChanged))
+		}
+		if report.Vocabulary.FailedCases > 0 {
+			return fmt.Errorf(
+				"%d evaluation case(s) violate their target-vocabulary disjointness policy",
+				report.Vocabulary.FailedCases,
+			)
 		}
 		return nil
 	case "recover":
@@ -210,10 +238,33 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		return printJSON(payload)
+	case "project-version":
+		flags := flag.NewFlagSet("project-version", flag.ContinueOnError)
+		projectRoot := flags.String("project-root", "", "managed project root or nested path")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		root := strings.TrimSpace(*projectRoot)
+		if root == "" {
+			var err error
+			root, err = knowledge.FindProjectRoot(".")
+			if err != nil {
+				return fmt.Errorf("--project-root is required outside an initialized project: %w", err)
+			}
+		}
+		version, err := knowledge.DetectProjectStateVersion(root)
+		if err != nil {
+			return err
+		}
+		return printJSON(map[string]any{
+			"schemaVersion":       1,
+			"projectStateVersion": version,
+			"migrationRequired":   version != "0.8",
+		})
 	case "migrate-project":
 		return runMigrationCommand(ctx, args[1:])
 	case "state", "query", "read", "trace", "context-pack-materialize",
-		"manager-apply", "curation-submit", "closure-apply":
+		"manager-apply", "curation-submit", "closure-apply", "normalization-queue":
 		return runPeerCommand(ctx, args[0], args[1:])
 	}
 	switch args[0] {
@@ -227,8 +278,6 @@ func run(ctx context.Context, args []string) error {
 	assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
 	projectRoot := flags.String("project-root", "", "managed project root or nested path")
 	cacheRoot := flags.String("cache-root", "", "optional cache root")
-	disableDense := flags.Bool("disable-dense", false, "select predefined no-embedding fallback")
-	disableRerank := flags.Bool("disable-rerank", false, "select predefined no-reranker fallback")
 	query := flags.String("query", "", "retrieval query")
 	queryClass := flags.String("query-class", "auto", "retrieval query class")
 	tiers := flags.String("tiers", "profile,navigation,truth,memory", "comma-separated epistemic tiers")
@@ -263,7 +312,6 @@ func run(ctx context.Context, args []string) error {
 	}
 	service, err := knowledge.NewService(knowledge.ServiceOptions{
 		ProjectRoot: root, AssetRoot: asset, CacheRoot: *cacheRoot,
-		DisableDense: *disableDense, DisableRerank: *disableRerank,
 	})
 	if err != nil {
 		return err
@@ -321,7 +369,7 @@ func printJSON(value any) error {
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: re-discipline-knowledge <serve|state|query|read|trace|context-pack-materialize|manager-apply|curation-submit|closure-apply|recover|ensure|preflight|status|index|replay|benchmark|calibrate|pin-evals|promote-profile|verify-pack|migrate-project> [options]")
+	return fmt.Errorf("usage: re-discipline-knowledge <serve|state|query|read|trace|context-pack-materialize|manager-apply|curation-submit|closure-apply|normalization-queue|recover|ensure|project-version|preflight|status|index|replay|benchmark|normalized-vs-raw|calibrate|pin-evals|promote-profile|verify-pack|migrate-project> [options]")
 }
 
 func runPeerCommand(ctx context.Context, command string, args []string) error {
@@ -329,14 +377,19 @@ func runPeerCommand(ctx context.Context, command string, args []string) error {
 	assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
 	projectRoot := flags.String("project-root", "", "managed project root or nested path")
 	cacheRoot := flags.String("cache-root", "", "optional cache root")
-	disableDense := flags.Bool("disable-dense", false, "select predefined no-embedding fallback")
-	disableRerank := flags.Bool("disable-rerank", false, "select predefined no-reranker fallback")
 	input := flags.String("input", "", "strict JSON request path, or - for stdin")
+	session := flags.Bool(
+		"session", false,
+		"query only: process a stream of strict JSON requests in one lease-preserving process",
+	)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if *input == "" {
 		return fmt.Errorf("--input is required")
+	}
+	if *session && command != "query" {
+		return fmt.Errorf("--session is supported only by query")
 	}
 	var contextPackRequest *knowledge.ContextPackMaterializeRequest
 	if command == "context-pack-materialize" {
@@ -363,7 +416,6 @@ func runPeerCommand(ctx context.Context, command string, args []string) error {
 	}
 	service, err := knowledge.NewService(knowledge.ServiceOptions{
 		ProjectRoot: root, AssetRoot: asset, CacheRoot: *cacheRoot,
-		DisableDense: *disableDense, DisableRerank: *disableRerank,
 	})
 	if err != nil {
 		return err
@@ -380,6 +432,9 @@ func runPeerCommand(ctx context.Context, command string, args []string) error {
 		}
 		return printJSON(value)
 	case "query":
+		if *session {
+			return runQuerySessionInput(ctx, *input, os.Stdout, service.Query)
+		}
 		var request knowledge.FindingQueryOptions
 		if err := decodeCLIRequest(*input, &request); err != nil {
 			return err
@@ -445,9 +500,85 @@ func runPeerCommand(ctx context.Context, command string, args []string) error {
 			return err
 		}
 		return printJSON(value)
+	case "normalization-queue":
+		var request knowledge.NormalizationQueueRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.NormalizationQueueApply(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
 	default:
 		return usageError()
 	}
+}
+
+func runQuerySessionInput(
+	ctx context.Context,
+	input string,
+	output io.Writer,
+	query func(context.Context, knowledge.FindingQueryOptions) (knowledge.FindingQueryResponse, error),
+) error {
+	var reader io.Reader
+	var closeInput func() error
+	if input == "-" {
+		reader = os.Stdin
+		closeInput = func() error { return nil }
+	} else {
+		file, err := os.Open(input)
+		if err != nil {
+			return err
+		}
+		reader = file
+		closeInput = file.Close
+	}
+	defer closeInput()
+	return runQuerySession(ctx, reader, output, query)
+}
+
+func runQuerySession(
+	ctx context.Context,
+	input io.Reader,
+	output io.Writer,
+	query func(context.Context, knowledge.FindingQueryOptions) (knowledge.FindingQueryResponse, error),
+) error {
+	const maxSessionBytes = 16 << 20
+	limited := &io.LimitedReader{R: input, N: maxSessionBytes + 1}
+	decoder := json.NewDecoder(limited)
+	decoder.DisallowUnknownFields()
+	encoder := json.NewEncoder(output)
+	requests := 0
+	for {
+		var request knowledge.FindingQueryOptions
+		if err := decoder.Decode(&request); err != nil {
+			if err == io.EOF {
+				if limited.N == 0 {
+					return fmt.Errorf("query session exceeds %d bytes", maxSessionBytes)
+				}
+				break
+			}
+			return fmt.Errorf("decode query session request %d: %w", requests+1, err)
+		}
+		response, err := query(ctx, request)
+		if err != nil {
+			return fmt.Errorf("query session request %d: %w", requests+1, err)
+		}
+		if err := encoder.Encode(response); err != nil {
+			return err
+		}
+		if flusher, ok := output.(interface{ Flush() error }); ok {
+			if err := flusher.Flush(); err != nil {
+				return err
+			}
+		}
+		requests++
+	}
+	if requests == 0 {
+		return errors.New("query session requires at least one request")
+	}
+	return nil
 }
 
 func decodeCLIRequest(input string, target any) error {
@@ -470,6 +601,10 @@ func decodeCLIRequest(input string, target any) error {
 	}
 	if len(body) > maxRequestBytes {
 		return fmt.Errorf("request exceeds %d bytes", maxRequestBytes)
+	}
+	body, err = normalizeCLIJSONEncoding(body)
+	if err != nil {
+		return fmt.Errorf("decode request: %w", err)
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.DisallowUnknownFields()
@@ -495,6 +630,7 @@ func splitCSV(value string) []string {
 func runMigrationCommand(ctx context.Context, args []string) error {
 	_ = ctx // Migration operations are bounded filesystem transactions today.
 	flags := flag.NewFlagSet("migrate-project", flag.ContinueOnError)
+	assetRoot := flags.String("asset-root", "knowledge", "plugin knowledge asset root")
 	project := flags.String("project", "", "managed 0.7 project root")
 	projectRoot := flags.String("project-root", "", "managed 0.7 project root")
 	previewMode := flags.Bool("preview", false, "build a read-only migration preview")
@@ -506,12 +642,21 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 	coveragePath := flags.String("coverage", "", "coverage receipt JSON to submit")
 	gate := flags.String("gate", "", "certification gate to record")
 	gatePassed := flags.Bool("gate-passed", false, "record the named gate as passed")
-	artifact := flags.String("artifact", "", "project-relative or external gate artifact handle")
-	artifactDigest := flags.String("artifact-digest", "", "sha256 digest of the gate artifact")
+	artifact := flags.String("artifact", "", "project-relative gate artifact; retrieval and host gates require strict gate-specific evidence")
+	artifactDigest := flags.String("artifact-digest", "", "exact sha256 digest rederived from the gate artifact bytes")
 	output := flags.String("output", "", "external preview output directory")
 	live := flags.String("live-campaigns", "", "comma-separated manager-designated live campaign slugs")
 	actor := flags.String("actor", "manager", "manager identity recorded in receipts")
 	reviewer := flags.String("reviewer", "manager", "reviewer identity for gate receipts")
+	shadowQuery := flags.String("shadow-query", "", "query digest-pinned legacy report provenance")
+	shadowCampaign := flags.String("shadow-campaign", "", "optional campaign filter for shadow query")
+	shadowLimit := flags.Int("shadow-limit", 5, "maximum shadow query results")
+	profileConflict := flags.Bool("profile-conflict", false, "export the digest-bound unsupported legacy retrieval-profile conflict packet")
+	profileDecision := flags.String("profile-decision", "", "submit an explicit non-activating manager retrieval-profile conversion decision from strict JSON")
+	replaceProfileDecision := flags.String("replace-profile-decision", "", "exact prior decision digest required to replace a submitted profile decision")
+	truthConflicts := flags.Bool("truth-conflicts", false, "export the digest-bound legacy truth atomicization conflict packet")
+	truthReview := flags.String("truth-review", "", "submit a manager-reviewed truth atomicization/split mapping from strict JSON")
+	replaceTruthReview := flags.String("replace-truth-review", "", "exact prior review digest required to replace a submitted truth review")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -530,15 +675,52 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 	for _, selected := range []bool{
 		*previewMode, *applyDigest != "", *resumeID != "", *statusMode,
 		*verifyMode, *ratifyDigest != "", *coveragePath != "", *gate != "",
+		*shadowQuery != "", *profileConflict, *profileDecision != "", *truthConflicts, *truthReview != "",
 	} {
 		if selected {
 			actions++
 		}
 	}
 	if actions != 1 {
-		return fmt.Errorf("migrate-project requires exactly one of --preview, --apply, --resume, --status, --verify, --ratify, --coverage, or --gate")
+		return fmt.Errorf("migrate-project requires exactly one of --preview, --apply, --resume, --status, --verify, --ratify, --coverage, --gate, --shadow-query, --profile-conflict, --profile-decision, --truth-conflicts, or --truth-review")
 	}
 	liveCampaigns := splitCSV(*live)
+	if *profileConflict {
+		value, err := knowledge.ExportMigrationProfileConflict(root)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
+	if *profileDecision != "" {
+		var submission knowledge.MigrationProfileDecisionSubmission
+		if err := decodeCLIRequest(*profileDecision, &submission); err != nil {
+			return err
+		}
+		value, err := knowledge.SubmitMigrationProfileDecision(root, submission, *replaceProfileDecision)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
+	if *truthConflicts {
+		value, err := knowledge.ExportMigrationTruthConflicts(root)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
+	if *truthReview != "" {
+		var submission knowledge.MigrationTruthReviewSubmission
+		if err := decodeCLIRequest(*truthReview, &submission); err != nil {
+			return err
+		}
+		value, err := knowledge.SubmitMigrationTruthReview(root, submission, *replaceTruthReview)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
 	if *previewMode {
 		value, err := knowledge.PreviewMigration(root, liveCampaigns)
 		if err != nil {
@@ -551,7 +733,11 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 		}
 		return printJSON(value)
 	}
-	engine, err := knowledge.NewMigrationEngine(root)
+	asset, err := filepath.Abs(*assetRoot)
+	if err != nil {
+		return err
+	}
+	engine, err := knowledge.NewMigrationEngineWithAssetRoot(root, asset)
 	if err != nil {
 		return err
 	}
@@ -594,15 +780,9 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 		return printJSON(value)
 	}
 	if *coveragePath != "" {
-		body, err := os.ReadFile(*coveragePath)
-		if err != nil {
-			return err
-		}
 		var receipt knowledge.MigrationCoverageReceipt
-		decoder := json.NewDecoder(strings.NewReader(string(body)))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&receipt); err != nil {
-			return fmt.Errorf("decode coverage receipt: %w", err)
+		if err := decodeCLIRequest(*coveragePath, &receipt); err != nil {
+			return err
 		}
 		value, err := engine.SubmitCoverage(receipt)
 		if err != nil {
@@ -615,6 +795,13 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 			Gate: *gate, Passed: *gatePassed, Artifact: *artifact,
 			ArtifactDigest: *artifactDigest, Reviewer: *reviewer,
 		})
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	}
+	if *shadowQuery != "" {
+		value, err := engine.QueryShadow(*shadowQuery, *shadowCampaign, *shadowLimit)
 		if err != nil {
 			return err
 		}

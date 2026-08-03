@@ -51,8 +51,8 @@ func pinnedFixtureCase(t *testing.T, root string) EvalCase {
 
 // Pin rot used to surface only when a calibration errored - that is, at the
 // moment somebody needed the measurement to be trustworthy. Status must be able
-// to say so first, and must distinguish advisory byte drift from a claim
-// nobody has re-answered the query against.
+// to say so first, and must distinguish semantic claim drift from byte changes
+// in an untyped document whose content is the only available identity.
 func TestStatusReportsEvidencePinHealth(t *testing.T) {
 	root := makeAdversarialProject(t)
 	service := newAdversarialService(t, root, nil)
@@ -84,8 +84,8 @@ func TestStatusReportsEvidencePinHealth(t *testing.T) {
 		t.Fatal("status omitted the evidence-pin census")
 	}
 
-	// Prose beneath the claim moved; the claim did not. The case still measures
-	// what it was ratified to measure, so this is drift, not breakage.
+	// This untyped document has no extractable semantic claim. Its content digest
+	// is therefore the only safe identity and any byte change breaks the pin.
 	enginePath := filepath.Join(root, "docs", "truth", "engine.md")
 	body, err := os.ReadFile(enginePath)
 	if err != nil {
@@ -96,15 +96,15 @@ func TestStatusReportsEvidencePinHealth(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	drifted := service.EvidencePinCensus()
-	if drifted.Drifted != 1 || drifted.Broken != 0 || drifted.Intact != 0 {
-		t.Fatalf("reworded evidence reported %+v, want one drifted pin", drifted)
+	changed := service.EvidencePinCensus()
+	if changed.Drifted != 0 || changed.Broken != 1 || changed.Intact != 0 {
+		t.Fatalf("changed untyped evidence reported %+v, want one broken pin", changed)
 	}
-	if len(drifted.NonIntactPaths) != 1 ||
-		drifted.NonIntactPaths[0].Path != "docs/truth/engine.md" ||
-		drifted.NonIntactPaths[0].State != "drifted" ||
-		drifted.NonIntactPaths[0].Pins != 1 {
-		t.Fatalf("drifted census named %+v", drifted.NonIntactPaths)
+	if len(changed.NonIntactPaths) != 1 ||
+		changed.NonIntactPaths[0].Path != "docs/truth/engine.md" ||
+		changed.NonIntactPaths[0].State != "broken" ||
+		changed.NonIntactPaths[0].Pins != 1 {
+		t.Fatalf("broken census named %+v", changed.NonIntactPaths)
 	}
 
 	// The pinned document is gone: the case's ground truth cannot hold.
@@ -132,6 +132,7 @@ func TestHardNegativeCoverageIsReportedNotGated(t *testing.T) {
 	bare := pinnedFixtureCase(t, root)
 	bare.ID = "engine-identifier-unguarded"
 	bare.Topic = "engine-unguarded"
+	bare.Query = "A1B2C3D4 unguarded coverage"
 	bare.HardNegativePaths = nil
 	writeProjectEvalCase(t, root, []EvalCase{guarded, bare})
 

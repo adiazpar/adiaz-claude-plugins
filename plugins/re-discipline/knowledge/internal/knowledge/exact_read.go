@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,10 @@ type ExactReadRequest struct {
 	StartLine   int    `json:"startLine,omitempty"`
 	EndLine     int    `json:"endLine,omitempty"`
 	TokenBudget int    `json:"tokenBudget,omitempty"`
+	byteRange   bool
+	startByte   int
+	endByte     int
+	pathHandle  string
 }
 
 type ExactReadResponse struct {
@@ -30,6 +35,9 @@ type ExactReadResponse struct {
 	SHA256          string `json:"sha256"`
 	StartLine       int    `json:"startLine,omitempty"`
 	EndLine         int    `json:"endLine,omitempty"`
+	ByteRange       bool   `json:"byteRange,omitempty"`
+	StartByte       int    `json:"startByte,omitempty"`
+	EndByte         int    `json:"endByte,omitempty"`
 	Content         string `json:"content"`
 	EstimatedTokens int    `json:"estimatedTokens"`
 	Truncated       bool   `json:"truncated"`
@@ -56,6 +64,21 @@ func (service *Service) ReadExact(ctx context.Context, request ExactReadRequest)
 	if request.StartLine < 0 || request.EndLine < 0 ||
 		(request.EndLine > 0 && request.EndLine < request.StartLine) {
 		return ExactReadResponse{}, errors.New("read line range is invalid")
+	}
+	if request.Selector == "path" {
+		parsed, err := parseExactPathHandle(request.Value)
+		if err != nil {
+			return ExactReadResponse{}, err
+		}
+		if parsed.byteRange || parsed.startLine > 0 {
+			if request.StartLine != 0 || request.EndLine != 0 {
+				return ExactReadResponse{}, errors.New("read path handle range cannot be combined with startLine/endLine")
+			}
+			request.StartLine, request.EndLine = parsed.startLine, parsed.endLine
+			request.byteRange, request.startByte, request.endByte =
+				parsed.byteRange, parsed.startByte, parsed.endByte
+		}
+		request.Value, request.pathHandle = parsed.path, parsed.canonical
 	}
 	if validOne(request.Selector, "path", "chunk", "uri") {
 		return service.readIndexedExact(ctx, request)
@@ -217,7 +240,10 @@ func (service *Service) readIndexedEvidenceExact(
 }
 
 func (service *Service) readIndexedExact(ctx context.Context, request ExactReadRequest) (ExactReadResponse, error) {
-	options := ReadOptions{StartLine: request.StartLine, EndLine: request.EndLine}
+	options := ReadOptions{
+		StartLine: request.StartLine, EndLine: request.EndLine,
+		ByteRange: request.byteRange, StartByte: request.startByte, EndByte: request.endByte,
+	}
 	switch request.Selector {
 	case "path":
 		options.Path = request.Value
@@ -244,13 +270,96 @@ func (service *Service) readIndexedExact(ctx context.Context, request ExactReadR
 		return ExactReadResponse{}, errors.New(
 			"indexed exact read returned an invalid source digest")
 	}
+	handle := request.Selector + ":" + request.Value
+	if request.Selector == "path" {
+		handle = request.pathHandle
+		if handle == "" {
+			handle = "path:" + request.Value
+		}
+	}
 	return sealExactReadResponse(ExactReadResponse{
 		SchemaVersion: CampaignSchemaVersion, Selector: request.Selector,
-		Handle: request.Selector + ":" + request.Value,
-		Path:   citation.Path, SHA256: sourceDigest,
+		Handle: handle, Path: citation.Path, SHA256: sourceDigest,
 		StartLine: citation.StartLine, EndLine: citation.EndLine,
+		ByteRange: citation.ByteRange, StartByte: citation.StartByte, EndByte: citation.EndByte,
 		Content: passage,
 	}, request.TokenBudget)
+}
+
+type parsedExactPathHandle struct {
+	path               string
+	canonical          string
+	startLine, endLine int
+	byteRange          bool
+	startByte, endByte int
+}
+
+// parseExactPathHandle is the single parser for public path handles. A plain
+// canonical path remains accepted for compatibility; emitted `path:` handles
+// and their #L/#B fragments can be passed back verbatim.
+func parseExactPathHandle(value string) (parsedExactPathHandle, error) {
+	if value == "" || value != strings.TrimSpace(value) {
+		return parsedExactPathHandle{}, errors.New("path handle is empty or contains surrounding whitespace")
+	}
+	value = strings.TrimPrefix(value, "path:")
+	if strings.Contains(value, ":") {
+		return parsedExactPathHandle{}, errors.New("path handle uses an unsupported scheme")
+	}
+	pathValue, fragment := value, ""
+	if marker := strings.LastIndex(value, "#"); marker >= 0 {
+		candidate := value[marker+1:]
+		if len(candidate) >= 4 && (candidate[0] == 'L' || candidate[0] == 'B') &&
+			strings.Contains(candidate, "-"+candidate[:1]) {
+			pathValue, fragment = value[:marker], candidate
+		}
+	}
+	if err := validateRelativeRecordPath(pathValue); err != nil {
+		return parsedExactPathHandle{}, err
+	}
+	parsed := parsedExactPathHandle{path: pathValue, canonical: "path:" + pathValue}
+	if fragment == "" {
+		return parsed, nil
+	}
+	if len(fragment) < 4 || (fragment[0] != 'L' && fragment[0] != 'B') {
+		return parsedExactPathHandle{}, errors.New("path handle fragment must be #L<start>-L<end> or #B<start>-B<end>")
+	}
+	prefix := fragment[:1]
+	parts := strings.Split(fragment, "-"+prefix)
+	if len(parts) != 2 || !strings.HasPrefix(parts[0], prefix) {
+		return parsedExactPathHandle{}, errors.New("path handle range fragment is invalid")
+	}
+	start, startErr := strconv.Atoi(strings.TrimPrefix(parts[0], prefix))
+	end, endErr := strconv.Atoi(parts[1])
+	if startErr != nil || endErr != nil {
+		return parsedExactPathHandle{}, errors.New("path handle range is not numeric")
+	}
+	if prefix == "L" {
+		if start < 1 || end < start {
+			return parsedExactPathHandle{}, errors.New("path handle line range is invalid")
+		}
+		parsed.startLine, parsed.endLine = start, end
+	} else {
+		if start < 0 || end <= start {
+			return parsedExactPathHandle{}, errors.New("path handle byte range is invalid")
+		}
+		parsed.byteRange, parsed.startByte, parsed.endByte = true, start, end
+	}
+	parsed.canonical = "path:" + pathValue + "#" + fragment
+	return parsed, nil
+}
+
+func formatExactPathHandle(
+	pathValue string,
+	byteRange bool,
+	startLine, endLine, startByte, endByte int,
+) string {
+	if byteRange {
+		return fmt.Sprintf("path:%s#B%d-B%d", pathValue, startByte, endByte)
+	}
+	if startLine > 0 && endLine >= startLine {
+		return fmt.Sprintf("path:%s#L%d-L%d", pathValue, startLine, endLine)
+	}
+	return "path:" + pathValue
 }
 
 func (service *Service) readEvidenceExact(

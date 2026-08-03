@@ -17,7 +17,10 @@ and exactly one primary work item.
 2. Select the native route unless the user or normalized provider config
    explicitly selects an external provider.
 3. Write a bounded brief containing objective, exclusions, required sources,
-   write grants, required output, and observable completion test.
+   write grants, required output, and observable completion test. Submit each
+   project grant as a canonical `{mode, path}` entry: `exact` names one file
+   and `directory` names one bounded directory prefix. Do not use globs,
+   overlapping grants, engine-managed paths, or parent traversal.
 4. Submit `manager_apply` with action `run.prepare`, campaign and work-item
    revisions, actor role, idempotency key, brief digest, and context budget.
 
@@ -31,8 +34,10 @@ active/<campaign>/runs/<run-id>/
 ```
 
 The worker may write `report.md`, create `payload/` lazily, and edit only the
-explicitly granted project paths. The run ID and path returned by the engine
-are immutable; never synthesize or rename them in an adapter.
+explicitly granted project paths. The engine normalizes the grants and seals
+the same list into `run.json`, `context-pack.json`, and an authoritative block
+appended to `brief.md`. The run ID and path returned by the engine are
+immutable; never synthesize or rename them in an adapter.
 
 ## Verify Context Before Dispatch
 

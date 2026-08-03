@@ -23,10 +23,9 @@ func splitFindingEvalSuites(
 
 func findingCalibrationWeightKey(weights map[string]int) string {
 	// Finding retrieval has no graph lane. Caching across graph-only variants
-	// reduces the 81-row calibration sweep to the 27 distinct finding rankers
+	// reduces the 27-row calibration sweep to the nine distinct finding rankers
 	// without changing a measured response.
-	return fmt.Sprintf("exact=%d/fts=%d/dense=%d",
-		weights["exact"], weights["fts"], weights["dense"])
+	return fmt.Sprintf("exact=%d/fts=%d", weights["exact"], weights["fts"])
 }
 
 func findingCalibrationMetricsPassed(metrics FindingEvaluationMetrics) bool {

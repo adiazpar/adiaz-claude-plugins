@@ -3,21 +3,168 @@
   "$id": "plugin://re-discipline/schemas/migration-plan.schema.json",
   "title": "0.7 To 0.8 Migration Plan",
   "type": "object",
-  "required": ["schemaVersion", "id", "sourceVersion", "targetVersion", "projectRootDigest", "inventoryDigest", "operations", "liveCampaigns", "blockers", "createdAt", "createdBy", "previewDigest"],
+  "required": [
+    "schemaVersion", "planId", "planDigest", "project", "projectIdentity",
+    "detectedVersion", "sourceFingerprint", "liveCampaigns", "sources",
+    "operations", "conflicts", "unresolvedClassifications", "profileChanges",
+    "profileBaseline", "baselineRequirements", "hostInventory", "truthConversions", "estimate"
+  ],
   "properties": {
-    "schemaVersion": {"const": 2},
-    "id": {"type": "string", "minLength": 1},
-    "sourceVersion": {"const": "0.7"},
-    "targetVersion": {"const": "0.8"},
-    "projectRootDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "inventoryDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "operations": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-    "liveCampaigns": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-    "blockers": {"type": "array", "items": {"type": "string"}},
-    "uncertainties": {"type": "array", "items": {"type": "string"}},
-    "createdAt": {"type": "string", "format": "date-time"},
-    "createdBy": {"type": "string", "minLength": 1},
-    "previewDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    "schemaVersion": {"const": 1},
+    "planId": {"type": "string", "pattern": "^MP-[A-F0-9]{16}$"},
+    "planDigest": {"$ref": "#/$defs/digest"},
+    "project": {"type": "string", "minLength": 1},
+    "projectIdentity": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"const": "missing"}
+      ]
+    },
+    "detectedVersion": {"enum": ["0.7", "0.8"]},
+    "sourceFingerprint": {"$ref": "#/$defs/digest"},
+    "liveCampaigns": {"type": "array", "items": {"$ref": "#/$defs/slug"}, "uniqueItems": true},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "size", "mtimeNs", "sha256", "role", "destination", "disposition"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "size": {"type": "integer", "minimum": 0},
+          "mtimeNs": {"type": "integer"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "role": {"type": "string", "minLength": 1},
+          "destination": {"type": "string", "minLength": 1},
+          "disposition": {"type": "string", "minLength": 1},
+          "campaign": {"$ref": "#/$defs/slug"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": {"$ref": "migration-operation.schema.json"}
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message", "blocks"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "path": {"type": "string"},
+          "message": {"type": "string", "minLength": 1},
+          "blocks": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "unresolvedClassifications": {"type": "array", "items": {"type": "string"}},
+    "profileChanges": {"type": "array", "items": {"type": "string"}},
+    "profileBaseline": {"$ref": "migration-profile-conflict-packet.schema.json#/$defs/baseline"},
+    "profileDecision": {"$ref": "migration-profile-conversion-decision.schema.json"},
+    "baselineRequirements": {"type": "array", "items": {"type": "string"}},
+    "hostInventory": {
+      "type": "object",
+      "required": [
+        "runtimeVersion", "runtimeSource", "runtimeAvailability", "installedPlugin",
+        "cliAvailability", "cliSource", "mcpConfigurationPath", "mcpConfiguration",
+        "mcpStartupStatus", "mcpToolSchemaStatus", "managerHosts", "projectPolicyPath",
+        "projectPolicyStatus", "projectPolicyDigest", "evidenceWallStatus"
+      ],
+      "properties": {
+        "runtimeVersion": {"type": "string", "minLength": 1},
+        "runtimeSource": {"const": "invoking-shared-engine"},
+        "runtimeAvailability": {"const": "available"},
+        "installedPlugin": {"enum": ["not-probed", "unavailable"]},
+        "cliAvailability": {"const": "available"},
+        "cliSource": {"const": "invoking-shared-engine"},
+        "mcpConfigurationPath": {"const": ".mcp.json"},
+        "mcpConfiguration": {"enum": ["not-probed", "unavailable", "available"]},
+        "mcpStartupStatus": {"enum": ["not-probed", "unavailable", "passed", "failed"]},
+        "mcpToolSchemaStatus": {"enum": ["not-probed", "unavailable", "passed", "failed"]},
+        "managerHosts": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["host", "adapterPath", "adapterStatus", "configurationPath", "configurationStatus", "availability", "startupStatus", "toolSchemaStatus"],
+            "properties": {
+              "host": {"enum": ["claude", "codex"]},
+              "adapterPath": {"type": "string", "minLength": 1},
+              "adapterStatus": {"enum": ["observed-present", "observed-absent"]},
+              "configurationPath": {"type": "string", "minLength": 1},
+              "configurationStatus": {"enum": ["observed-present", "observed-absent"]},
+              "availability": {"enum": ["not-probed", "unavailable", "available"]},
+              "startupStatus": {"enum": ["not-probed", "unavailable", "passed", "failed"]},
+              "toolSchemaStatus": {"enum": ["not-probed", "unavailable", "passed", "failed"]}
+            },
+            "additionalProperties": false
+          }
+        },
+        "projectPolicyPath": {"const": ".re-discipline/project-profile.md"},
+        "projectPolicyStatus": {"enum": ["observed-present", "observed-absent"]},
+        "projectPolicyDigest": {
+          "anyOf": [
+            {"$ref": "#/$defs/digest"},
+            {"const": "missing"}
+          ]
+        },
+        "evidenceWallStatus": {"enum": ["observed-present", "observed-absent"]}
+      },
+      "additionalProperties": false
+    },
+    "truthConversions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sourcePath", "sourceDigest", "sourceText", "findingId", "destination", "title", "claim", "legacyScope", "legacyExclusions", "legacyDependencies", "syntheticQuestions", "reviewDigest", "splitIndex", "splitCount", "claimDigest"],
+        "properties": {
+          "sourcePath": {"type": "string", "pattern": "^docs/truth/.+\\.md$"},
+          "sourceDigest": {"$ref": "#/$defs/digest"},
+          "sourceText": {"type": "string", "minLength": 1},
+          "findingId": {"type": "string", "pattern": "^F-[0-9]{4,}$"},
+          "destination": {"type": "string", "pattern": "^docs/truth/findings/F-[0-9]{4,}\\.md$"},
+          "title": {"type": "string", "minLength": 1},
+          "claim": {"type": "string", "minLength": 1, "maxLength": 500},
+          "legacyConfidence": {"type": "string"},
+          "legacyVerifiedAt": {"type": "string"},
+          "legacyStatus": {"enum": ["superseded", "corrected"]},
+          "legacyCorrection": {"type": "string"},
+          "legacyScope": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "legacyExclusions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "legacyDependencies": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "syntheticQuestions": {"type": "array", "minItems": 3, "maxItems": 5, "items": {"type": "string"}, "uniqueItems": true},
+          "reviewDigest": {
+            "anyOf": [
+              {"$ref": "#/$defs/digest"},
+              {"const": ""}
+            ]
+          },
+          "splitIndex": {"type": "integer", "minimum": 1},
+          "splitCount": {"type": "integer", "minimum": 1},
+          "claimDigest": {"$ref": "#/$defs/digest"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "estimate": {
+      "type": "object",
+      "required": ["sourceFiles", "legacyReports", "campaigns", "proposedRuns", "normalizedRecords"],
+      "properties": {
+        "sourceFiles": {"type": "integer", "minimum": 0},
+        "legacyReports": {"type": "integer", "minimum": 0},
+        "campaigns": {"type": "integer", "minimum": 0},
+        "proposedRuns": {"type": "integer", "minimum": 0},
+        "normalizedRecords": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,49}$"}
   },
   "additionalProperties": false
 }

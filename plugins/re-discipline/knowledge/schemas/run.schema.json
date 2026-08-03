@@ -19,6 +19,12 @@
     "actorId": {"type": "string", "minLength": 1},
     "role": {"enum": ["manager", "investigator", "reviewer", "curator"]},
     "status": {"enum": ["prepared", "running", "returned", "completed", "blocked", "aborted", "invalidated"]},
+    "writeGrants": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/writeGrant"}
+    },
     "brief": {"$ref": "#/$defs/fileHandle"},
     "contextPack": {"$ref": "#/$defs/fileHandle"},
     "startedAt": {"type": "string", "format": "date-time"},
@@ -43,6 +49,15 @@
     {"if": {"properties": {"status": {"const": "invalidated"}}}, "then": {"required": ["invalidatedBy"]}}
   ],
   "$defs": {
+    "writeGrant": {
+      "type": "object",
+      "required": ["mode", "path"],
+      "properties": {
+        "mode": {"enum": ["exact", "directory"]},
+        "path": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[A-Za-z0-9._@+#() -]+(?:/[A-Za-z0-9._@+#() -]+)*$"}
+      },
+      "additionalProperties": false
+    },
     "fileHandle": {
       "type": "object",
       "required": ["path", "sha256"],

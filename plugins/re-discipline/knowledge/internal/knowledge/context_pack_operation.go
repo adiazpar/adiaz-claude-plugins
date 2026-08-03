@@ -16,6 +16,7 @@ type ContextPackMaterializeRequest struct {
 	AllowedTiers   []string          `json:"allowedTiers,omitempty"`
 	TokenBudget    int               `json:"tokenBudget,omitempty"`
 	RequiredPaths  []string          `json:"requiredPaths,omitempty"`
+	WriteGrants    []WriteGrant      `json:"writeGrants,omitempty"`
 	ExpectedDigest string            `json:"expectedDigest,omitempty"`
 	ExpectedPackID string            `json:"expectedPackId,omitempty"`
 }
@@ -65,6 +66,7 @@ func (service *Service) ContextPackMaterialize(
 		Target: request.Target,
 		Task:   request.Task, Role: request.Role, Tiers: request.AllowedTiers,
 		TokenBudget: request.TokenBudget, RequiredPaths: request.RequiredPaths,
+		WriteGrants: request.WriteGrants,
 	})
 	if err != nil {
 		return nil, err

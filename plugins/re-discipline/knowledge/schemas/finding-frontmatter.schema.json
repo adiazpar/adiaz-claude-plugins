@@ -101,7 +101,7 @@
     "evidence": {
       "type": "array",
       "minItems": 1,
-      "items": {"$ref": "#/$defs/evidence"}
+      "items": {"$ref": "finding-evidence.schema.json"}
     },
     "supports": {"$ref": "#/$defs/findingIds"},
     "contradicts": {"$ref": "#/$defs/findingIds"},
@@ -194,27 +194,6 @@
       "type": "array",
       "uniqueItems": true,
       "items": {"type": "string", "pattern": "^F-[0-9]{4,}$"}
-    },
-    "evidence": {
-      "type": "object",
-      "required": ["path", "sha256"],
-      "properties": {
-        "path": {"$ref": "#/$defs/nonEmptyLine"},
-        "sha256": {"$ref": "#/$defs/sha256"},
-        "startLine": {"type": "integer", "minimum": 1},
-        "endLine": {"type": "integer", "minimum": 1},
-        "objectKey": {"$ref": "#/$defs/nonEmptyLine"},
-        "sourceRun": {"$ref": "#/$defs/runId"}
-      },
-      "dependentRequired": {
-        "startLine": ["endLine"],
-        "endLine": ["startLine"]
-      },
-      "anyOf": [
-        {"required": ["startLine", "endLine"]},
-        {"required": ["objectKey"]}
-      ],
-      "additionalProperties": false
     }
   },
   "additionalProperties": false

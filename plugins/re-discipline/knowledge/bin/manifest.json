@@ -4,7 +4,7 @@
   "runtime": {
     "name": "re-discipline-knowledge",
     "version": "0.8.0",
-    "buildId": "sha256:8602406e2cd84394bba0f47764fe0e16e7cccb5555543cab8ce7dcad0a7e81eb"
+    "buildId": "sha256:a8818142f5fdaa19aa448b1e0688ce6a0f65ab383d170c760b9ed5ca50469293"
   },
   "build": {
     "goToolchain": "go1.26.5",
@@ -12,7 +12,7 @@
     "flags": [
       "-trimpath",
       "-buildvcs=false",
-      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:8602406e2cd84394bba0f47764fe0e16e7cccb5555543cab8ce7dcad0a7e81eb"
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:a8818142f5fdaa19aa448b1e0688ce6a0f65ab383d170c760b9ed5ca50469293"
     ],
     "environment": [
       "CGO_ENABLED=0",
@@ -32,8 +32,8 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:ee57227442349ecbe1520f046c7963192f904b560e972126001533cbd3d5b84b",
-      "size": 9804800,
+      "sha256": "sha256:d576a6dd19e360faa0a7d40a52c5f311eaec9b8f844a5674792da4157b820eab",
+      "size": 10830848,
       "mode": "0644"
     },
     {
@@ -41,8 +41,8 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:9bb8146488acd3523d41d735d495d2d0fe1306ba254e9ec5c48ce5dfa44235e6",
-      "size": 9136640,
+      "sha256": "sha256:d60e194eec3dceb49f7890027a8ffd294b29879fbe011b0d36c0e24dead539de",
+      "size": 10020864,
       "mode": "0644"
     },
     {
@@ -50,8 +50,8 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:48010f23754d98a8fce05f6e7ee8f5b9d407f127ed50e142dd62fb142a60c218",
-      "size": 9556094,
+      "sha256": "sha256:05e4a3eee56a35205b5f7bdfcfdea9ba2b266e6c85cb2970d4fd8760cc67a797",
+      "size": 10567806,
       "mode": "0755"
     },
     {
@@ -59,8 +59,8 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:42f2d816ba195ecf33fb8e9112bc9aa1a7a8fe4c734019a0009589bbab8afe0f",
-      "size": 9044094,
+      "sha256": "sha256:c4bb479e23f3d2f5895aa69b0131b8c5ccfd950bf114b1860159ce726395a9f0",
+      "size": 9961598,
       "mode": "0755"
     },
     {
@@ -68,8 +68,8 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:751bba894979ad618b07d8c34c2c1d24dc9b4ce8e36b8db2b49cf047b85642fe",
-      "size": 9710592,
+      "sha256": "sha256:2378d5e0f0ef449367685450b9ec9305db24ce646dac6372f4aef15d20bbd5d5",
+      "size": 10728960,
       "mode": "0755"
     },
     {
@@ -77,8 +77,8 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:eeaefb2216af097de2a0bf6cd49ee1e7711970663024d9b136a59570df39472d",
-      "size": 9237010,
+      "sha256": "sha256:7baef9c43b6c154b1c301b6f0f984668d8920fb8bf324e280dd808c4b3acbadf",
+      "size": 10122994,
       "mode": "0755"
     }
   ],
@@ -95,7 +95,7 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "re-discipline-knowledge.exe",
-      "sha256": "sha256:ee0db94b2f6f997b6b59aec75163a2d2881f31c0b992c09b9e5e04c17130228e",
+      "sha256": "sha256:cf67abcd6f50d9f72f076c38bae568983936c21bd70b9d82482dfc6ca0cce549",
       "size": 2072064,
       "mode": "0644"
     }
@@ -104,22 +104,22 @@
     {
       "kind": "benchmark-cases",
       "path": "evals/conformance/cases.json",
-      "sha256": "sha256:671a92ebf2ef988da970a4fa998cacbf4e9d279f0e51546627299ef2394cec0c",
-      "size": 7769,
+      "sha256": "sha256:6bc4e0934adc1597d92c8873d3f86c0893e932e7b3da2d599aa30b94263f4189",
+      "size": 7806,
       "mode": "0644"
     },
     {
       "kind": "benchmark-cases",
       "path": "evals/conformance/finding-cases.json",
-      "sha256": "sha256:37adb18e2bf04e777ef3eefccc449f0b52afbfc5a6283be921de9102dbf9ef20",
+      "sha256": "sha256:8ae5d7c825f3ef5c76f5548b13067a0e73c1cc61558a60f20c50cdaaed1c27bf",
       "size": 48531,
       "mode": "0644"
     },
     {
       "kind": "benchmark-fixture",
       "path": "evals/conformance/fixture/.re-discipline/config.json",
-      "sha256": "sha256:1431c3d934a87262902c4a93ed102b837fb01fd341674c038e66689376d5528b",
-      "size": 1230,
+      "sha256": "sha256:787f427a347554d7e2cab93f3b8debdb5bfeae998f1b37f80a8ce73a684bd46b",
+      "size": 1320,
       "mode": "0644"
     },
     {
@@ -306,9 +306,23 @@
     },
     {
       "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/backlog/holdout-experiment.md",
+      "sha256": "sha256:ab23939ab5e338e4ae87bea6d4358f38128b4b07277dfb79ddf852d20ac76260",
+      "size": 108,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
       "path": "evals/conformance/fixture/docs/history/INDEX.md",
       "sha256": "sha256:2d84f8cfbf60de600b7d06d85fb4f31bf2f9fda61897a40f7503f5efda549161",
       "size": 51,
+      "mode": "0644"
+    },
+    {
+      "kind": "benchmark-fixture",
+      "path": "evals/conformance/fixture/docs/history/holdout-retired.md",
+      "sha256": "sha256:05bcd2f954449cc964b2fef2aeb969c7a0386fb859bf6b70de6b6c0220d87684",
+      "size": 131,
       "mode": "0644"
     },
     {
@@ -375,6 +389,20 @@
       "mode": "0644"
     },
     {
+      "kind": "lane-ablation-decision",
+      "path": "evals/conformance/lane-ablation-decision.json",
+      "sha256": "sha256:c6a5ecfa54ccd19add5ccf5b0bbc101022c23f03268d27c18f4f57b52de7e625",
+      "size": 2080,
+      "mode": "0644"
+    },
+    {
+      "kind": "lane-ablation-report",
+      "path": "evals/conformance/lane-ablation-report.json",
+      "sha256": "sha256:d5da38a7ad38bcff1d5a9a9580e930753004421c7881af34df0d9c4f3325f208",
+      "size": 45491,
+      "mode": "0644"
+    },
+    {
       "kind": "model-artifact-documentation",
       "path": "models/artifacts/README.md",
       "sha256": "sha256:67b78163221fba8080d64bcd9522ae74b3de953d1b65af9cc1f649580b84d6be",
@@ -391,8 +419,8 @@
     {
       "kind": "model-manifest",
       "path": "models/manifest.json",
-      "sha256": "sha256:f17af57ce7009ecb2b1684c18f9b5539fb288f692af440353be7f76731b32861",
-      "size": 1835,
+      "sha256": "sha256:265ea8990c99911718aa7180fa6a01b4c1b909c20eb5ef336c0aa230252df7c8",
+      "size": 1286,
       "mode": "0644"
     },
     {
@@ -403,17 +431,10 @@
       "mode": "0644"
     },
     {
-      "kind": "model-specification",
-      "path": "models/specs/linear-reranker-v1.json",
-      "sha256": "sha256:4deaafbfeb3aaa7c90b466cf20d7c206c735260e898f8d739ad98c281f6acdd1",
-      "size": 690,
-      "mode": "0644"
-    },
-    {
       "kind": "retrieval-profile",
       "path": "profiles/balanced-v1.json",
-      "sha256": "sha256:00b507fd8dae289f3bae7f02c6c7ea3c4759f7e6c467821f44e654087dd137d7",
-      "size": 4424,
+      "sha256": "sha256:b2d236650f3bd3de8a32a8497b5697b36d82a4bafe9d4dd8075f1ef33189f150",
+      "size": 2960,
       "mode": "0644"
     },
     {
@@ -440,8 +461,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/closure-coverage.schema.json",
-      "sha256": "sha256:32f6a9b9469d6436ee6d277472bd42f1347ce277e050b6bcc7e6ec939be146e8",
-      "size": 1576,
+      "sha256": "sha256:6e1e08b0de70fa22908fccb6370b5d0aba6307bd01dbed313f254533d3db825c",
+      "size": 1804,
       "mode": "0644"
     },
     {
@@ -468,22 +489,22 @@
     {
       "kind": "json-schema",
       "path": "schemas/config.schema.json",
-      "sha256": "sha256:7bdab546d2e8157bc6d6e3194d08958c015098d211697adf48dbfc8adba4414e",
-      "size": 3808,
+      "sha256": "sha256:b73bf23da8a0bceab11953222c91e1f785d0f25208c5e06829f373fdb7d42a2f",
+      "size": 4183,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/context-card.schema.json",
-      "sha256": "sha256:ed9ef856e7a3b6ddf5fe84510521bdfad6e41d02613918b138b99ba9d28febc1",
-      "size": 1950,
+      "sha256": "sha256:b339de4983aa0fbd5f1c90a4bd6a4967baa48fd3c94bbb09fdf8a67fa5a5f9c3",
+      "size": 2052,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/context-pack.schema.json",
-      "sha256": "sha256:e59c2b7ff5a176acc7f47d29d65d6b3f2b673b04691d55542b9d4a7532e1b491",
-      "size": 6408,
+      "sha256": "sha256:e4866ed822c64f8d25d925f5bbadab6bc76ab0a0ec743d0d0595916c8861ab33",
+      "size": 6440,
       "mode": "0644"
     },
     {
@@ -496,8 +517,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/eval-case.schema.json",
-      "sha256": "sha256:c63fb5e9028f1a2c9da4eb2fe9efc7281afc6920580187a9ea631d7d8288004e",
-      "size": 4550,
+      "sha256": "sha256:377892a4b3b0a29d4541bfe0d44798e6ec98aee1da61212ad28ce7a2f034792a",
+      "size": 4608,
       "mode": "0644"
     },
     {
@@ -531,8 +552,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/intake.schema.json",
-      "sha256": "sha256:0e357c86c59995f8cde62f9bc4dc61e7ac3f40fa58f27186b4cdc87f624a7076",
-      "size": 2840,
+      "sha256": "sha256:f2cc8b74de61da157df1402f59b3038e3be2d001a258cef973381ce23c78bffd",
+      "size": 3301,
       "mode": "0644"
     },
     {
@@ -544,37 +565,65 @@
     },
     {
       "kind": "json-schema",
+      "path": "schemas/lane-ablation-report.schema.json",
+      "sha256": "sha256:6747bf7f899e5b5463bd0c185a6abe371d2044e960314e4b48a44868488d65f2",
+      "size": 9408,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
       "path": "schemas/migration-operation.schema.json",
-      "sha256": "sha256:d0b08a3e28374d7db2fdf417adfeb92fc78b7e5d45c9711788c1a59da11bae00",
-      "size": 1364,
+      "sha256": "sha256:4a4ecf25d5bb8af01163c35240b05ad73208c8d6cb44450ddcf95bb3cc0415b2",
+      "size": 899,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/migration-plan.schema.json",
-      "sha256": "sha256:05db042d7228fc81b6aa9cc3cca0c8590fc977c7d61d302a6dbee95642221529",
-      "size": 1267,
+      "sha256": "sha256:a9693756f67ec1ea8a893172d0c60ca98587c276421a02b6b2cd1d34de0f5dbc",
+      "size": 5134,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/migration-receipt.schema.json",
-      "sha256": "sha256:45cf9637c98fd589282eb5a9d5bcbe374f075d363e167cff79403a5b4045093d",
-      "size": 1488,
+      "sha256": "sha256:b999493e8d04bd495a0480bcbdf29b7853560889b7dc01831c704fa898253c74",
+      "size": 4168,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-truth-atomicization-review.schema.json",
+      "sha256": "sha256:f99c7def0b414ef635237893a7d5f06aab203e206def0749ed6cc44f63a9e58f",
+      "size": 1567,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-truth-conflict-packet.schema.json",
+      "sha256": "sha256:2297aa70cea8ccef901fa00119345610c20ab443fd4ee16cc8f859857ae4f2be",
+      "size": 1782,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-truth-review-submission.schema.json",
+      "sha256": "sha256:f2174ad06af4999996e1ca153d1c85457576e6a7bbefb744c1068b6eddad209a",
+      "size": 1448,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/model-manifest.schema.json",
-      "sha256": "sha256:66b0ab1d2035638f5c5490909f8494e5396e3d3085709e6f48c571eaeb212708",
-      "size": 2845,
+      "sha256": "sha256:305ebb9bbbadd45fcff7cb52348d3d215ce509c786c89fe40e8fe2f2f2cf23ac",
+      "size": 2514,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/normalization-queue.schema.json",
-      "sha256": "sha256:39263701265a130d69e70cccc424dd820bb85ad661a097e25271725c7cbd5019",
-      "size": 1414,
+      "sha256": "sha256:8ffd4eced7711cf299984f9d0e1556da1b02af425e239640140528f45bc55fb2",
+      "size": 2784,
       "mode": "0644"
     },
     {
@@ -586,23 +635,37 @@
     },
     {
       "kind": "json-schema",
+      "path": "schemas/project-lane-ablation-report.schema.json",
+      "sha256": "sha256:a9287a0c908ccdf94751f01986d851ca9fc15cd32b8482e8ed80309dd9ed4c9d",
+      "size": 25464,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
       "path": "schemas/retrieval-profile.schema.json",
-      "sha256": "sha256:6a62ff485cf88a431e718243ad906a844d38da1e8f15f197d96eace5c1279f3e",
-      "size": 6434,
+      "sha256": "sha256:1f9a900065c635b968ec1a89d4e6c59614d6532e03ba4870cf51d5a5487fc7f2",
+      "size": 6503,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/review-load-receipt.schema.json",
+      "sha256": "sha256:1a818e4e000b1c2a7c0c180bc5323b7c6e02f95597e9e67fe596ece3676b8f35",
+      "size": 3261,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/review-packet.schema.json",
-      "sha256": "sha256:cf66a5fffe2e713841f9060251d7746daac660b9aefda4922dc6082f9bfe31a8",
-      "size": 1683,
+      "sha256": "sha256:3d9338d4e477db6b198d9176eafb584e3bbc5b71478f85791322f50a3c7be3c0",
+      "size": 1788,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/review.schema.json",
-      "sha256": "sha256:2135ee3bb4ddedaf9a6c9863ec7b97643d5f74339b5c04333da50d926fbc8aba",
-      "size": 2468,
+      "sha256": "sha256:0856cdbc3c973e8c32385d0e1a524cca88ba5d6697541a7624b036267b57d5ae",
+      "size": 2567,
       "mode": "0644"
     },
     {
@@ -621,9 +684,23 @@
     },
     {
       "kind": "json-schema",
+      "path": "schemas/state-inventory.schema.json",
+      "sha256": "sha256:35a8d36379889c770fe2fd1a97cc49397d26f879dd91303fc73f8c4f4a30666b",
+      "size": 955,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
       "path": "schemas/transaction.schema.json",
-      "sha256": "sha256:b5457ae460aac54afae6e363819d67dac77f09f0aaf595f3d26dd35a8be4e4b4",
-      "size": 2416,
+      "sha256": "sha256:70208320cf61056c77b46d879ddfab564d8a0ac195d7cf52accd13dd360f4ef2",
+      "size": 2634,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/truth-compatibility-receipt.schema.json",
+      "sha256": "sha256:1e719e8cf8c2d261ce341ab1ca6b302d874b36139fbc2edf1f8ccf61733e0230",
+      "size": 3270,
       "mode": "0644"
     },
     {

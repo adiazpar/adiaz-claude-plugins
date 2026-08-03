@@ -25,6 +25,18 @@ type TruthProjection struct {
 // epistemic gate and every evidence digest before returning bytes; publishing
 // those bytes still belongs to the closure transaction.
 func BuildTruthProjection(boundary Boundary, finding FindingRecord, destination string) (TruthProjection, error) {
+	return buildTruthProjection(boundary, finding, finding.Evidence, destination)
+}
+
+// buildTruthProjection lets closure validate evidence at its still-live source
+// path while rendering the durable archive path that will exist after the
+// final atomic cutover. Ordinary callers use the same references for both.
+func buildTruthProjection(
+	boundary Boundary,
+	finding FindingRecord,
+	sourceEvidence []EvidenceReference,
+	destination string,
+) (TruthProjection, error) {
 	if err := ValidateFinding(finding); err != nil {
 		return TruthProjection{}, err
 	}
@@ -38,7 +50,16 @@ func BuildTruthProjection(boundary Boundary, finding FindingRecord, destination 
 	if err := validateTruthDestination(destination); err != nil {
 		return TruthProjection{}, err
 	}
-	for _, evidence := range finding.Evidence {
+	if len(sourceEvidence) != len(finding.Evidence) {
+		return TruthProjection{}, errors.New("truth projection evidence source inventory is incomplete")
+	}
+	for index, evidence := range sourceEvidence {
+		durable := finding.Evidence[index]
+		if durable.SHA256 != evidence.SHA256 || durable.StartLine != evidence.StartLine ||
+			durable.EndLine != evidence.EndLine ||
+			durable.SourceRun != evidence.SourceRun {
+			return TruthProjection{}, errors.New("truth projection durable evidence changed its source identity")
+		}
 		absolute, err := boundary.Resolve(evidence.Path, true)
 		if err != nil {
 			return TruthProjection{}, fmt.Errorf("resolve evidence %s: %w", EvidenceHandle(finding.ID, evidence), err)

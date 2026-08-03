@@ -3,7 +3,7 @@
   "$id": "plugin://re-discipline/schemas/config.schema.json",
   "title": "Re-Discipline 0.8 Project Configuration",
   "type": "object",
-  "required": ["schemaVersion", "campaignSchemaVersion", "state", "authority", "context", "payload", "closure", "memory", "knowledge", "migration"],
+  "required": ["schemaVersion", "campaignSchemaVersion", "state", "authority", "context", "payload", "reviewLoad", "closure", "memory", "knowledge", "migration"],
   "properties": {
     "schemaVersion": {"const": 3},
     "campaignSchemaVersion": {"const": 2},
@@ -49,6 +49,15 @@
         "createLazily": {"const": true},
         "maxInlineBytes": {"type": "integer", "minimum": 4096},
         "requireRegistration": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "reviewLoad": {
+      "type": "object",
+      "required": ["targetMinutesPerPacket", "targetPacketsPerSession"],
+      "properties": {
+        "targetMinutesPerPacket": {"type": "integer", "minimum": 1, "maximum": 240},
+        "targetPacketsPerSession": {"type": "integer", "minimum": 1, "maximum": 100}
       },
       "additionalProperties": false
     },

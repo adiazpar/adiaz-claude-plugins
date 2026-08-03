@@ -18,7 +18,12 @@
   "candidateFindingIds": ["F-0001"],
   "coverage": [
     {
-      "sourceHandle": "report.md#claims",
+      "sourceHandle": "path:active/campaign-slug/runs/R-20000101-0001/report.md#L1-L1",
+      "sourcePath": "active/campaign-slug/runs/R-20000101-0001/report.md",
+      "sourceSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "startLine": 1,
+      "endLine": 1,
+      "sourceLineCount": 1,
       "disposition": "candidate-finding",
       "targetId": "F-0001"
     }

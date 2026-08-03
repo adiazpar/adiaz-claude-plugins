@@ -31,6 +31,18 @@ closure. Investigators produce run provenance. Curators split and normalize
 claims, connect exact evidence, propose relations, and account for coverage.
 Curators may not ratify, decide final evidence grade, edit truth, approve their
 own packet, change retrieval profiles, delete artifacts, or close campaigns.
+Curators also may not create work-item records or update the returned curator
+run during curation submission. `spawnedWorkItems` contains proposal IDs only;
+a manager may create those records as part of the bound review transaction,
+and each created record must link back to that immutable review.
+
+Measurement is evidence, not authority. In particular, a passing
+normalized-versus-raw candidate cannot disable default report fallback. Only
+the manager's `knowledge.archive-fallback.opt-in` transition may do so, after
+the engine recomputes the exact ratified case-level evidence and atomically
+binds the durable report, authorization receipt, and resulting policy. Startup
+revalidates that binding; a missing, stale, or altered report or receipt makes
+the opt-in policy invalid rather than silently trusted.
 
 Role claims are validated with available host and engine signals. In 0.8 the
 hook boundary protects against accidental direct edits; it is not proof
@@ -39,10 +51,33 @@ without review and truth projection outside closure.
 
 ## Review And Challenge
 
-Intake coverage accounts for every claim span. Routine uncontested candidates
-may be reviewed in one submission; conflicts and truth-touching candidates
-require individual engagement. Every finding receives its own immutable
-decision receipt.
+An intake binds every source to the exact canonical returned-run report path
+and digest. Its inclusive line spans form an exhaustive partition from line 1
+through the declared normalized line count: no gaps, overlaps, or unaccounted
+tail are permitted. Each span uses the canonical
+`path:<report-path>#L<start>-L<end>` handle. Candidate evidence must match a
+targeted span exactly on source run, path, digest, line bounds, and object key.
+Duplicate spans target an existing canonical finding. Coverage-only intakes
+with zero candidates are valid and still close the source's review obligation.
+
+Manager review is reconstructed from persisted canonical state at commit. The
+submitted intake, candidate revisions and digests, packet rows, evidence
+handles, and packet digest must all agree with that state. After the packet is
+sealed, a review outcome may advance only review-owned metadata and disposition
+fields. It may not substitute the claim, evidence, sources, relations, body,
+or synthetic questions; a content correction requires a new candidate or
+explicit follow-up work. Routine uncontested candidates may be reviewed in one
+submission; conflicts and truth-touching candidates require individual
+engagement. Every finding receives its own immutable decision receipt.
+
+Closure counts a returned run as curated only when a reviewed intake
+exhaustively covers that exact run report path and digest. Reusing a path with
+different bytes, or reviewing only part of a multi-source intake, cannot satisfy
+coverage. When closure itself queued the source for normalization, the campaign
+cannot advance beyond the normalize stage until the manager also resolves that
+exact queue item with the canonical curator-run, coverage, and review receipt.
+This operational receipt does not add epistemic authority; it prevents closure
+from retiring the source tree while normalization work still points at it.
 
 Contrary evidence first marks a finding challenged. Retrieval surfaces the
 conflict immediately and traces dependents. A later manager review may dismiss,

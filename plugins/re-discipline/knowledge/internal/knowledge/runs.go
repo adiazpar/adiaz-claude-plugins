@@ -130,8 +130,9 @@ func ValidateRunTransition(previous *RunRecord, next RunRecord) error {
 		return err
 	}
 	if previous.CampaignID != next.CampaignID || previous.PrimaryWorkItemID != next.PrimaryWorkItemID ||
-		previous.ActorID != next.ActorID || previous.Role != next.Role {
-		return errors.New("run campaign, primary work item, actor, and role are immutable")
+		previous.ActorID != next.ActorID || previous.Role != next.Role ||
+		!EqualWriteGrants(previous.WriteGrants, next.WriteGrants) {
+		return errors.New("run campaign, primary work item, actor, role, and write grants are immutable")
 	}
 	if !runTransitions[previous.Status][next.Status] {
 		return fmt.Errorf("illegal run transition %s -> %s", previous.Status, next.Status)
@@ -190,6 +191,11 @@ func validateAppliedRunReturn(previous CampaignGraph, request StateTransactionRe
 		return errors.New("automatic curation queue is not a work-item record")
 	}
 	expected := continuousCurationWork(*returned, request.Actor, request.CorrelationID)
+	// Prepared writes are normalized before this invariant runs. Normalize the
+	// engine-generated expectation and the supplied value so nil and canonical
+	// empty slices cannot make either the pre-seal or service-level check fail.
+	normalizeWorkItemRecord(&actual)
+	normalizeWorkItemRecord(&expected)
 	actual.Digest, expected.Digest = "", ""
 	if !reflect.DeepEqual(actual, expected) {
 		return errors.New("automatic curation work does not match the frozen returned run")

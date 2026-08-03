@@ -19,6 +19,13 @@ func newStateTestStore(t *testing.T) (*StateStore, string) {
 	if err := os.Mkdir(filepath.Join(root, ".re-discipline"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(
+		filepath.Join(root, ".re-discipline", "project-profile.md"),
+		[]byte("# Test project\n\n"+SharedLawsMarker+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	store, err := NewStateStore(root)
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -37,7 +38,8 @@ func TestClosedCampaignIndexRebuildCutsOverToSingleArchiveFinding(t *testing.T) 
 		SchemaVersion: CampaignSchemaVersion, CampaignID: campaignID,
 		SourceRunCoverage: map[string]string{}, FindingCoverage: map[string]string{findingID: "history"},
 		WorkItemCoverage: map[string]string{}, FileRetention: map[string]string{},
-		UnresolvedConflicts: []string{}, MissingDecisions: []string{},
+		ActiveFileDispositions: map[string]string{},
+		UnresolvedConflicts:    []string{}, MissingDecisions: []string{},
 	}
 	if err := sealClosureCoverage(&coverage); err != nil {
 		t.Fatal(err)
@@ -82,6 +84,20 @@ func TestClosedCampaignIndexRebuildCutsOverToSingleArchiveFinding(t *testing.T) 
 	writeFindingFixtureFile(t, root, archiveRoot+"/README.md", []byte("# Archived campaign\n"))
 
 	inventory := assertSingleCutoverFinding(t, boundary, settings, archivePath)
+	extraPath := archiveRoot + "/findings/F-0099.md"
+	writeFindingFixtureFile(t, root, extraPath, renderedFixtureFinding(t,
+		"F-0099", extraPath, "manager-ratified", "current",
+		"This unmanifested archive finding must never become historical authority.",
+		[]string{
+			"Should this extra archive finding be indexed?",
+			"Can an unmanifested archive object become authority?",
+			"Which archive inventory controls historical indexing?",
+		}, FindingRelations{}))
+	assertSingleCutoverFinding(t, boundary, settings, activePath)
+	if err := os.Remove(filepath.Join(root, filepath.FromSlash(extraPath))); err != nil {
+		t.Fatal(err)
+	}
+	inventory = assertSingleCutoverFinding(t, boundary, settings, archivePath)
 	writeFindingFixtureFile(t, root, archivePath, append(append([]byte(nil), findingBody...), []byte("\narchive corruption\n")...))
 	assertSingleCutoverFinding(t, boundary, settings, activePath)
 	writeFindingFixtureFile(t, root, archivePath, findingBody)

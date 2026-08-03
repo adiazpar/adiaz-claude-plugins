@@ -51,6 +51,24 @@ func (graph CampaignGraph) Validate() error {
 		if err := graph.validateWorkRelations(item); err != nil {
 			return err
 		}
+		if item.Deferment != nil {
+			if trigger := item.Deferment.RevisitWhen; trigger.Type == DefermentTriggerWorkItemState {
+				if trigger.WorkItemID == item.ID {
+					return fmt.Errorf("work item %s deferment cannot wait on its own state", id)
+				}
+				if _, ok := graph.WorkItems[trigger.WorkItemID]; !ok {
+					return fmt.Errorf("work item %s deferment target %s does not resolve", id, trigger.WorkItemID)
+				}
+			}
+			if owner := item.Deferment.Owner; workItemIDRE.MatchString(owner) {
+				if owner == item.ID {
+					return fmt.Errorf("work item %s deferment cannot own itself", id)
+				}
+				if _, ok := graph.WorkItems[owner]; !ok {
+					return fmt.Errorf("work item %s deferment owner %s does not resolve", id, owner)
+				}
+			}
+		}
 	}
 	if err := graph.validateDependencyCycles(); err != nil {
 		return err
@@ -106,6 +124,16 @@ func (graph CampaignGraph) Validate() error {
 				return fmt.Errorf("intake %s candidate finding %s does not resolve", id, findingID)
 			}
 		}
+		packet := CurationPacket{Intake: intake}
+		for _, findingID := range intake.CandidateFindingIDs {
+			packet.Candidates = append(packet.Candidates, FindingDocument{Record: graph.Findings[findingID]})
+		}
+		if _, err := validateCurationGraphBindings(graph, packet, false); err != nil {
+			return fmt.Errorf("intake %s: %w", id, err)
+		}
+		if intake.Status == "reviewed" && !reviewBindsIntake(graph, intake) {
+			return fmt.Errorf("reviewed intake %s has no immutable review receipt", id)
+		}
 	}
 	for id, review := range graph.Reviews {
 		if id != review.ID || review.CampaignID != campaignID {
@@ -124,6 +152,9 @@ func (graph CampaignGraph) Validate() error {
 				return fmt.Errorf("review %s does not bind finding %s revision", id, decision.FindingID)
 			}
 		}
+	}
+	if err := ValidateReviewLoadSessions(graph.Reviews); err != nil {
+		return err
 	}
 	supersededBy := map[string][]string{}
 	for id, finding := range graph.Findings {
@@ -219,6 +250,28 @@ func (graph CampaignGraph) Validate() error {
 		}
 	}
 	return nil
+}
+
+func reviewBindsIntake(graph CampaignGraph, intake IntakeRecord) bool {
+	for _, review := range graph.Reviews {
+		if review.CampaignID != intake.CampaignID || review.IntakeID != intake.ID ||
+			review.IntakeRevision != intake.Revision-1 ||
+			len(review.Decisions) != len(intake.CandidateFindingIDs) {
+			continue
+		}
+		decisions := map[string]bool{}
+		for _, decision := range review.Decisions {
+			decisions[decision.FindingID] = true
+		}
+		complete := true
+		for _, findingID := range intake.CandidateFindingIDs {
+			complete = complete && decisions[findingID]
+		}
+		if complete && len(decisions) == len(intake.CandidateFindingIDs) {
+			return true
+		}
+	}
+	return false
 }
 
 func (graph CampaignGraph) validateWorkRelations(item WorkItemRecord) error {

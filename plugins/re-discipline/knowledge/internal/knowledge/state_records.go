@@ -24,7 +24,7 @@ var (
 	fileSHA256RE    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	correlationIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	actionIDRE      = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
-	cardRelationRE  = regexp.MustCompile(`^(?:(?:supports|contradicts|depends-on|supersedes|duplicates|answers|incoming-supports|incoming-contradicts|incoming-depends-on|incoming-duplicates|incoming-answers|superseded-by):F-[0-9]{4,}|spawned:W-[0-9]{4,})$`)
+	cardRelationRE  = regexp.MustCompile(`^(?:(?:supports|contradicts|depends-on|supersedes|duplicates|answers|incoming-supports|incoming-contradicts|incoming-depends-on|incoming-duplicates|incoming-answers|superseded-by|stale-dependent):F-[0-9]{4,}|stale-path:F-[0-9]{4,}(?:>F-[0-9]{4,})+|spawned:W-[0-9]{4,})$`)
 )
 
 // RecordMeta is carried by every canonical 0.8 record. Digest is calculated
@@ -72,11 +72,22 @@ type WorkRelations struct {
 	SpawnedByIDs []string `json:"spawnedByIds,omitempty"`
 }
 
+type DefermentTrigger struct {
+	Type       string `json:"type"`
+	At         string `json:"at,omitempty"`
+	WorkItemID string `json:"workItemId,omitempty"`
+	State      string `json:"state,omitempty"`
+	Action     string `json:"action,omitempty"`
+	AffectedID string `json:"affectedId,omitempty"`
+}
+
 type DefermentContract struct {
-	Reason        string `json:"reason"`
-	RevisitWhen   string `json:"revisitWhen"`
-	Owner         string `json:"owner"`
-	BlocksClosure bool   `json:"blocksClosure"`
+	Reason             string           `json:"reason"`
+	RevisitWhen        DefermentTrigger `json:"revisitWhen"`
+	Owner              string           `json:"owner"`
+	BlocksClosure      bool             `json:"blocksClosure"`
+	ClosureDisposition string           `json:"closureDisposition"`
+	ClosureDestination string           `json:"closureDestination,omitempty"`
 }
 
 type WorkItemRecord struct {
@@ -119,25 +130,26 @@ type FileHandle struct {
 
 type RunRecord struct {
 	RecordMeta
-	CampaignID          string      `json:"campaignId"`
-	PrimaryWorkItemID   string      `json:"primaryWorkItemId"`
-	ActorID             string      `json:"actorId"`
-	Role                string      `json:"role"`
-	Status              string      `json:"status"`
-	Brief               *FileHandle `json:"brief,omitempty"`
-	ContextPack         *FileHandle `json:"contextPack,omitempty"`
-	StartedAt           string      `json:"startedAt,omitempty"`
-	ReturnedAt          string      `json:"returnedAt,omitempty"`
-	ReviewedAt          string      `json:"reviewedAt,omitempty"`
-	TerminalAt          string      `json:"terminalAt,omitempty"`
-	Files               []RunFile   `json:"files,omitempty"`
-	ChangedProjectPaths []string    `json:"changedProjectPaths,omitempty"`
-	Report              *FileHandle `json:"report,omitempty"`
-	FindingIDs          []string    `json:"findingIds,omitempty"`
-	SpawnedWorkItemIDs  []string    `json:"spawnedWorkItemIds,omitempty"`
-	ResultSummary       string      `json:"resultSummary,omitempty"`
-	InvalidatedBy       string      `json:"invalidatedBy,omitempty"`
-	RetryOf             string      `json:"retryOf,omitempty"`
+	CampaignID          string       `json:"campaignId"`
+	PrimaryWorkItemID   string       `json:"primaryWorkItemId"`
+	ActorID             string       `json:"actorId"`
+	Role                string       `json:"role"`
+	Status              string       `json:"status"`
+	WriteGrants         []WriteGrant `json:"writeGrants,omitempty"`
+	Brief               *FileHandle  `json:"brief,omitempty"`
+	ContextPack         *FileHandle  `json:"contextPack,omitempty"`
+	StartedAt           string       `json:"startedAt,omitempty"`
+	ReturnedAt          string       `json:"returnedAt,omitempty"`
+	ReviewedAt          string       `json:"reviewedAt,omitempty"`
+	TerminalAt          string       `json:"terminalAt,omitempty"`
+	Files               []RunFile    `json:"files,omitempty"`
+	ChangedProjectPaths []string     `json:"changedProjectPaths,omitempty"`
+	Report              *FileHandle  `json:"report,omitempty"`
+	FindingIDs          []string     `json:"findingIds,omitempty"`
+	SpawnedWorkItemIDs  []string     `json:"spawnedWorkItemIds,omitempty"`
+	ResultSummary       string       `json:"resultSummary,omitempty"`
+	InvalidatedBy       string       `json:"invalidatedBy,omitempty"`
+	RetryOf             string       `json:"retryOf,omitempty"`
 }
 
 type EvidenceReference struct {
@@ -193,10 +205,15 @@ type FindingRecord struct {
 }
 
 type CoverageEntry struct {
-	SourceHandle string `json:"sourceHandle"`
-	Disposition  string `json:"disposition"`
-	TargetID     string `json:"targetId,omitempty"`
-	Rationale    string `json:"rationale,omitempty"`
+	SourceHandle    string `json:"sourceHandle"`
+	SourcePath      string `json:"sourcePath"`
+	SourceSHA256    string `json:"sourceSha256"`
+	StartLine       int    `json:"startLine"`
+	EndLine         int    `json:"endLine"`
+	SourceLineCount int    `json:"sourceLineCount"`
+	Disposition     string `json:"disposition"`
+	TargetID        string `json:"targetId,omitempty"`
+	Rationale       string `json:"rationale,omitempty"`
 }
 
 type IntakeRecord struct {
@@ -227,17 +244,18 @@ type ReviewDecision struct {
 
 type ReviewRecord struct {
 	RecordMeta
-	CampaignID          string           `json:"campaignId"`
-	Reviewer            string           `json:"reviewer"`
-	Authority           string           `json:"authority"`
-	IntakeID            string           `json:"intakeId"`
-	IntakeRevision      int64            `json:"intakeRevision"`
-	PacketDigest        string           `json:"packetDigest"`
-	Decisions           []ReviewDecision `json:"decisions"`
-	UnresolvedConflicts []string         `json:"unresolvedConflicts,omitempty"`
-	PriorReviewID       string           `json:"priorReviewId,omitempty"`
-	ResultingEventIDs   []string         `json:"resultingEventIds,omitempty"`
-	ResultingRecordIDs  []string         `json:"resultingRecordIds,omitempty"`
+	CampaignID          string            `json:"campaignId"`
+	Reviewer            string            `json:"reviewer"`
+	Authority           string            `json:"authority"`
+	IntakeID            string            `json:"intakeId"`
+	IntakeRevision      int64             `json:"intakeRevision"`
+	PacketDigest        string            `json:"packetDigest"`
+	ReviewLoad          ReviewLoadReceipt `json:"reviewLoad"`
+	Decisions           []ReviewDecision  `json:"decisions"`
+	UnresolvedConflicts []string          `json:"unresolvedConflicts,omitempty"`
+	PriorReviewID       string            `json:"priorReviewId,omitempty"`
+	ResultingEventIDs   []string          `json:"resultingEventIds,omitempty"`
+	ResultingRecordIDs  []string          `json:"resultingRecordIds,omitempty"`
 }
 
 type StateEvent struct {
@@ -262,15 +280,16 @@ type StateEvent struct {
 }
 
 type ClosureCoverage struct {
-	SchemaVersion       int               `json:"schemaVersion"`
-	CampaignID          string            `json:"campaignId"`
-	SourceRunCoverage   map[string]string `json:"sourceRunCoverage"`
-	FindingCoverage     map[string]string `json:"findingCoverage"`
-	WorkItemCoverage    map[string]string `json:"workItemCoverage"`
-	FileRetention       map[string]string `json:"fileRetention"`
-	UnresolvedConflicts []string          `json:"unresolvedConflicts"`
-	MissingDecisions    []string          `json:"missingDecisions"`
-	Digest              string            `json:"digest"`
+	SchemaVersion          int               `json:"schemaVersion"`
+	CampaignID             string            `json:"campaignId"`
+	SourceRunCoverage      map[string]string `json:"sourceRunCoverage"`
+	FindingCoverage        map[string]string `json:"findingCoverage"`
+	WorkItemCoverage       map[string]string `json:"workItemCoverage"`
+	FileRetention          map[string]string `json:"fileRetention"`
+	ActiveFileDispositions map[string]string `json:"activeFileDispositions"`
+	UnresolvedConflicts    []string          `json:"unresolvedConflicts"`
+	MissingDecisions       []string          `json:"missingDecisions"`
+	Digest                 string            `json:"digest"`
 }
 
 type ClosureJob struct {
@@ -284,6 +303,7 @@ type ClosureJob struct {
 	ArchiveDestination     string            `json:"archiveDestination,omitempty"`
 	TruthDigests           map[string]string `json:"truthDigests,omitempty"`
 	ProjectionDigests      map[string]string `json:"projectionDigests,omitempty"`
+	StagingDigest          string            `json:"stagingDigest,omitempty"`
 	ArchiveDigest          string            `json:"archiveDigest,omitempty"`
 	Blockers               []string          `json:"blockers,omitempty"`
 }
@@ -493,9 +513,11 @@ func ValidateWorkItem(record WorkItemRecord) error {
 		return err
 	}
 	if record.State == "deferred" {
-		if record.Deferment == nil || strings.TrimSpace(record.Deferment.Reason) == "" ||
-			strings.TrimSpace(record.Deferment.RevisitWhen) == "" || strings.TrimSpace(record.Deferment.Owner) == "" {
-			return errors.New("deferred work requires reason, revisitWhen, and owner")
+		if record.Deferment == nil {
+			return errors.New("deferred work requires a deferment contract")
+		}
+		if err := ValidateDefermentContract(*record.Deferment); err != nil {
+			return fmt.Errorf("deferment: %w", err)
 		}
 	} else if record.Deferment != nil {
 		return errors.New("only deferred work may carry a deferment contract")
@@ -524,6 +546,9 @@ func ValidateRun(record RunRecord) error {
 	if !validOne(record.Role, "manager", "investigator", "reviewer", "curator") ||
 		!validOne(record.Status, "prepared", "running", "returned", "completed", "blocked", "aborted", "invalidated") {
 		return errors.New("run role or status is unsupported")
+	}
+	if err := ValidateCanonicalWriteGrants(record.WriteGrants); err != nil {
+		return err
 	}
 	if record.Role != "manager" && (record.Brief == nil || record.ContextPack == nil) {
 		return errors.New("delegated runs require brief and verified context-pack handles")
@@ -696,8 +721,8 @@ func ValidateIntake(record IntakeRecord) error {
 		return err
 	}
 	if !campaignIDRE.MatchString(record.CampaignID) || len(record.SourceRuns) == 0 ||
-		len(record.CandidateFindingIDs) == 0 || len(record.Coverage) == 0 || record.Triage == nil {
-		return errors.New("intake requires campaign, source runs, candidates, coverage, and triage")
+		len(record.Coverage) == 0 || record.Triage == nil {
+		return errors.New("intake requires campaign, source runs, coverage, and triage")
 	}
 	if !validOne(record.Status, "draft", "submitted", "reviewed", "superseded") {
 		return fmt.Errorf("unsupported intake status %q", record.Status)
@@ -712,8 +737,18 @@ func ValidateIntake(record IntakeRecord) error {
 		}
 		seenSources[source.Path] = true
 	}
+	if len(record.CandidateFindingIDs) > 10 {
+		return errors.New("intake may contain at most 10 candidate findings")
+	}
 	if err := validateIDList("intake candidate findings", record.CandidateFindingIDs, findingIDRE, ""); err != nil {
 		return err
+	}
+	if err := validateIDList("intake spawned work proposals", record.SpawnedWorkItems, workItemIDRE, ""); err != nil {
+		return err
+	}
+	candidates := map[string]bool{}
+	for _, findingID := range record.CandidateFindingIDs {
+		candidates[findingID] = true
 	}
 	if len(record.Triage) != len(record.CandidateFindingIDs) {
 		return errors.New("intake triage must classify every candidate exactly once")
@@ -723,21 +758,88 @@ func ValidateIntake(record IntakeRecord) error {
 			return fmt.Errorf("intake candidate %s requires routine or attention triage", findingID)
 		}
 	}
+	sourceHandles := map[string]FileHandle{}
+	for _, source := range record.SourceRuns {
+		sourceHandles[coverageSourceKey(source.Path, source.SHA256)] = source
+	}
 	seenCoverage := map[string]bool{}
+	coverageBySource := map[string][]CoverageEntry{}
+	candidateCoverage := map[string]bool{}
 	for _, coverage := range record.Coverage {
 		if strings.TrimSpace(coverage.SourceHandle) == "" || seenCoverage[coverage.SourceHandle] ||
 			!validOne(coverage.Disposition, "candidate-finding", "duplicate", "non-claim", "unresolved", "out-of-scope") {
 			return errors.New("coverage requires unique handles and a supported disposition")
 		}
+		if err := validateRelativeRecordPath(coverage.SourcePath); err != nil ||
+			!fileSHA256RE.MatchString(coverage.SourceSHA256) || coverage.StartLine < 1 ||
+			coverage.EndLine < coverage.StartLine || coverage.SourceLineCount < coverage.EndLine {
+			return errors.New("coverage requires a canonical source path, digest, and valid inclusive line span")
+		}
+		key := coverageSourceKey(coverage.SourcePath, coverage.SourceSHA256)
+		if _, ok := sourceHandles[key]; !ok {
+			return fmt.Errorf("coverage source %s is not an exact intake source", coverage.SourcePath)
+		}
+		if coverage.SourceHandle != canonicalCoverageHandle(coverage) {
+			return fmt.Errorf("coverage handle %q is not canonical for its declared source span", coverage.SourceHandle)
+		}
 		seenCoverage[coverage.SourceHandle] = true
+		coverageBySource[key] = append(coverageBySource[key], coverage)
 		if validOne(coverage.Disposition, "candidate-finding", "duplicate") && !findingIDRE.MatchString(coverage.TargetID) {
 			return errors.New("finding coverage dispositions require a target finding")
+		}
+		if coverage.Disposition == "candidate-finding" && !candidates[coverage.TargetID] {
+			return errors.New("candidate-finding coverage must target a finding in the intake")
+		}
+		if coverage.Disposition == "candidate-finding" {
+			candidateCoverage[coverage.TargetID] = true
+		}
+		if !validOne(coverage.Disposition, "candidate-finding", "duplicate") && coverage.TargetID != "" {
+			return errors.New("only finding coverage dispositions may name a target finding")
 		}
 		if validOne(coverage.Disposition, "unresolved", "out-of-scope") && strings.TrimSpace(coverage.Rationale) == "" {
 			return errors.New("unresolved or out-of-scope coverage requires rationale")
 		}
 	}
+	for findingID := range candidates {
+		if !candidateCoverage[findingID] {
+			return fmt.Errorf("intake candidate %s has no candidate-finding coverage span", findingID)
+		}
+	}
+	for key, source := range sourceHandles {
+		spans := append([]CoverageEntry(nil), coverageBySource[key]...)
+		if len(spans) == 0 {
+			return fmt.Errorf("intake source %s has no coverage spans", source.Path)
+		}
+		sort.Slice(spans, func(i, j int) bool {
+			if spans[i].StartLine != spans[j].StartLine {
+				return spans[i].StartLine < spans[j].StartLine
+			}
+			return spans[i].EndLine < spans[j].EndLine
+		})
+		lineCount := spans[0].SourceLineCount
+		nextLine := 1
+		for _, span := range spans {
+			if span.SourceLineCount != lineCount {
+				return fmt.Errorf("coverage for %s disagrees on source line count", source.Path)
+			}
+			if span.StartLine != nextLine {
+				return fmt.Errorf("coverage for %s has a gap or overlap at line %d", source.Path, nextLine)
+			}
+			nextLine = span.EndLine + 1
+		}
+		if nextLine != lineCount+1 {
+			return fmt.Errorf("coverage for %s ends at line %d, expected %d", source.Path, nextLine-1, lineCount)
+		}
+	}
 	return nil
+}
+
+func coverageSourceKey(sourcePath, sourceSHA256 string) string {
+	return sourcePath + "\x00" + sourceSHA256
+}
+
+func canonicalCoverageHandle(entry CoverageEntry) string {
+	return fmt.Sprintf("path:%s#L%d-L%d", entry.SourcePath, entry.StartLine, entry.EndLine)
 }
 
 func ValidateReview(record ReviewRecord) error {
@@ -746,8 +848,18 @@ func ValidateReview(record ReviewRecord) error {
 	}
 	if !campaignIDRE.MatchString(record.CampaignID) || strings.TrimSpace(record.Reviewer) == "" ||
 		!validOne(record.Authority, "manager", "reviewer") || !intakeIDRE.MatchString(record.IntakeID) ||
-		record.IntakeRevision < 1 || !digestRE.MatchString(record.PacketDigest) || len(record.Decisions) == 0 {
-		return errors.New("review campaign, reviewer, authority, intake revision, packet digest, and decisions are required")
+		record.IntakeRevision < 1 || !digestRE.MatchString(record.PacketDigest) {
+		return errors.New("review campaign, reviewer, authority, intake revision, and packet digest are required")
+	}
+	if err := ValidateReviewLoadReceipt(record.ReviewLoad); err != nil {
+		return err
+	}
+	if record.ReviewLoad.ReviewID != record.ID || record.ReviewLoad.CampaignID != record.CampaignID ||
+		record.ReviewLoad.PacketDigest != record.PacketDigest {
+		return errors.New("review-load receipt does not bind its immutable review")
+	}
+	if len(record.Decisions) > 10 {
+		return errors.New("review may contain at most 10 candidate decisions")
 	}
 	seen := map[string]bool{}
 	for _, decision := range record.Decisions {

@@ -71,10 +71,13 @@ func DefaultBootstrapConfig() BootstrapConfig {
 		},
 		Context: ContextConfig{
 			ManagerCardTokens: 6144, DrafterCardTokens: 3072,
-			MaxCards: 16, MaxExpansionBytes: 32768, LeaseMode: "none",
+			MaxCards: 16, MaxExpansionBytes: 32768, LeaseMode: "memory-only",
 		},
 		Payload: PayloadConfig{
 			CreateLazily: true, MaxInlineBytes: 1048576, RequireRegistration: true,
+		},
+		ReviewLoad: ReviewLoadConfig{
+			TargetMinutesPerPacket: 12, TargetPacketsPerSession: 6,
 		},
 		Closure: ClosureConfig{
 			RequireRunCoverage: true, RequireFindingDisposition: true,
@@ -413,6 +416,10 @@ func ValidateBootstrap(config BootstrapConfig) error {
 		!config.Payload.RequireRegistration {
 		return errors.New("payload configuration must be lazy, bounded, and registration-gated")
 	}
+	if config.ReviewLoad.TargetMinutesPerPacket < 1 || config.ReviewLoad.TargetMinutesPerPacket > 240 ||
+		config.ReviewLoad.TargetPacketsPerSession < 1 || config.ReviewLoad.TargetPacketsPerSession > 100 {
+		return errors.New("review-load targets must be 1..240 minutes per packet and 1..100 packets per session")
+	}
 	if !config.Closure.RequireRunCoverage || !config.Closure.RequireFindingDisposition ||
 		!config.Closure.RequireFileRetention || !config.Closure.RequireArchiveVerification {
 		return errors.New("closure configuration cannot disable required gates")
@@ -455,6 +462,9 @@ func ValidateSettings(settings KnowledgeSettings) error {
 	for index, source := range settings.Sources.Additional {
 		normalized := strings.ReplaceAll(source.Path, "\\", "/")
 		clean := path.Clean(normalized)
+		// IsForbiddenSource includes the measurement-receipt root. A project
+		// cannot turn benchmark output into indexed evidence by declaring it as
+		// an additional source class.
 		if normalized == "" || normalized != clean || clean == "." || clean == ".." ||
 			strings.HasPrefix(clean, "../") || filepath.IsAbs(filepath.FromSlash(clean)) ||
 			IsForbiddenSource(clean) || IsForbiddenSource(clean+"/probe.md") {
@@ -688,7 +698,7 @@ func ValidateProfile(profile RetrievalProfile) error {
 	}
 	names := map[string]bool{}
 	digests := map[string]bool{}
-	baselineCount, denseCount, rerankCount := 0, 0, 0
+	baselineCount, denseCount := 0, 0
 	for _, row := range profile.EffectiveProfiles {
 		if !managedSlugRE.MatchString(row.Name) || names[row.Name] ||
 			len(row.Description) > 2000 {
@@ -701,7 +711,7 @@ func ValidateProfile(profile RetrievalProfile) error {
 				return fmt.Errorf("effective profile %q repeats retrieval lane %q", row.Name, lane)
 			}
 			switch lane {
-			case "exact", "fts", "graph", "dense", "rerank":
+			case "exact", "fts", "graph", "dense":
 				laneSet[lane] = true
 			default:
 				return fmt.Errorf("unsupported retrieval lane %q", lane)
@@ -725,15 +735,8 @@ func ValidateProfile(profile RetrievalProfile) error {
 		if !laneSet["exact"] || !laneSet["fts"] || !laneSet["graph"] {
 			return fmt.Errorf("effective profile %q omits required lexical safety lanes", row.Name)
 		}
-		if laneSet["dense"] != (row.Requires.Embedding != nil) ||
-			laneSet["rerank"] != (row.Requires.Reranker != nil) {
-			return fmt.Errorf("effective profile %q lane and model requirements disagree", row.Name)
-		}
-		if laneSet["rerank"] && (!laneSet["dense"] || row.RerankDepth < 1) {
-			return fmt.Errorf("effective profile %q has inconsistent reranking shape", row.Name)
-		}
-		if !laneSet["rerank"] && row.RerankDepth != 0 {
-			return fmt.Errorf("effective profile %q has rerankDepth without reranker", row.Name)
+		if laneSet["dense"] != (row.Requires.Embedding != nil) {
+			return fmt.Errorf("effective profile %q dense lane and embedding requirement disagree", row.Name)
 		}
 		for _, lane := range []string{"exact", "fts", "graph"} {
 			if row.Weights[lane] <= 0 {
@@ -747,7 +750,6 @@ func ValidateProfile(profile RetrievalProfile) error {
 			return fmt.Errorf("effective profile %q weights an inactive dense lane", row.Name)
 		}
 		if row.RRFK < 1 || row.RRFK > 1000 ||
-			row.RerankDepth < 0 || row.RerankDepth > 100 ||
 			row.MaxPerDocument < 1 || row.MaxPerDocument > 20 ||
 			row.Packing.MaxPassages < 1 || row.Packing.MaxPassages > 50 ||
 			row.Packing.MaxBytes < 4096 || row.Packing.MaxBytes > 262144 {
@@ -811,17 +813,15 @@ func ValidateProfile(profile RetrievalProfile) error {
 		if row.Benchmark.Status != "passed" {
 			continue
 		}
-		if row.Requires.Embedding == nil && row.Requires.Reranker == nil {
+		if row.Requires.Embedding == nil {
 			baselineCount++
-		} else if row.Requires.Embedding != nil && row.Requires.Reranker == nil {
+		} else {
 			denseCount++
-		} else if row.Requires.Embedding != nil && row.Requires.Reranker != nil {
-			rerankCount++
 		}
 	}
-	if baselineCount != 1 || denseCount != 1 || rerankCount != 1 {
+	if baselineCount != 1 || denseCount != 1 || len(profile.EffectiveProfiles) != 2 {
 		return fmt.Errorf(
-			"profile must contain exactly one passed full, no-rerank, and model-free capability row")
+			"profile must contain exactly one passed dense and one passed model-free capability row")
 	}
 	return nil
 }
@@ -832,19 +832,15 @@ func ValidateProfileModels(profile RetrievalProfile, manifest ModelManifest) err
 		models[model.ID] = model
 	}
 	for _, row := range profile.EffectiveProfiles {
-		for role, id := range map[string]*string{
-			"embedding": row.Requires.Embedding, "reranker": row.Requires.Reranker,
-		} {
-			if id == nil {
-				continue
-			}
-			model, ok := models[*id]
-			if !ok {
-				return fmt.Errorf("profile %q references unmanifested model %q", row.Name, *id)
-			}
-			if model.Role != role {
-				return fmt.Errorf("profile %q uses model %q for wrong role", row.Name, *id)
-			}
+		if row.Requires.Embedding == nil {
+			continue
+		}
+		model, ok := models[*row.Requires.Embedding]
+		if !ok {
+			return fmt.Errorf("profile %q references unmanifested model %q", row.Name, *row.Requires.Embedding)
+		}
+		if model.Role != "embedding" {
+			return fmt.Errorf("profile %q uses model %q for the wrong role", row.Name, *row.Requires.Embedding)
 		}
 	}
 	return nil
@@ -882,8 +878,9 @@ func LoadModelManifest(assetRoot string) (ModelManifest, error) {
 	}
 	manifest.ExecutableModels = map[string]ModelIdentity{}
 	manifest.UnavailableModels = map[string]string{}
-	if len(manifest.Models) == 0 || len(manifest.Models) > 16 {
-		return ModelManifest{}, fmt.Errorf("model manifest must contain 1 to 16 models")
+	if len(manifest.Models) != 1 {
+		return ModelManifest{}, errors.New(
+			"model manifest must contain exactly one embedding model")
 	}
 	seen := map[string]bool{}
 	for _, model := range manifest.Models {
@@ -891,12 +888,12 @@ func LoadModelManifest(assetRoot string) (ModelManifest, error) {
 			!hexDigestRE.MatchString(model.SpecSHA256) ||
 			model.NetworkRequired || !modelRevisionRE.MatchString(model.Revision) ||
 			strings.TrimSpace(model.License) == "" ||
-			len(model.Description) > 2000 || model.Dimensions < 0 ||
+			len(model.Description) > 2000 || model.Dimensions < 1 ||
 			model.Dimensions > 4096 {
 			return ModelManifest{}, fmt.Errorf("invalid or network-enabled model manifest entry %q", model.ID)
 		}
-		if model.Role != "embedding" && model.Role != "reranker" {
-			return ModelManifest{}, fmt.Errorf("model %q has unsupported role", model.ID)
+		if model.Role != "embedding" {
+			return ModelManifest{}, fmt.Errorf("model %q has unsupported role %q", model.ID, model.Role)
 		}
 		switch model.Implementation {
 		case "builtin", "bundled-local", "onnx-local":
@@ -932,17 +929,11 @@ func LoadModelManifest(assetRoot string) (ModelManifest, error) {
 		if err := json.Unmarshal(specBody, &declared); err != nil ||
 			declared.SchemaVersion != 1 || declared.ID != model.ID ||
 			declared.Revision != model.Revision ||
-			declared.License != model.License || declared.NetworkRequired {
+			declared.License != model.License || declared.NetworkRequired ||
+			declared.Dimensions != model.Dimensions {
 			return ModelManifest{}, fmt.Errorf("model spec identity mismatch for %q", model.ID)
 		}
-		if model.Role == "embedding" && declared.Dimensions != model.Dimensions {
-			return ModelManifest{}, fmt.Errorf("embedding dimensions mismatch for %q", model.ID)
-		}
-		if model.Role == "embedding" && model.Dimensions < 1 {
-			return ModelManifest{}, fmt.Errorf("embedding dimensions are missing for %q", model.ID)
-		}
-		if model.Implementation == "builtin" && model.Role == "embedding" &&
-			model.Dimensions != featureDimensions {
+		if model.Implementation == "builtin" && model.Dimensions != featureDimensions {
 			return ModelManifest{}, fmt.Errorf("builtin feature embedding dimensions mismatch for %q", model.ID)
 		}
 		if model.Implementation == "bundled-local" {
@@ -1048,9 +1039,11 @@ func SelectEffectiveProfile(
 	profile RetrievalProfile,
 	manifest ModelManifest,
 	runtime RuntimeIdentity,
-	disableDense bool,
-	disableRerank bool,
 ) (SelectedProfile, error) {
+	if len(manifest.Models) != 1 || manifest.Models[0].Role != "embedding" {
+		return SelectedProfile{}, errors.New(
+			"profile selection requires exactly one validated embedding manifest entry")
+	}
 	models := map[string]ModelIdentity{}
 	for _, model := range manifest.Models {
 		if identity, ok := manifest.ExecutableModels[model.ID]; ok {
@@ -1088,12 +1081,10 @@ func SelectEffectiveProfile(
 		if row.Benchmark.Status != "passed" {
 			continue
 		}
+		activeModels := []ModelIdentity{}
 		if row.Requires.Embedding != nil {
-			if disableDense {
-				missingReasons = append(missingReasons, "embedding-disabled")
-				continue
-			}
-			if _, ok := models[*row.Requires.Embedding]; !ok {
+			identity, ok := models[*row.Requires.Embedding]
+			if !ok {
 				reason := manifest.UnavailableModels[*row.Requires.Embedding]
 				if reason == "" {
 					reason = "unavailable"
@@ -1104,30 +1095,7 @@ func SelectEffectiveProfile(
 				)
 				continue
 			}
-		}
-		if row.Requires.Reranker != nil {
-			if disableRerank {
-				missingReasons = append(missingReasons, "reranker-disabled")
-				continue
-			}
-			if _, ok := models[*row.Requires.Reranker]; !ok {
-				reason := manifest.UnavailableModels[*row.Requires.Reranker]
-				if reason == "" {
-					reason = "unavailable"
-				}
-				missingReasons = append(
-					missingReasons,
-					"reranker-"+reason+":"+*row.Requires.Reranker,
-				)
-				continue
-			}
-		}
-		activeModels := []ModelIdentity{}
-		for _, id := range []*string{row.Requires.Embedding, row.Requires.Reranker} {
-			if id == nil {
-				continue
-			}
-			activeModels = append(activeModels, models[*id])
+			activeModels = append(activeModels, identity)
 		}
 		identityInput := struct {
 			Profile EffectiveProfile        `json:"profile"`
@@ -1156,6 +1124,13 @@ func SelectEffectiveProfile(
 	return SelectedProfile{}, fmt.Errorf("no independently benchmarked effective profile matches available capabilities")
 }
 
+func capabilityPreference(row EffectiveProfile) int {
+	if row.Requires.Embedding != nil {
+		return 0
+	}
+	return 1
+}
+
 func runtimeEffectiveProfile(row EffectiveProfile) EffectiveProfile {
 	row = cloneEffectiveProfile(row)
 	// Benchmark receipts and prose do not change execution. Excluding them
@@ -1164,17 +1139,6 @@ func runtimeEffectiveProfile(row EffectiveProfile) EffectiveProfile {
 	row.Description = ""
 	row.Benchmark = BenchmarkEvidence{}
 	return row
-}
-
-func capabilityPreference(row EffectiveProfile) int {
-	switch {
-	case row.Requires.Embedding != nil && row.Requires.Reranker != nil:
-		return 0
-	case row.Requires.Embedding != nil:
-		return 1
-	default:
-		return 2
-	}
 }
 
 func semanticProfile(profile RetrievalProfile) RetrievalProfile {

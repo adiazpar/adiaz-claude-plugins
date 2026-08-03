@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,13 +14,34 @@ import (
 
 type FindingSubmission struct {
 	Record             FindingRecord `json:"record"`
+	Body               string        `json:"body"`
+	Path               string        `json:"path"`
 	SyntheticQuestions []string      `json:"syntheticQuestions"`
 	QuestionsReviewed  bool          `json:"questionsReviewed"`
 }
 
+func (submission FindingSubmission) MarshalJSON() ([]byte, error) {
+	type wireFindingSubmission FindingSubmission
+	wire := wireFindingSubmission(submission)
+	if wire.Body == "" {
+		wire.Body = submission.Record.Body
+	}
+	if wire.Path == "" {
+		wire.Path = submission.Record.Path
+	}
+	return json.Marshal(wire)
+}
+
 func (submission FindingSubmission) Document() FindingDocument {
+	record := submission.Record
+	if submission.Body != "" {
+		record.Body = submission.Body
+	}
+	if submission.Path != "" {
+		record.Path = submission.Path
+	}
 	return FindingDocument{
-		Record: submission.Record, SyntheticQuestions: append([]string(nil), submission.SyntheticQuestions...),
+		Record: record, SyntheticQuestions: append([]string(nil), submission.SyntheticQuestions...),
 		QuestionsReviewed: submission.QuestionsReviewed,
 	}
 }
@@ -52,41 +74,43 @@ func (submission ReviewPacketSubmission) Packet() CurationPacket {
 }
 
 type ManagerApplyRequest struct {
-	Action                string                  `json:"action"`
-	Actor                 string                  `json:"actor"`
-	CampaignSlug          string                  `json:"campaignSlug"`
-	CampaignID            string                  `json:"campaignId"`
-	CorrelationID         string                  `json:"correlationId"`
-	IdempotencyKey        string                  `json:"idempotencyKey"`
-	Rationale             string                  `json:"rationale,omitempty"`
-	ExpectedHeadRevision  int64                   `json:"expectedHeadRevision"`
-	ExpectedHeadDigest    string                  `json:"expectedHeadDigest"`
-	ExpectedRecordDigests map[string]string       `json:"expectedRecordDigests,omitempty"`
-	Campaign              *CampaignRecord         `json:"campaign,omitempty"`
-	WorkItems             []WorkItemRecord        `json:"workItems,omitempty"`
-	Runs                  []RunRecord             `json:"runs,omitempty"`
-	Findings              []FindingSubmission     `json:"findings,omitempty"`
-	Intake                *IntakeRecord           `json:"intake,omitempty"`
-	Review                *ReviewRecord           `json:"review,omitempty"`
-	ReviewPacket          *ReviewPacketSubmission `json:"reviewPacket,omitempty"`
-	RunPreparation        *RunPreparation         `json:"runPreparation,omitempty"`
+	Action                  string                        `json:"action"`
+	Actor                   string                        `json:"actor"`
+	CampaignSlug            string                        `json:"campaignSlug"`
+	CampaignID              string                        `json:"campaignId"`
+	CorrelationID           string                        `json:"correlationId"`
+	IdempotencyKey          string                        `json:"idempotencyKey"`
+	Rationale               string                        `json:"rationale,omitempty"`
+	ExpectedHeadRevision    int64                         `json:"expectedHeadRevision"`
+	ExpectedHeadDigest      string                        `json:"expectedHeadDigest"`
+	ExpectedRecordDigests   map[string]string             `json:"expectedRecordDigests,omitempty"`
+	Campaign                *CampaignRecord               `json:"campaign,omitempty"`
+	WorkItems               []WorkItemRecord              `json:"workItems,omitempty"`
+	Runs                    []RunRecord                   `json:"runs,omitempty"`
+	Findings                []FindingSubmission           `json:"findings,omitempty"`
+	Intake                  *IntakeRecord                 `json:"intake,omitempty"`
+	Review                  *ReviewRecord                 `json:"review,omitempty"`
+	ReviewPacket            *ReviewPacketSubmission       `json:"reviewPacket,omitempty"`
+	RunPreparation          *RunPreparation               `json:"runPreparation,omitempty"`
+	ArchiveFallbackDecision *ArchiveFallbackOptInDecision `json:"archiveFallbackDecision,omitempty"`
 }
 
 var managerActionKinds = map[string]map[string]bool{
-	"campaign.open":                  {"campaign": true, "work": true},
-	"campaign.update":                {"campaign": true, "work": true},
-	"work.create":                    {"work": true, "campaign": true},
-	"work.update":                    {"work": true, "campaign": true},
-	"run.prepare":                    {"run": true, "work": true},
-	"run.start":                      {"run": true, "work": true},
-	"run.return":                     {"run": true, "work": true},
-	"run.complete":                   {"run": true, "work": true, "finding": true},
-	"closure.remediation.run.create": {"run": true, "work": true},
-	"review.submit":                  {"review": true, "intake": true, "finding": true, "work": true},
-	"finding.challenge":              {"finding": true, "work": true},
-	"finding.update":                 {"finding": true, "work": true},
-	"decision.record":                {"review": true, "intake": true, "finding": true, "work": true},
-	"reconcile.import":               {"campaign": true, "work": true, "run": true, "finding": true, "intake": true, "review": true},
+	"campaign.open":                     {"campaign": true, "work": true},
+	"campaign.update":                   {"campaign": true, "work": true},
+	"work.create":                       {"work": true, "campaign": true},
+	"work.update":                       {"work": true, "campaign": true},
+	"run.prepare":                       {"run": true, "work": true},
+	"run.start":                         {"run": true, "work": true},
+	"run.return":                        {"run": true, "work": true},
+	"run.complete":                      {"run": true, "work": true, "finding": true},
+	"closure.remediation.run.create":    {"run": true, "work": true},
+	"review.submit":                     {"review": true, "intake": true, "finding": true, "work": true},
+	"finding.challenge":                 {"finding": true, "work": true},
+	"finding.update":                    {"finding": true, "work": true},
+	"decision.record":                   {"review": true, "intake": true, "finding": true, "work": true},
+	"reconcile.import":                  {"campaign": true, "work": true, "run": true, "finding": true, "intake": true, "review": true},
+	"knowledge.archive-fallback.opt-in": {},
 }
 
 func (service *Service) ManagerApply(ctx context.Context, request ManagerApplyRequest) (StateTransactionReceipt, error) {
@@ -105,6 +129,11 @@ func (service *Service) ManagerApply(ctx context.Context, request ManagerApplyRe
 		return StateTransactionReceipt{}, err
 	}
 	if receipt, replayed, err := replayManagerRunPreparation(store, service.Boundary, request); err != nil {
+		return StateTransactionReceipt{}, err
+	} else if replayed {
+		return receipt, nil
+	}
+	if receipt, replayed, err := replayArchiveFallbackOptIn(store, service.Boundary, request); err != nil {
 		return StateTransactionReceipt{}, err
 	} else if replayed {
 		return receipt, nil
@@ -132,13 +161,18 @@ func (service *Service) ManagerApply(ctx context.Context, request ManagerApplyRe
 			return StateTransactionReceipt{}, err
 		}
 	}
-	if err := validateManagerActionPayload(request, allowedKinds); err != nil {
+	if err := validateManagerActionPayload(request, allowedKinds, service.Configuration); err != nil {
 		return StateTransactionReceipt{}, err
 	}
 	artifacts, err := service.prepareManagerRunArtifacts(ctx, store, graph, request)
 	if err != nil {
 		return StateTransactionReceipt{}, err
 	}
+	archiveArtifacts, err := service.prepareArchiveFallbackOptInArtifacts(ctx, store, request)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	artifacts = append(artifacts, archiveArtifacts...)
 	writes, reviewHandle, err := buildManagerWrites(service.Boundary, request, artifacts)
 	if err != nil {
 		return StateTransactionReceipt{}, err
@@ -158,11 +192,18 @@ func managerStateTransactionRequest(
 		Rationale: request.Rationale, ReviewHandle: reviewHandle,
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadRevision: request.ExpectedHeadRevision, ExpectedHeadDigest: request.ExpectedHeadDigest,
-		Writes: writes, Artifacts: artifacts,
+		Writes: writes, Artifacts: artifacts, ReviewPacket: request.ReviewPacket,
 	}
 }
 
-func validateManagerActionPayload(request ManagerApplyRequest, allowed map[string]bool) error {
+func validateManagerActionPayload(request ManagerApplyRequest, allowed map[string]bool, configuration Configuration) error {
+	archiveAction := request.Action == "knowledge.archive-fallback.opt-in"
+	if request.ArchiveFallbackDecision != nil && !archiveAction {
+		return fmt.Errorf("manager action %s cannot carry an archive fallback decision", request.Action)
+	}
+	if archiveAction && request.ArchiveFallbackDecision == nil {
+		return errors.New("archive fallback opt-in requires an explicit decision payload")
+	}
 	preparationAction := validOne(request.Action, "run.prepare", "closure.remediation.run.create")
 	if request.RunPreparation != nil && !preparationAction {
 		return fmt.Errorf("manager action %s cannot carry delegated run preparation", request.Action)
@@ -179,7 +220,7 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 		}
 		total += count
 	}
-	if total == 0 {
+	if total == 0 && !archiveAction {
 		return errors.New("manager mutation contains no typed records")
 	}
 	switch request.Action {
@@ -190,6 +231,10 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 	case "work.create", "work.update":
 		if len(request.WorkItems) == 0 {
 			return errors.New("work action requires at least one work item")
+		}
+	case "knowledge.archive-fallback.opt-in":
+		if total != 0 || request.RunPreparation != nil || request.ReviewPacket != nil {
+			return errors.New("archive fallback opt-in may carry only its explicit decision")
 		}
 	case "run.prepare", "run.start", "run.return", "run.complete", "closure.remediation.run.create":
 		if len(request.Runs) != 1 || len(request.WorkItems) == 0 {
@@ -226,6 +271,18 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 		}
 		if request.Review.PacketDigest != request.ReviewPacket.Envelope.Digest {
 			return errors.New("review receipt does not bind the submitted packet digest")
+		}
+		if !configuration.Valid {
+			return errors.New("manager review requires valid review-load configuration")
+		}
+		if err := ValidateReviewLoadBinding(request.Review.ReviewLoad, *request.Review,
+			packet, configuration.Bootstrap.ReviewLoad); err != nil {
+			return err
+		}
+		if err := ValidateReviewLoadTemporalBinding(
+			request.Review.ReviewLoad, request.ReviewPacket.Envelope.CreatedAt, *request.Review,
+		); err != nil {
+			return err
 		}
 		if request.Intake.ID != request.Review.IntakeID || request.Intake.Revision != request.Review.IntakeRevision+1 ||
 			request.Intake.Status != "reviewed" {
@@ -317,6 +374,9 @@ func (service *Service) prepareManagerRunArtifacts(
 	if preparation.ContextPack.Role != expectedRole {
 		return nil, fmt.Errorf("run role %s requires a %s context pack", run.Role, expectedRole)
 	}
+	if !EqualWriteGrants(run.WriteGrants, preparation.ContextPack.WriteGrants) {
+		return nil, errors.New("run preparation write grants do not match the immutable context pack")
+	}
 	campaignHandle := "record:active/" + request.CampaignSlug + "/campaign.json"
 	workHandle := "record:active/" + request.CampaignSlug + "/work-items/" + run.PrimaryWorkItemID + ".json"
 	if !containsString(preparation.ContextPack.RequiredHandles, campaignHandle) ||
@@ -350,7 +410,7 @@ func runPreparationArtifacts(request ManagerApplyRequest) ([]StateArtifactWrite,
 	}
 	run := request.Runs[0]
 	preparation := *request.RunPreparation
-	briefBody, err := canonicalRunBrief(preparation.Brief)
+	briefBody, err := canonicalRunBrief(preparation.Brief, run.WriteGrants)
 	if err != nil {
 		return nil, err
 	}
@@ -370,11 +430,15 @@ func runPreparationArtifacts(request ManagerApplyRequest) ([]StateArtifactWrite,
 	pack := StateArtifactWrite{
 		Path: runPrefix + "context-pack.json", ContentDigest: "sha256:" + SHA256Bytes(packBody), Body: packBody,
 	}
+	overrideBody := []byte(strings.TrimSpace(migrationDrafterOverrideTemplate) + "\n")
+	override := StateArtifactWrite{
+		Path: runPrefix + "AGENTS.override.md", ContentDigest: "sha256:" + SHA256Bytes(overrideBody), Body: overrideBody,
+	}
 	if run.Brief == nil || run.Brief.Path != brief.Path || run.Brief.SHA256 != brief.ContentDigest ||
 		run.ContextPack == nil || run.ContextPack.Path != pack.Path || run.ContextPack.SHA256 != pack.ContentDigest {
 		return nil, errors.New("run launch handles do not match the generated brief and context-pack artifacts")
 	}
-	return []StateArtifactWrite{brief, pack}, nil
+	return []StateArtifactWrite{override, brief, pack}, nil
 }
 
 func replayManagerRunPreparation(
@@ -406,12 +470,31 @@ func replayManagerRunPreparation(
 	return receipt, true, nil
 }
 
-func canonicalRunBrief(value string) ([]byte, error) {
+const sealedWriteGrantMarker = "<!-- re-discipline:sealed-write-grants v1 -->"
+
+func canonicalRunBrief(value string, grants []WriteGrant) ([]byte, error) {
 	if !utf8.ValidString(value) || strings.HasPrefix(value, "\ufeff") ||
 		strings.ContainsRune(value, '\x00') || strings.ContainsRune(value, '\r') ||
 		!strings.HasSuffix(value, "\n") || strings.TrimSpace(value) == "" {
 		return nil, errors.New("run brief must be non-empty canonical UTF-8 with LF line endings and a final LF")
 	}
+	if strings.Contains(value, sealedWriteGrantMarker) {
+		return nil, errors.New("run brief may not supply the engine-sealed write-grant block")
+	}
+	if err := ValidateCanonicalWriteGrants(grants); err != nil {
+		return nil, err
+	}
+	briefGrants := grants
+	if briefGrants == nil {
+		briefGrants = []WriteGrant{}
+	}
+	grantBody, err := json.Marshal(briefGrants)
+	if err != nil {
+		return nil, err
+	}
+	value += "\n" + sealedWriteGrantMarker + "\n## Engine-Sealed Write Grants\n\n" +
+		"Run-local `report.md` and `payload/**` are implicit. The only ordinary project writes are:\n\n" +
+		"```json\n" + string(grantBody) + "\n```\n"
 	if int64(len(value)) > maxSourceBytes {
 		return nil, fmt.Errorf("run brief exceeds the %d-byte source limit", maxSourceBytes)
 	}
@@ -516,7 +599,8 @@ func buildManagerWrites(
 		if err != nil {
 			return nil, "", err
 		}
-		if campaignID != request.CampaignID || correlationID != request.CorrelationID {
+		if campaignID != request.CampaignID ||
+			(request.Action != "reconcile.import" && correlationID != request.CorrelationID) {
 			return nil, "", fmt.Errorf("record %s does not bind the requested campaign and correlation", id)
 		}
 		path, err := stateRecordPath(request.CampaignSlug, value)
@@ -525,6 +609,9 @@ func buildManagerWrites(
 		}
 		expectedRevision := revision - 1
 		expectedDigest := ""
+		if request.Action == "reconcile.import" {
+			expectedRevision = revision
+		}
 		if expectedRevision > 0 {
 			expectedDigest = request.ExpectedRecordDigests[id]
 			if !digestRE.MatchString(expectedDigest) {
@@ -555,7 +642,7 @@ type CurationSubmitRequest struct {
 	Candidates            []FindingSubmission `json:"candidates"`
 	Rows                  []CurationRow       `json:"rows"`
 	CuratorRun            *RunRecord          `json:"curatorRun,omitempty"`
-	WorkItems             []WorkItemRecord    `json:"workItems,omitempty"`
+	WorkItems             []WorkItemRecord    `json:"-"`
 }
 
 func (service *Service) CurationSubmit(ctx context.Context, request CurationSubmitRequest) (StateTransactionReceipt, error) {
@@ -564,7 +651,16 @@ func (service *Service) CurationSubmit(ctx context.Context, request CurationSubm
 	}
 	packet := CurationPacket{Intake: request.Intake, Rows: append([]CurationRow(nil), request.Rows...)}
 	for _, candidate := range request.Candidates {
-		packet.Candidates = append(packet.Candidates, candidate.Document())
+		document := candidate.Document()
+		expectedPath, pathErr := stateRecordPath(request.CampaignSlug, document)
+		if pathErr != nil {
+			return StateTransactionReceipt{}, pathErr
+		}
+		if document.Record.Path != expectedPath {
+			return StateTransactionReceipt{}, fmt.Errorf(
+				"candidate %s path must be canonical %s", document.Record.ID, expectedPath)
+		}
+		packet.Candidates = append(packet.Candidates, document)
 	}
 	if err := ValidateCurationPacket("curator", packet); err != nil {
 		return StateTransactionReceipt{}, err
@@ -583,24 +679,41 @@ func (service *Service) CurationSubmit(ctx context.Context, request CurationSubm
 	if graph.Campaign.Status != "open" && graph.Campaign.Status != "closing" {
 		return StateTransactionReceipt{}, errors.New("curation requires an open or closing campaign")
 	}
+	declared := map[string]bool{}
+	for _, findingID := range request.Intake.CandidateFindingIDs {
+		declared[findingID] = true
+	}
+	for _, coverage := range request.Intake.Coverage {
+		if coverage.Disposition != "duplicate" || declared[coverage.TargetID] {
+			continue
+		}
+		if _, exists := graph.Findings[coverage.TargetID]; !exists {
+			return StateTransactionReceipt{}, fmt.Errorf(
+				"duplicate coverage target %s is not a canonical campaign finding", coverage.TargetID)
+		}
+	}
+	if _, err := validateCurationGraphBindings(graph, packet, true); err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	if err := verifyCanonicalIntakeCoverage(service.Boundary, request.Intake); err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	if len(request.WorkItems) != 0 {
+		return StateTransactionReceipt{}, errors.New(
+			"curators may propose spawned work-item ids in intake but only manager review may create work records")
+	}
 	values := []any{request.Intake}
 	for _, candidate := range request.Candidates {
 		values = append(values, candidate.Document())
 	}
 	if request.CuratorRun != nil {
-		if request.CuratorRun.Role != "curator" || !isTerminalRun(request.CuratorRun.Status) {
-			return StateTransactionReceipt{}, errors.New("curation may update only its terminal curator run")
+		canonical, bindingErr := validateReturnedCuratorRunBinding(graph, request.Actor, *request.CuratorRun)
+		if bindingErr != nil {
+			return StateTransactionReceipt{}, bindingErr
 		}
-		if err := verifyRunHandles(service.Boundary, request.CampaignSlug, *request.CuratorRun, nil); err != nil {
+		if err := verifyRunHandles(service.Boundary, request.CampaignSlug, canonical, nil); err != nil {
 			return StateTransactionReceipt{}, err
 		}
-		values = append(values, *request.CuratorRun)
-	}
-	for _, work := range request.WorkItems {
-		if !containsString(request.Intake.SpawnedWorkItems, work.ID) {
-			return StateTransactionReceipt{}, fmt.Errorf("curator work item %s was not declared by the intake", work.ID)
-		}
-		values = append(values, work)
 	}
 	writes := []StateWrite{}
 	for _, value := range values {
@@ -632,6 +745,54 @@ func (service *Service) CurationSubmit(ctx context.Context, request CurationSubm
 		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
 		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes,
 	})
+}
+
+func validateReturnedCuratorRunBinding(
+	graph CampaignGraph,
+	actor string,
+	submitted RunRecord,
+) (RunRecord, error) {
+	canonical, ok := graph.Runs[submitted.ID]
+	if !ok || canonical.Role != "curator" || canonical.Status != "returned" ||
+		canonical.ActorID != actor || !reflect.DeepEqual(canonical, submitted) {
+		return RunRecord{}, errors.New(
+			"curatorRun must be an exact binding to the caller's canonical returned curator run")
+	}
+	return canonical, nil
+}
+
+func verifyCanonicalIntakeCoverage(boundary Boundary, intake IntakeRecord) error {
+	for _, source := range intake.SourceRuns {
+		if err := verifyCanonicalFileHandle(boundary, source); err != nil {
+			return fmt.Errorf("intake source %s: %w", source.Path, err)
+		}
+		absolute, err := boundary.Resolve(source.Path, true)
+		if err != nil {
+			return err
+		}
+		body, err := os.ReadFile(absolute)
+		if err != nil {
+			return err
+		}
+		if !utf8.Valid(body) {
+			return fmt.Errorf("intake source %s is not valid UTF-8 report text", source.Path)
+		}
+		lines := strings.Split(string(normalizeNewlines(body)), "\n")
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
+		if len(lines) == 0 {
+			return fmt.Errorf("intake source %s has no report lines to cover", source.Path)
+		}
+		for _, entry := range intake.Coverage {
+			if coverageSourceKey(entry.SourcePath, entry.SourceSHA256) == coverageSourceKey(source.Path, source.SHA256) &&
+				entry.SourceLineCount != len(lines) {
+				return fmt.Errorf("coverage for %s declares %d lines; canonical report has %d",
+					source.Path, entry.SourceLineCount, len(lines))
+			}
+		}
+	}
+	return nil
 }
 
 func verifyRunHandles(

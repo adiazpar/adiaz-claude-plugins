@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/migration-host-conformance.schema.json",
+  "title": "Migration Host Conformance Evidence",
+  "type": "object",
+  "required": [
+    "schemaVersion", "suite", "transactionId", "planDigest",
+    "protocolDigest", "trials", "passed", "resultDigest"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "suite": {"const": "migration-host-conformance-v1"},
+    "transactionId": {"type": "string", "pattern": "^M-[A-F0-9]{20}$"},
+    "planDigest": {"$ref": "#/$defs/digest"},
+    "protocolDigest": {"$ref": "#/$defs/digest"},
+    "trials": {"type": "array", "minItems": 25, "items": {"$ref": "#/$defs/trial"}},
+    "passed": {"const": true},
+    "resultDigest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "failure": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": {"enum": ["role-boundary-refused", "mcp-unavailable"]},
+            "message": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "trial": {
+      "type": "object",
+      "required": [
+        "id", "host", "scenario", "transport", "request", "result",
+        "failure", "exitCode", "semanticResult", "semanticDigest",
+        "passed", "digest"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^MHT-[0-9a-f]{20}$"},
+        "host": {"enum": ["mcp", "cli", "claude", "codex"]},
+        "scenario": {"enum": ["discovery", "status", "retrieval", "expansion", "role-boundary", "bounded-recovery", "local-fallback"]},
+        "transport": {"enum": ["mcp-stdio-jsonrpc", "cli-process-json", "claude-code-plugin", "codex-plugin", "claude-cli-fallback", "codex-cli-fallback"]},
+        "request": {},
+        "result": {},
+        "failure": {"$ref": "#/$defs/failure"},
+        "exitCode": {"type": "integer"},
+        "semanticResult": {},
+        "semanticDigest": {"$ref": "#/$defs/digest"},
+        "passed": {"const": true},
+        "digest": {"$ref": "#/$defs/digest"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

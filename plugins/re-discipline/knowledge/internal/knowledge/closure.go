@@ -162,7 +162,11 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 		SchemaVersion: CampaignSchemaVersion, CampaignID: graph.Campaign.ID,
 		SourceRunCoverage: map[string]string{}, FindingCoverage: map[string]string{},
 		WorkItemCoverage: map[string]string{}, FileRetention: map[string]string{},
-		UnresolvedConflicts: []string{}, MissingDecisions: []string{},
+		ActiveFileDispositions: map[string]string{},
+		UnresolvedConflicts:    []string{}, MissingDecisions: []string{},
+	}
+	if prior != nil {
+		coverage.ActiveFileDispositions = cloneStringMap(prior.ActiveFileDispositions)
 	}
 	reviewedReports := reviewedReportCoverage(graph)
 	for id, run := range graph.Runs {
@@ -172,7 +176,7 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 		case run.Report == nil:
 			coverage.SourceRunCoverage[id] = "missing-report"
 			coverage.MissingDecisions = append(coverage.MissingDecisions, "run:"+id+":report")
-		case reviewedReports[run.Report.Path]:
+		case reviewedReports[reviewedRunCoverageKey(id, *run.Report)]:
 			coverage.SourceRunCoverage[id] = "reviewed-intake"
 		default:
 			coverage.SourceRunCoverage[id] = "missing-reviewed-intake"
@@ -197,7 +201,9 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 		case "done", "cancelled", "superseded":
 			value = item.State
 		case "deferred":
-			if item.Deferment != nil && !item.Deferment.BlocksClosure && prior != nil &&
+			if item.Deferment != nil && !item.Deferment.BlocksClosure &&
+				item.Deferment.ClosureDisposition == DefermentDispositionExportBacklog &&
+				validateDefermentBacklogDestination(item.Deferment.ClosureDestination) == nil && prior != nil &&
 				prior.WorkItemCoverage[id] == "exported-backlog" {
 				value = "exported-backlog"
 			}
@@ -226,6 +232,12 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 			}
 		}
 	}
+	for dependentID, dependencyIDs := range closureStaleFindingDependents(graph.Findings) {
+		for _, dependencyID := range dependencyIDs {
+			coverage.MissingDecisions = append(coverage.MissingDecisions,
+				"finding:"+dependentID+":stale-dependency:"+dependencyID)
+		}
+	}
 	for _, intake := range graph.Intakes {
 		for _, conflict := range intake.Conflicts {
 			coverage.UnresolvedConflicts = append(coverage.UnresolvedConflicts,
@@ -246,27 +258,56 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 	return coverage, nil
 }
 
-func reviewedReportCoverage(graph CampaignGraph) map[string]bool {
-	result := map[string]bool{}
-	for _, intake := range graph.Intakes {
-		if intake.Status != "reviewed" {
-			continue
-		}
-		hasUnresolved := false
-		for _, entry := range intake.Coverage {
-			if entry.Disposition == "unresolved" {
-				hasUnresolved = true
-				break
-			}
-		}
-		if hasUnresolved {
-			continue
-		}
-		for _, source := range intake.SourceRuns {
-			result[source.Path] = true
+func closureStaleFindingDependents(findings map[string]FindingRecord) map[string][]string {
+	result := map[string][]string{}
+	for dependentID, dependencyIDs := range StaleFindingDependents(findings) {
+		if findingIsEpistemicallyLive(findings[dependentID]) {
+			result[dependentID] = append([]string(nil), dependencyIDs...)
 		}
 	}
 	return result
+}
+
+func reviewedReportCoverage(graph CampaignGraph) map[string]bool {
+	result := map[string]bool{}
+	for _, intake := range graph.Intakes {
+		if intake.Status != "reviewed" || !reviewBindsIntake(graph, intake) {
+			continue
+		}
+		packet := CurationPacket{Intake: intake}
+		for _, findingID := range intake.CandidateFindingIDs {
+			finding, ok := graph.Findings[findingID]
+			if !ok {
+				continue
+			}
+			packet.Candidates = append(packet.Candidates, FindingDocument{Record: finding})
+		}
+		bindings, err := validateCurationGraphBindings(graph, packet, false)
+		if err != nil {
+			continue
+		}
+		unresolvedSources := map[string]bool{}
+		for _, entry := range intake.Coverage {
+			if entry.Disposition == "unresolved" {
+				unresolvedSources[coverageSourceKey(entry.SourcePath, entry.SourceSHA256)] = true
+			}
+		}
+		for _, source := range intake.SourceRuns {
+			sourceKey := coverageSourceKey(source.Path, source.SHA256)
+			if unresolvedSources[sourceKey] {
+				continue
+			}
+			runID := bindings[sourceKey]
+			if runID != "" {
+				result[reviewedRunCoverageKey(runID, source)] = true
+			}
+		}
+	}
+	return result
+}
+
+func reviewedRunCoverageKey(runID string, report FileHandle) string {
+	return runID + "\x00" + report.Path + "\x00" + report.SHA256
 }
 
 func inferRetentionDisposition(file RunFile) string {
@@ -333,11 +374,12 @@ func conflictingFindingsRemainLive(graph CampaignGraph, leftID, rightID string) 
 	if !leftOK || !rightOK {
 		return true
 	}
-	terminal := func(record FindingRecord) bool {
-		return record.ReviewState == "manager-rejected" ||
-			validOne(record.Validity, "invalid", "superseded", "historical")
-	}
-	return !terminal(left) && !terminal(right)
+	return findingIsEpistemicallyLive(left) && findingIsEpistemicallyLive(right)
+}
+
+func findingIsEpistemicallyLive(record FindingRecord) bool {
+	return record.ReviewState != "manager-rejected" &&
+		!validOne(record.Validity, "invalid", "superseded", "historical")
 }
 
 func sealClosureCoverage(coverage *ClosureCoverage) error {
@@ -359,7 +401,8 @@ func ValidateClosureCoverage(coverage ClosureCoverage) error {
 		return errors.New("closure coverage identity or digest is invalid")
 	}
 	if coverage.SourceRunCoverage == nil || coverage.FindingCoverage == nil ||
-		coverage.WorkItemCoverage == nil || coverage.FileRetention == nil {
+		coverage.WorkItemCoverage == nil || coverage.FileRetention == nil ||
+		coverage.ActiveFileDispositions == nil {
 		return errors.New("all closure coverage maps are required")
 	}
 	for key, value := range coverage.SourceRunCoverage {
@@ -393,6 +436,12 @@ func ValidateClosureCoverage(coverage ClosureCoverage) error {
 		if strings.HasPrefix(value, "maintained:") &&
 			validateRelativeRecordPath(strings.TrimPrefix(value, "maintained:")) != nil {
 			return fmt.Errorf("closure file retention %q has an invalid maintained destination", key)
+		}
+	}
+	for key, value := range coverage.ActiveFileDispositions {
+		if validateRelativeRecordPath(key) != nil ||
+			!validOne(value, "retain", "destroy-approved", "ephemeral", "decision-required") {
+			return fmt.Errorf("closure active file %q has an invalid disposition", key)
 		}
 	}
 	if err := requireUniqueNonEmpty("closure unresolved conflicts", coverage.UnresolvedConflicts); err != nil {
@@ -450,6 +499,9 @@ func ValidateClosureJob(job ClosureJob) error {
 			return errors.New("closure projection digest map is invalid")
 		}
 	}
+	if job.StagingDigest != "" && !digestRE.MatchString(job.StagingDigest) {
+		return errors.New("closure staging digest is invalid")
+	}
 	if job.ArchiveDigest != "" && !digestRE.MatchString(job.ArchiveDigest) {
 		return errors.New("closure archive digest is invalid")
 	}
@@ -492,6 +544,9 @@ func ValidateClosureAdvance(previous, next ClosureJob) error {
 		if next.Coverage == nil || len(next.Coverage.MissingDecisions) != 0 ||
 			len(next.Coverage.UnresolvedConflicts) != 0 {
 			return errors.New("closure cannot project with missing decisions or unresolved conflicts")
+		}
+		if next.Stage != "finalize" && !digestRE.MatchString(next.StagingDigest) {
+			return errors.New("closure projected state requires an authenticated private staging manifest")
 		}
 	}
 	if to >= closureStageIndex["verify"] {

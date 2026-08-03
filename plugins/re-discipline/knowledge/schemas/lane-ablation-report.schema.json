@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adiaz.github.io/re-discipline/schemas/lane-ablation-report.schema.json",
+  "title": "Controlled retrieval-lane ablation report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "suite",
+    "evaluatedAt",
+    "sourceRevision",
+    "evalFingerprint",
+    "corpusFingerprint",
+    "runtimeFingerprint",
+    "parserVersion",
+    "chunkerVersion",
+    "profiles",
+    "models",
+    "cases",
+    "projectEvidence"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "suite": {"const": "packaged-conformance-v1"},
+    "evaluatedAt": {"type": "string", "format": "date-time"},
+    "sourceRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "evalFingerprint": {"$ref": "#/$defs/identity"},
+    "corpusFingerprint": {"$ref": "#/$defs/identity"},
+    "runtimeFingerprint": {"$ref": "#/$defs/identity"},
+    "parserVersion": {"type": "string", "minLength": 1},
+    "chunkerVersion": {"type": "string", "minLength": 1},
+    "profiles": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/profile"}
+    },
+    "models": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/model"}
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "baseline", "dense", "rerank"],
+        "properties": {
+          "caseId": {"type": "string", "minLength": 1},
+          "baseline": {"$ref": "#/$defs/outcome"},
+          "dense": {"$ref": "#/$defs/outcome"},
+          "rerank": {"$ref": "#/$defs/outcome"}
+        }
+      }
+    },
+    "projectEvidence": {"$ref": "#/$defs/projectEvidence"}
+  },
+  "$defs": {
+    "identity": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "bareDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "name", "lanes", "benchmarkDigest", "modelFingerprint"],
+      "properties": {
+        "role": {"enum": ["baseline", "dense", "rerank"]},
+        "name": {"type": "string", "minLength": 1},
+        "lanes": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"type": "string"}},
+        "benchmarkDigest": {"$ref": "#/$defs/identity"},
+        "modelFingerprint": {"$ref": "#/$defs/identity"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "revision", "implementation", "specSha256"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "role": {"enum": ["embedding", "reranker"]},
+        "revision": {"type": "string", "minLength": 1},
+        "implementation": {"type": "string", "minLength": 1},
+        "specSha256": {"$ref": "#/$defs/bareDigest"},
+        "artifactSha256": {"$ref": "#/$defs/bareDigest"}
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relevantHit", "uniqueFirst", "relevantRank", "findingIds"],
+      "properties": {
+        "relevantHit": {"type": "boolean"},
+        "uniqueFirst": {"type": "boolean"},
+        "relevantRank": {"type": "integer", "minimum": 0},
+        "findingIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^F-[0-9]+$"}
+        }
+      }
+    },
+    "projectEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suite", "project", "status", "evaluatedAt", "frozenSourceRevision",
+        "rawBenchmarkSha256", "rawBenchmarkRunId", "complete", "armCount",
+        "casesPerArm", "corpusFingerprint", "evalFingerprint",
+        "projectionTransformDigest", "projectMeasurementPath",
+        "projectMeasurementSha256", "indexedSourceBytesUnchanged",
+        "sharedHardGateFailures", "denseAddedHardGateRegressions",
+        "rerankAddedHardGateRegressions", "dense", "rerank", "rescueCases",
+        "uncertainty"
+      ],
+      "properties": {
+        "suite": {"const": "project-benchmark-v1"},
+        "project": {"const": "snaphak-re"},
+        "status": {"enum": ["preliminary-final-corpus-rerun-required", "final-corpus-verified"]},
+        "evaluatedAt": {"type": "string", "format": "date-time"},
+        "frozenSourceRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "rawBenchmarkSha256": {"$ref": "#/$defs/identity"},
+        "rawBenchmarkRunId": {"type": "string", "minLength": 1},
+        "complete": {"const": true},
+        "armCount": {"const": 2},
+        "casesPerArm": {"const": 64},
+        "corpusFingerprint": {"$ref": "#/$defs/identity"},
+        "evalFingerprint": {"$ref": "#/$defs/identity"},
+        "projectionTransformDigest": {"$ref": "#/$defs/identity"},
+        "projectMeasurementPath": {"const": "evals/conformance/project-lane-ablation.json"},
+        "projectMeasurementSha256": {"$ref": "#/$defs/identity"},
+        "indexedSourceBytesUnchanged": {"const": true},
+        "sharedHardGateFailures": {"type": "integer", "minimum": 0},
+        "denseAddedHardGateRegressions": {"const": 0},
+        "rerankAddedHardGateRegressions": {"const": 0},
+        "dense": {"$ref": "#/$defs/projectLane"},
+        "rerank": {"$ref": "#/$defs/projectRerankLane"},
+        "rescueCases": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/projectRescue"}
+        },
+        "uncertainty": {"$ref": "#/$defs/projectUncertainty"}
+      }
+    },
+    "projectLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rescues", "losses", "rankImprovements", "rankDegradations",
+        "overallRecallDelta", "holdoutRecallDelta",
+        "overallCompleteEvidenceDelta", "holdoutCompleteEvidenceDelta"
+      ],
+      "properties": {
+        "rescues": {"type": "integer", "minimum": 0, "maximum": 64},
+        "losses": {"type": "integer", "minimum": 0, "maximum": 64},
+        "rankImprovements": {"type": "integer", "minimum": 0},
+        "rankDegradations": {"type": "integer", "minimum": 0},
+        "overallRecallDelta": {"type": "number", "minimum": -1, "maximum": 1},
+        "holdoutRecallDelta": {"type": "number", "minimum": -1, "maximum": 1},
+        "overallCompleteEvidenceDelta": {"type": "number", "minimum": -1, "maximum": 1},
+        "holdoutCompleteEvidenceDelta": {"type": "number", "minimum": -1, "maximum": 1}
+      }
+    },
+    "projectRerankLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rescues", "losses", "rankImprovements", "rankDegradations", "pathsChanged"],
+      "properties": {
+        "rescues": {"type": "integer", "minimum": 0, "maximum": 64},
+        "losses": {"type": "integer", "minimum": 0, "maximum": 64},
+        "rankImprovements": {"type": "integer", "minimum": 0, "maximum": 64},
+        "rankDegradations": {"type": "integer", "minimum": 0, "maximum": 64},
+        "pathsChanged": {"type": "integer", "minimum": 0, "maximum": 64}
+      }
+    },
+    "projectRescue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId", "split", "topic", "targetPath", "baselineRelevantRank",
+        "denseRelevantRank", "targetDisjoint", "sourceClass",
+        "addedHardGateRegressions"
+      ],
+      "properties": {
+        "caseId": {"type": "string", "minLength": 1},
+        "split": {"enum": ["development", "holdout"]},
+        "topic": {"type": "string", "minLength": 1},
+        "targetPath": {"type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._/-]+$"},
+        "baselineRelevantRank": {"type": "integer", "minimum": 0},
+        "denseRelevantRank": {"type": "integer", "minimum": 1},
+        "targetDisjoint": {"type": "boolean"},
+        "sourceClass": {"enum": ["history", "truth", "backlog", "active", "project"]},
+        "addedHardGateRegressions": {"type": "integer", "minimum": 0}
+      }
+    },
+    "projectUncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wilsonIntervals", "topicBootstrap", "leaveOneTopicOutZeroWhenOmitting",
+        "clusterFragile", "finalCorpusRerunRequired"
+      ],
+      "properties": {
+        "wilsonIntervals": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/wilsonInterval"}
+        },
+        "topicBootstrap": {"$ref": "#/$defs/topicBootstrap"},
+        "leaveOneTopicOutZeroWhenOmitting": {
+          "type": "array", "minItems": 0, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "clusterFragile": {"type": "boolean"},
+        "finalCorpusRerunRequired": {"type": "boolean"}
+      }
+    },
+    "wilsonInterval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slice", "successes", "trials", "estimate", "lower", "upper"],
+      "properties": {
+        "slice": {"type": "string", "minLength": 1},
+        "successes": {"type": "integer", "minimum": 0},
+        "trials": {"type": "integer", "minimum": 1},
+        "estimate": {"type": "number", "minimum": 0, "maximum": 1},
+        "lower": {"type": "number", "minimum": 0, "maximum": 1},
+        "upper": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "topicBootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replicates", "pointEstimate", "lower", "upper", "zeroOrLowerFraction"],
+      "properties": {
+        "replicates": {"const": 10000},
+        "pointEstimate": {"type": "number", "minimum": -1, "maximum": 1},
+        "lower": {"type": "number", "minimum": -1, "maximum": 1},
+        "upper": {"type": "number", "minimum": -1, "maximum": 1},
+        "zeroOrLowerFraction": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

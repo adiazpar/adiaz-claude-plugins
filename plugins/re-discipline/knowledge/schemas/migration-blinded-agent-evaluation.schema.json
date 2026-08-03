@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/migration-blinded-agent-evaluation.schema.json",
+  "title": "Migration Blinded Agent Evaluation",
+  "type": "object",
+  "required": [
+    "schemaVersion", "suite", "transactionId", "planDigest",
+    "benchmarkDigest", "calibrationDigest", "protocolDigest", "evaluator",
+    "evaluatorDigest", "cases", "passed", "resultDigest"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "suite": {"const": "migration-blinded-agent-evaluation-v1"},
+    "transactionId": {"type": "string", "pattern": "^M-[A-F0-9]{20}$"},
+    "planDigest": {"$ref": "#/$defs/digest"},
+    "benchmarkDigest": {"$ref": "#/$defs/digest"},
+    "calibrationDigest": {"$ref": "#/$defs/digest"},
+    "protocolDigest": {"$ref": "#/$defs/digest"},
+    "evaluator": {"type": "string", "minLength": 1, "maxLength": 128},
+    "evaluatorDigest": {"$ref": "#/$defs/digest"},
+    "cases": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/case"}},
+    "passed": {"const": true},
+    "resultDigest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stringArray": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "request": {
+      "type": "object",
+      "required": ["caseId", "query", "queryClass", "role", "allowedTiers", "tokenBudget"],
+      "properties": {
+        "caseId": {"type": "string", "minLength": 1},
+        "query": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "queryClass": {"enum": ["auto", "exact", "conceptual", "orientation", "current", "provenance", "dependency", "contradiction"]},
+        "role": {"enum": ["manager", "drafter"]},
+        "allowedTiers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["profile", "navigation", "truth", "history", "backlog", "active", "memory", "asset", "campaign", "draft", "provisional", "archive", "intake", "playbook"]}
+        },
+        "tokenBudget": {"type": "integer", "minimum": 128, "maximum": 4096}
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "answerClaims", "decision", "openedSourceIds", "contextCardHandles",
+        "expansionHandles", "citations", "durabilityLabels", "fullCorpusRead",
+        "contextTokens", "error"
+      ],
+      "properties": {
+        "answerClaims": {"$ref": "#/$defs/stringArray"},
+        "decision": {"type": "string"},
+        "openedSourceIds": {"$ref": "#/$defs/stringArray"},
+        "contextCardHandles": {"$ref": "#/$defs/stringArray"},
+        "expansionHandles": {"$ref": "#/$defs/stringArray"},
+        "citations": {"$ref": "#/$defs/stringArray"},
+        "durabilityLabels": {"$ref": "#/$defs/stringArray"},
+        "fullCorpusRead": {"type": "boolean"},
+        "contextTokens": {"type": "integer", "minimum": 0},
+        "error": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "case": {
+      "type": "object",
+      "required": [
+        "id", "caseId", "condition", "agent", "model", "agentDigest",
+        "queryDigest", "benchmarkOutcomeDigest", "request", "response",
+        "responseDigest", "factualAccuracy", "decisionAccuracy",
+        "unsupportedClaims", "evidenceTracePassed", "passed", "digest"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^MBE-[0-9a-f]{20}$"},
+        "caseId": {"type": "string", "minLength": 1},
+        "condition": {"enum": ["legacy", "compiled"]},
+        "agent": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "agentDigest": {"$ref": "#/$defs/digest"},
+        "queryDigest": {"$ref": "#/$defs/digest"},
+        "benchmarkOutcomeDigest": {"$ref": "#/$defs/digest"},
+        "request": {"$ref": "#/$defs/request"},
+        "response": {"$ref": "#/$defs/response"},
+        "responseDigest": {"$ref": "#/$defs/digest"},
+        "factualAccuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "decisionAccuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "unsupportedClaims": {"type": "integer", "minimum": 0},
+        "evidenceTracePassed": {"type": "boolean"},
+        "passed": {"type": "boolean"},
+        "digest": {"$ref": "#/$defs/digest"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

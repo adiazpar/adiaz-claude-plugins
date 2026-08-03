@@ -542,6 +542,7 @@ func createSchema(ctx context.Context, db *sql.DB) error {
 			claim TEXT NOT NULL, scope_json TEXT NOT NULL, evidence_grade TEXT NOT NULL,
 			review_state TEXT NOT NULL, validity TEXT NOT NULL, projection TEXT NOT NULL,
 			record_digest TEXT NOT NULL, body TEXT NOT NULL, source_class TEXT NOT NULL,
+			verified_at TEXT NOT NULL DEFAULT '',
 			questions_reviewed INTEGER NOT NULL
 		)`,
 		`CREATE INDEX findings_filters ON findings(source_class,review_state,validity,campaign_id)`,
@@ -770,11 +771,11 @@ func populateDatabase(
 		sourceClass := sourceDocument.Tier
 		if _, err := tx.ExecContext(ctx, `INSERT INTO findings(
 			id,document_id,campaign_id,kind,subject,claim,scope_json,evidence_grade,
-			review_state,validity,projection,record_digest,body,source_class,questions_reviewed)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, sourceDocument.ID, record.CampaignID,
+			review_state,validity,projection,record_digest,body,source_class,verified_at,questions_reviewed)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, sourceDocument.ID, record.CampaignID,
 			record.Kind, record.Subject, record.Claim, string(scopeJSON), record.EvidenceGrade,
 			record.ReviewState, record.Validity, record.Projection, record.Digest, record.Body,
-			sourceClass, findingDocument.QuestionsReviewed); err != nil {
+			sourceClass, record.VerifiedAt, findingDocument.QuestionsReviewed); err != nil {
 			return err
 		}
 		aliases := strings.Join(record.Aliases, "\n")

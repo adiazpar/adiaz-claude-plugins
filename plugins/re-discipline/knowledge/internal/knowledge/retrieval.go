@@ -36,7 +36,10 @@ type candidate struct {
 	DocumentHash string
 	LaneRanks    map[string]int
 	Fusion       int64
-	Rerank       int64
+	// SupersededBy is the replacement document that must already be present in
+	// the packed response before this candidate may be returned. This keeps a
+	// legacy document marker from becoming a warning with no usable successor.
+	SupersededBy string
 }
 
 type rankedID struct {
@@ -60,6 +63,9 @@ type Retriever struct {
 }
 
 func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (SearchResponse, error) {
+	// The pinned generation is built only from DiscoverSources output.
+	// Measurement receipts are forbidden at that boundary, so search can never
+	// retrieve an ablation conclusion as if it were project evidence.
 	options.Query = strings.TrimSpace(options.Query)
 	if options.Query == "" || len([]byte(options.Query)) > 1000 {
 		return SearchResponse{}, errors.New("query must contain 1 to 1000 UTF-8 bytes")
@@ -97,7 +103,7 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	defer db.Close()
 
 	ranked, err := retriever.rankCandidates(
-		ctx, db, options.Query, options.QueryClass, tiers, nil)
+		ctx, db, options.Query, tiers, nil)
 	if err != nil {
 		return SearchResponse{}, err
 	}
@@ -124,6 +130,7 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	omitted := 0
 	omittedByReason := map[string]int{
 		"resultLimit": 0, "documentCap": 0, "staleSource": 0, "budget": 0,
+		"superseded": 0,
 	}
 	// Mandatory response metadata is charged against the same token budget as
 	// the passages, so reserve it before packing. Budgeting passages against
@@ -143,6 +150,7 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 		ContextTokens: options.TokenBudget,
 		Omitted:       len(ranked), OmittedByReason: map[string]int{
 			"resultLimit": 0, "documentCap": 0, "staleSource": 0, "budget": len(ranked),
+			"superseded": 0,
 		},
 		Metadata: metadata,
 	})
@@ -150,6 +158,16 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 		contentBudget = 0
 	}
 	for _, row := range ranked {
+		// A superseded source is useful only together with the document that
+		// replaced it. The replacement candidate is promoted ahead of the old
+		// source below; if it was stale, inaccessible, over budget, or displaced
+		// by the result limit, drop the old source rather than returning a warning
+		// the caller cannot follow.
+		if row.SupersededBy != "" && perDocument[row.SupersededBy] == 0 {
+			omitted++
+			omittedByReason["superseded"]++
+			continue
+		}
 		if len(results) >= options.Limit {
 			omitted++
 			omittedByReason["resultLimit"]++
@@ -176,7 +194,7 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 
 		uri := "re-discipline://" + retriever.Generation.ID + "/chunks/" + row.Chunk.ID
 		result := SearchResult{
-			ChunkID: row.Chunk.ID, Score: row.Fusion, Rerank: row.Rerank,
+			ChunkID: row.Chunk.ID, Score: row.Fusion,
 			LaneRanks: cloneRanks(row.LaneRanks), Passage: row.Chunk.Content,
 			DocumentContext: chunkContext,
 			Citation: Citation{
@@ -213,14 +231,20 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 		perDocument[row.Chunk.Path]++
 	}
 	contextTokens := 0
+	relevantPaths := map[string]bool{}
 	for _, result := range results {
 		contextTokens += EstimateTokens(result.DocumentContext)
+		relevantPaths[result.Citation.Path] = true
+	}
+	disagreementStatus, err := loadTierDisagreements(ctx, db, relevantPaths, 8)
+	if err != nil {
+		return SearchResponse{}, err
 	}
 	response := SearchResponse{
 		Query: options.Query, QueryClass: options.QueryClass, AllowedTiers: tiers,
 		Verbosity:   verbosity,
 		TokenBudget: options.TokenBudget, ContextTokens: contextTokens,
-		Results: results, Omitted: omitted,
+		Results: results, TierDisagreements: disagreementStatus.Signals, Omitted: omitted,
 		OmittedByReason: omittedByReason,
 		Metadata:        metadata,
 	}
@@ -229,8 +253,8 @@ func (retriever Retriever) Search(ctx context.Context, options SearchOptions) (S
 	)
 }
 
-// rankCandidates runs every active lane, fuses them, applies the reranker and
-// the distinct-document lead, and returns the candidates in canonical order.
+// rankCandidates runs every active lexical, dense, and graph lane, fuses them, applies the
+// distinct-document lead, and returns the candidates in canonical order.
 //
 // paths, when non-empty, bounds every lane to those documents. Ordinary
 // retrieval passes none; required-evidence selection passes the required
@@ -241,7 +265,6 @@ func (retriever Retriever) rankCandidates(
 	ctx context.Context,
 	db *sql.DB,
 	query string,
-	queryClass string,
 	tiers []string,
 	paths []string,
 ) ([]*candidate, error) {
@@ -324,23 +347,6 @@ func (retriever Retriever) rankCandidates(
 	}
 	ranked := sortedCandidates(
 		candidates, retriever.Profile.Effective.Weights, retriever.Profile.Effective.RRFK)
-	if active["rerank"] && shouldRerank(queryClass, len(ranked)) {
-		depth := retriever.Profile.Effective.RerankDepth
-		if depth > len(ranked) {
-			depth = len(ranked)
-		}
-		for index := 0; index < depth; index++ {
-			ranked[index].Rerank = linearRerank(query, ranked[index].Chunk)
-		}
-		sort.SliceStable(ranked[:depth], func(i, j int) bool {
-			left := ranked[i].Fusion + ranked[i].Rerank*1000
-			right := ranked[j].Fusion + ranked[j].Rerank*1000
-			if left != right {
-				return left > right
-			}
-			return candidateLess(ranked[i], ranked[j])
-		})
-	}
 
 	// Promote the highest-ranked chunk of each distinct document ahead of
 	// additional chunks of documents already represented, up to
@@ -365,7 +371,182 @@ func (retriever Retriever) rankCandidates(
 		}
 		ranked = append(lead, rest...)
 	}
-	return ranked, nil
+	return retriever.applyDocumentSupersession(ctx, db, ranked, tiers, paths)
+}
+
+// applyDocumentSupersession turns the legacy document-level Superseded-by and
+// Supersedes markers into packing behavior. Every obsolete candidate names its
+// replacement, and the replacement's opening chunk is placed immediately
+// before the first obsolete candidate even when the query only matched the old
+// wording. Search then admits an obsolete passage only after the replacement
+// was actually packed.
+func (retriever Retriever) applyDocumentSupersession(
+	ctx context.Context,
+	db *sql.DB,
+	ranked []*candidate,
+	tiers []string,
+	paths []string,
+) ([]*candidate, error) {
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT
+		CASE e.kind WHEN 'superseded-by' THEN source.path ELSE target.path END AS old_path,
+		CASE e.kind WHEN 'superseded-by' THEN target.path ELSE source.path END AS new_path
+		FROM edges e
+		JOIN chunks source ON source.id=e.source_id
+		JOIN chunks target ON target.id=e.target_id
+		WHERE e.kind IN ('superseded-by','supersedes')
+		ORDER BY old_path,new_path`)
+	if err != nil {
+		return nil, err
+	}
+	replacements := map[string]string{}
+	for rows.Next() {
+		var oldPath, newPath string
+		if err := rows.Scan(&oldPath, &newPath); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		// Multiple contradictory markers never produce nondeterministic output.
+		// The lexicographically first replacement wins until governance repairs
+		// the source documents.
+		if _, present := replacements[oldPath]; !present {
+			replacements[oldPath] = newPath
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// Preserve the fail-closed behavior even when a marker names a missing or
+	// malformed target and therefore produced no graph edge. The bounded
+	// document prelude carries the same correction handle on non-opening
+	// chunks; a one-chunk document carries the original line in its content.
+	markerRows, err := db.QueryContext(ctx, `SELECT c.path,c.content,c.context
+		FROM chunks c
+		WHERE instr(lower(c.content),'superseded-by:') > 0
+		   OR instr(lower(c.context),'status: superseded') > 0
+		ORDER BY c.path,c.start_line,c.id`)
+	if err != nil {
+		return nil, err
+	}
+	for markerRows.Next() {
+		var oldPath, content, documentContext string
+		if err := markerRows.Scan(&oldPath, &content, &documentContext); err != nil {
+			markerRows.Close()
+			return nil, err
+		}
+		if _, present := replacements[oldPath]; present {
+			continue
+		}
+		target := supersessionTarget(content, documentContext)
+		if target != "" {
+			replacements[oldPath] = resolveManagedReference(oldPath, target)
+		}
+	}
+	if err := markerRows.Close(); err != nil {
+		return nil, err
+	}
+	if len(replacements) == 0 || len(ranked) == 0 {
+		return ranked, nil
+	}
+
+	allowedTiers := map[string]bool{}
+	for _, tier := range tiers {
+		allowedTiers[tier] = true
+	}
+	allowedPaths := map[string]bool{}
+	for _, path := range paths {
+		allowedPaths[path] = true
+	}
+	byPath := map[string]*candidate{}
+	for _, row := range ranked {
+		if _, present := byPath[row.Chunk.Path]; !present {
+			byPath[row.Chunk.Path] = row
+		}
+	}
+
+	// Load a replacement claim-bearing chunk when no retrieval lane found it.
+	// It is not an inferred match: the source document explicitly named it.
+	for oldPath, newPath := range replacements {
+		if _, obsoletePresent := byPath[oldPath]; !obsoletePresent {
+			continue
+		}
+		if len(allowedPaths) > 0 && !allowedPaths[newPath] {
+			continue
+		}
+		row, found, err := loadReplacementCandidate(ctx, db, newPath)
+		if err != nil {
+			return nil, err
+		}
+		if !found || !allowedTiers[row.Chunk.Tier] {
+			continue
+		}
+		row.LaneRanks = map[string]int{"graph": 1}
+		row.Fusion = byPath[oldPath].Fusion
+		byPath[newPath] = row
+	}
+
+	output := make([]*candidate, 0, len(ranked)+len(replacements))
+	outputPaths := map[string]bool{}
+	promotedIDs := map[string]bool{}
+	for _, row := range ranked {
+		newPath, obsolete := replacements[row.Chunk.Path]
+		if obsolete {
+			row.SupersededBy = newPath
+			if replacement := byPath[newPath]; replacement != nil && !outputPaths[newPath] {
+				output = append(output, replacement)
+				outputPaths[newPath] = true
+				promotedIDs[replacement.Chunk.ID] = true
+			}
+		}
+		// A replacement promoted above must not appear again at its former rank.
+		if promotedIDs[row.Chunk.ID] && !obsolete {
+			continue
+		}
+		output = append(output, row)
+		outputPaths[row.Chunk.Path] = true
+	}
+	return output, nil
+}
+
+func supersessionTarget(content, documentContext string) string {
+	if match := preludeSupersededByRE.FindStringSubmatch(content); match != nil {
+		return normalizePreludeField(match[1])
+	}
+	if !strings.Contains(documentContext, "status: superseded") {
+		return ""
+	}
+	for _, field := range strings.Split(documentContext, " | ") {
+		if strings.HasPrefix(field, "correction: ") {
+			return strings.TrimSpace(strings.TrimPrefix(field, "correction: "))
+		}
+	}
+	return ""
+}
+
+func loadReplacementCandidate(ctx context.Context, db *sql.DB, path string) (*candidate, bool, error) {
+	row := candidate{LaneRanks: map[string]int{}}
+	err := db.QueryRowContext(ctx, `SELECT c.id,c.document_id,c.path,c.tier,
+		c.heading,c.start_line,c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content,c.content_hash,
+		COALESCE(c.parent_id,''),COALESCE(c.previous_id,''),COALESCE(c.next_id,''),d.content_hash
+		FROM chunks c JOIN documents d ON d.id=c.document_id
+		WHERE c.path=?
+		ORDER BY CASE
+			WHEN instr(lower(c.content),'claim:') > 0 THEN 0
+			WHEN length(c.content) > 160 THEN 1
+			ELSE 2
+		END,c.start_line,c.id LIMIT 1`, path).Scan(
+		&row.Chunk.ID, &row.Chunk.DocumentID, &row.Chunk.Path, &row.Chunk.Tier,
+		&row.Chunk.Heading, &row.Chunk.StartLine, &row.Chunk.EndLine,
+		&row.Chunk.ByteRange, &row.Chunk.StartByte, &row.Chunk.EndByte,
+		&row.Chunk.Content, &row.Chunk.ContentHash, &row.Chunk.ParentID,
+		&row.Chunk.PreviousID, &row.Chunk.NextID, &row.DocumentHash,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &row, true, nil
 }
 
 // BestDocumentChunks returns, for each requested document, the single chunk
@@ -414,16 +595,16 @@ func (retriever Retriever) BestDocumentChunks(
 		return nil, err
 	}
 	defer db.Close()
-	ranked, err := retriever.rankCandidates(ctx, db, query, queryClass, tiers, paths)
+	ranked, err := retriever.rankCandidates(ctx, db, query, tiers, paths)
 	if err != nil {
 		return nil, err
 	}
-	// Corpus-wide fusion and reranking are useful for deciding which document
-	// to return, but a required document has already been chosen by the caller.
+	// Corpus-wide fusion is useful for deciding which document to return, but a
+	// required document has already been chosen by the caller.
 	// Within that document, prefer the chunk with the strongest literal query
 	// coverage. This prevents a title/claim-heavy opening chunk from winning a
-	// linear rerank over the later chunk that contains the caller's distinctive
-	// identifier. Ranked order remains the deterministic tie-break.
+	// fused opening rank over the later chunk that contains the caller's
+	// distinctive identifier. Ranked order remains the deterministic tie-break.
 	bestScore := map[string]int64{}
 	for _, row := range ranked {
 		score := requiredChunkLexicalScore(query, row.Chunk)
@@ -543,7 +724,6 @@ func projectSearchResult(
 		return result
 	}
 	result.Score = 0
-	result.Rerank = 0
 	result.LaneRanks = nil
 	result.Citation.SourceHash = ""
 	if !retainURI {
@@ -608,6 +788,7 @@ func finalizeSearchResponse(
 	maxBytes int,
 ) (SearchResponse, error) {
 	for {
+		response.TierDisagreements = filterTierDisagreements(response.Results, response.TierDisagreements)
 		converged := false
 		for iteration := 0; iteration < 6; iteration++ {
 			body, err := json.Marshal(response)
@@ -718,7 +899,10 @@ func rankExact(
 	paths []string,
 	candidateLimit int,
 ) ([]candidate, error) {
-	queryTokens := SortedUnique(modelTokens(query))
+	// Use the same identifier analyzer at query time that populated the exact
+	// term index. This is what makes 0x141A08E80 equivalent to FUN_141A08E80
+	// and camelCase/underscore spellings equivalent to their split forms.
+	queryTokens := IdentifierTerms(query)
 	terms := append([]string(nil), queryTokens...)
 	if len(terms) > 24 {
 		terms = terms[:24]
@@ -824,14 +1008,29 @@ func rankExact(
 		content := strings.ToLower(row.Chunk.Content)
 		heading := strings.ToLower(row.Chunk.Heading)
 		path := strings.ToLower(row.Chunk.Path)
+		contentTerms := stringSet(IdentifierTerms(row.Chunk.Content))
+		headingTerms := stringSet(IdentifierTerms(row.Chunk.Heading))
+		pathTerms := stringSet(IdentifierTerms(row.Chunk.Path))
 		var score int64
 		score += int64(strings.Count(content, queryLower)) * 10000
 		score += int64(strings.Count(heading, queryLower)) * 18000
 		score += int64(strings.Count(path, queryLower)) * 22000
 		for _, token := range queryTokens {
-			score += int64(strings.Count(content, token)) * 100
-			score += int64(strings.Count(heading, token)) * 300
-			score += int64(strings.Count(path, token)) * 500
+			contentCount := strings.Count(content, token)
+			headingCount := strings.Count(heading, token)
+			pathCount := strings.Count(path, token)
+			score += int64(contentCount) * 100
+			score += int64(headingCount) * 300
+			score += int64(pathCount) * 500
+			if contentCount == 0 && contentTerms[token] {
+				score += 100
+			}
+			if headingCount == 0 && headingTerms[token] {
+				score += 300
+			}
+			if pathCount == 0 && pathTerms[token] {
+				score += 500
+			}
 		}
 		if score > 0 {
 			scoredRows = append(scoredRows, scored{row, score})
@@ -851,6 +1050,14 @@ func rankExact(
 		result[index] = scoredRows[index].row
 	}
 	return result, nil
+}
+
+func stringSet(values []string) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for _, value := range values {
+		result[value] = true
+	}
+	return result
 }
 
 func loadChunksByID(ctx context.Context, db *sql.DB, ids []rankedID) ([]candidate, error) {
@@ -1275,21 +1482,15 @@ func classifyQuery(query string) string {
 		strings.Contains(lower, "provenance") {
 		return "provenance"
 	}
-	if strings.Contains(lower, "contradict") || strings.Contains(lower, "conflict") {
+	if strings.Contains(lower, "contradict") || strings.Contains(lower, "conflict") ||
+		strings.Contains(lower, "disagree") || strings.Contains(lower, "inconsisten") ||
+		strings.Contains(lower, "at odds") || strings.Contains(lower, "different account") {
 		return "contradiction"
 	}
 	if strings.Contains(lower, "orient") || strings.Contains(lower, "overview") {
 		return "orientation"
 	}
 	return "conceptual"
-}
-
-func shouldRerank(class string, count int) bool {
-	if count < 2 {
-		return false
-	}
-	return class == "conceptual" || class == "orientation" ||
-		class == "dependency" || class == "contradiction"
 }
 
 func lineRangeBody(body []byte, start, end int) (string, error) {

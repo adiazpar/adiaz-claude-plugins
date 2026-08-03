@@ -11,39 +11,48 @@ import (
 )
 
 type FindingQueryOptions struct {
-	Query                string                `json:"query"`
-	CampaignID           string                `json:"campaignId,omitempty"`
-	AllowedSourceClasses []string              `json:"allowedSourceClasses,omitempty"`
-	AllowedReviewStates  []string              `json:"allowedReviewStates,omitempty"`
-	AllowedValidities    []string              `json:"allowedValidities,omitempty"`
-	Limit                int                   `json:"limit,omitempty"`
-	TokenBudget          int                   `json:"tokenBudget,omitempty"`
-	IncludeRaw           bool                  `json:"includeRaw,omitempty"`
-	RequestID            string                `json:"requestId,omitempty"`
-	ArchivePolicy        ArchiveFallbackPolicy `json:"archivePolicy,omitempty"`
+	Query                  string                `json:"query"`
+	QueryClass             string                `json:"queryClass,omitempty"`
+	CampaignID             string                `json:"campaignId,omitempty"`
+	AllowedSourceClasses   []string              `json:"allowedSourceClasses,omitempty"`
+	AllowedProvenanceTiers []string              `json:"allowedProvenanceTiers,omitempty"`
+	AllowedReviewStates    []string              `json:"allowedReviewStates,omitempty"`
+	AllowedValidities      []string              `json:"allowedValidities,omitempty"`
+	Limit                  int                   `json:"limit,omitempty"`
+	TokenBudget            int                   `json:"tokenBudget,omitempty"`
+	IncludeRaw             bool                  `json:"includeRaw,omitempty"`
+	RequestID              string                `json:"requestId,omitempty"`
+	ContextLeaseID         string                `json:"contextLeaseId,omitempty"`
+	ResetContextLease      bool                  `json:"resetContextLease,omitempty"`
+	ArchivePolicy          ArchiveFallbackPolicy `json:"archivePolicy,omitempty"`
 	// suppressRaw is an in-process measurement control. Public adapters cannot
 	// set it; it lets the paired evaluator measure normalized cards without the
 	// fallback lane contaminating recall or token cost.
-	suppressRaw bool
+	suppressRaw        bool
+	suppressProvenance bool
+	// suppressNormalized is the reciprocal in-process measurement control. It
+	// leaves every public question, filter, budget, and limit unchanged while
+	// preventing finding cards from entering the raw-only arm.
+	suppressNormalized bool
 }
 
 type FindingCandidateTrace struct {
 	FindingID    string         `json:"findingId"`
 	LaneRanks    map[string]int `json:"laneRanks,omitempty"`
 	FusionScore  int64          `json:"fusionScore,omitempty"`
-	RerankScore  int64          `json:"rerankScore,omitempty"`
 	FilteredBy   []string       `json:"filteredBy,omitempty"`
 	RelationAdds []string       `json:"relationAdds,omitempty"`
 }
 
 type FindingQueryTrace struct {
-	AnalyzerVersion    string                  `json:"analyzerVersion"`
-	FindingFormat      string                  `json:"findingFormat"`
-	Candidates         []FindingCandidateTrace `json:"candidates"`
-	CandidateOmitted   int                     `json:"candidateOmitted,omitempty"`
-	FilteredByReason   map[string]int          `json:"filteredByReason,omitempty"`
-	RawFallbackDefault bool                    `json:"rawFallbackDefault"`
-	RawFallbackServed  bool                    `json:"rawFallbackServed"`
+	AnalyzerVersion          string                  `json:"analyzerVersion"`
+	FindingFormat            string                  `json:"findingFormat"`
+	Candidates               []FindingCandidateTrace `json:"candidates"`
+	CandidateOmitted         int                     `json:"candidateOmitted,omitempty"`
+	FilteredByReason         map[string]int          `json:"filteredByReason,omitempty"`
+	ProvenanceFallbackServed bool                    `json:"provenanceFallbackServed"`
+	RawFallbackDefault       bool                    `json:"rawFallbackDefault"`
+	RawFallbackServed        bool                    `json:"rawFallbackServed"`
 	// Operational counters remain available to in-process callers but are
 	// excluded from the deterministic query receipt and replay identity.
 	ArchiveServes            []ArchiveServeEvent `json:"-"`
@@ -51,14 +60,19 @@ type FindingQueryTrace struct {
 }
 
 type FindingQueryResponse struct {
-	Query           string            `json:"query"`
-	Status          string            `json:"status"`
-	Cards           []ContextCard     `json:"cards"`
-	TokenBudget     int               `json:"tokenBudget"`
-	EstimatedTokens int               `json:"estimatedTokens"`
-	Omitted         int               `json:"omitted"`
-	Trace           FindingQueryTrace `json:"trace"`
-	Digest          string            `json:"digest"`
+	Query                    string               `json:"query"`
+	QueryClass               string               `json:"queryClass"`
+	Status                   string               `json:"status"`
+	Cards                    []ContextCard        `json:"cards"`
+	TierDisagreements        []TierDisagreement   `json:"tierDisagreements,omitempty"`
+	TierDisagreementsOmitted int                  `json:"tierDisagreementsOmitted,omitempty"`
+	TierAuthorityRule        string               `json:"tierAuthorityRule,omitempty"`
+	TokenBudget              int                  `json:"tokenBudget"`
+	EstimatedTokens          int                  `json:"estimatedTokens"`
+	Omitted                  int                  `json:"omitted"`
+	Trace                    FindingQueryTrace    `json:"trace"`
+	ContextLease             *ContextLeaseReceipt `json:"contextLease,omitempty"`
+	Digest                   string               `json:"digest"`
 }
 
 type findingCandidate struct {
@@ -70,7 +84,6 @@ type findingCandidate struct {
 	terms             map[string]bool
 	laneRanks         map[string]int
 	fusion            int64
-	rerank            int64
 	why               []string
 	relationAlerts    []string
 	relationAdds      []string
@@ -98,6 +111,17 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 	if options.TokenBudget < 128 || options.TokenBudget > 8192 {
 		return FindingQueryResponse{}, errors.New("token budget must be between 128 and 8192")
 	}
+	options.QueryClass = strings.TrimSpace(options.QueryClass)
+	if options.QueryClass == "" || options.QueryClass == "auto" {
+		options.QueryClass = classifyQuery(options.Query)
+	}
+	if !validOne(options.QueryClass, "exact", "conceptual", "orientation", "current",
+		"provenance", "dependency", "contradiction") {
+		return FindingQueryResponse{}, fmt.Errorf("unsupported finding query class %q", options.QueryClass)
+	}
+	if _, err := managedProvenanceTiers(options.AllowedProvenanceTiers); err != nil {
+		return FindingQueryResponse{}, err
+	}
 	binding, err := retriever.archiveFallbackBinding()
 	if err != nil {
 		return FindingQueryResponse{}, err
@@ -120,6 +144,10 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 	if err != nil {
 		return FindingQueryResponse{}, err
 	}
+	if options.suppressNormalized {
+		candidates = map[string]*findingCandidate{}
+		filtered = nil
+	}
 	queryTerms := IdentifierTerms(options.Query)
 	rankFindingExact(options.Query, queryTerms, candidates)
 	if err := rankFindingFTS(ctx, db, options.Query, candidates); err != nil {
@@ -133,9 +161,6 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 	}
 	fuseFindingCandidates(candidates, retriever.Profile.Effective.Weights, retriever.Profile.Effective.RRFK)
 	ranked := sortedFindingCandidates(candidates)
-	if laneEnabled(retriever.Profile.ActiveLanes, "rerank") {
-		rerankFindingCandidates(options.Query, ranked, retriever.Profile.Effective.RerankDepth)
-	}
 	visibilityRanked, relationEligible, denseOnlySuppressed :=
 		suppressDenseOnlyBehindLexical(ranked, candidates)
 	visibleRanked, err := expandFindingRelations(
@@ -157,7 +182,7 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 	for _, candidate := range traceCandidates {
 		trace.Candidates = append(trace.Candidates, FindingCandidateTrace{
 			FindingID: candidate.record.ID, LaneRanks: cloneRanks(candidate.laneRanks),
-			FusionScore: candidate.fusion, RerankScore: candidate.rerank,
+			FusionScore:  candidate.fusion,
 			RelationAdds: append([]string(nil), candidate.relationAdds...),
 		})
 	}
@@ -185,6 +210,26 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 		cards = append(cards, additions...)
 	}
 	normalizedCount := len(cards)
+	provenanceCandidateCount := 0
+	provenanceCount := 0
+	if !options.suppressProvenance && len(cards) < options.Limit {
+		provenanceCards, total, err := queryManagedProvenanceCards(
+			ctx, db, options, options.Limit-len(cards))
+		if err != nil {
+			return FindingQueryResponse{}, err
+		}
+		provenanceCandidateCount = total
+		for _, provenance := range provenanceCards {
+			omitted := normalizedCandidateCount - normalizedCount +
+				provenanceCandidateCount - (provenanceCount + 1)
+			if !cardsFitFindingBudget(options, cards, []ContextCard{provenance}, trace, omitted) {
+				continue
+			}
+			cards = append(cards, provenance)
+			provenanceCount++
+			trace.ProvenanceFallbackServed = true
+		}
+	}
 	serveRaw := !options.suppressRaw && (rawDefault || options.IncludeRaw)
 	if serveRaw && len(cards) < options.Limit {
 		rawCards, err := queryRawReportCards(ctx, db, options.Query, options.Limit-len(cards))
@@ -202,7 +247,12 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 				if requestID == "" {
 					requestID = StableID("query", retriever.Generation.ID, options.Query)
 				}
-				event, err := retriever.ArchiveTracker.Record(raw.digest, requestID)
+				source, err := normalizationSourceForReport(
+					retriever.Boundary, raw.card.Metadata["path"], raw.digest)
+				if err != nil {
+					return FindingQueryResponse{}, err
+				}
+				event, err := retriever.ArchiveTracker.RecordSource(raw.digest, requestID, source)
 				if err != nil {
 					return FindingQueryResponse{}, err
 				}
@@ -214,18 +264,40 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 		}
 	}
 	trace.NormalizationSuggestions = SortedUnique(trace.NormalizationSuggestions)
+	relevantPaths := map[string]bool{}
+	for _, card := range cards {
+		if candidatePath := card.Metadata["path"]; candidatePath != "" {
+			relevantPaths[candidatePath] = true
+		}
+	}
+	if options.QueryClass == "contradiction" {
+		relevantPaths = nil
+	}
+	disagreements, err := loadTierDisagreements(ctx, db, relevantPaths, options.Limit)
+	if err != nil {
+		return FindingQueryResponse{}, err
+	}
 	response := FindingQueryResponse{
-		Query: options.Query, Status: findingResponseStatus(cards),
-		Cards: cards, TokenBudget: options.TokenBudget,
-		Omitted: normalizedCandidateCount - normalizedCount, Trace: trace,
+		Query: options.Query, QueryClass: options.QueryClass,
+		Status: findingResponseStatus(cards, disagreements.Signals),
+		Cards:  cards, TokenBudget: options.TokenBudget,
+		TierDisagreements:        disagreements.Signals,
+		TierDisagreementsOmitted: disagreements.Omitted,
+		TierAuthorityRule:        disagreements.AuthorityRule,
+		Omitted: normalizedCandidateCount - normalizedCount +
+			provenanceCandidateCount - provenanceCount,
+		Trace: trace,
 	}
 	if response.Omitted < 0 {
 		response.Omitted = 0
 	}
-	return finalizeFindingResponse(response)
+	return finalizeBoundedFindingResponse(response)
 }
 
-func findingResponseStatus(cards []ContextCard) string {
+func findingResponseStatus(cards []ContextCard, disagreements []TierDisagreement) string {
+	if len(disagreements) != 0 {
+		return "conflicted"
+	}
 	if len(cards) == 0 {
 		return "abstained"
 	}
@@ -246,6 +318,38 @@ func findingResponseStatus(cards []ContextCard) string {
 		return "insufficient-evidence"
 	}
 	return "answered"
+}
+
+// Tier-disagreement metadata is useful only if the complete response remains
+// inside the caller's hard budget. Contradiction queries prioritize at least
+// one typed disagreement over ordinary cards; other query classes preserve
+// their ranked cards and trim only the bounded disagreement tail.
+func finalizeBoundedFindingResponse(response FindingQueryResponse) (FindingQueryResponse, error) {
+	for {
+		response.Status = findingResponseStatus(response.Cards, response.TierDisagreements)
+		if response.TierDisagreementsOmitted > 0 {
+			response.Status = "conflicted"
+		}
+		finalized, err := finalizeFindingResponse(response)
+		if err == nil {
+			return finalized, nil
+		}
+		if response.QueryClass == "contradiction" && len(response.TierDisagreements) != 0 &&
+			len(response.Cards) != 0 {
+			response.Cards = response.Cards[:len(response.Cards)-1]
+			response.Omitted++
+			continue
+		}
+		if len(response.TierDisagreements) != 0 {
+			response.TierDisagreements = response.TierDisagreements[:len(response.TierDisagreements)-1]
+			response.TierDisagreementsOmitted++
+			if len(response.TierDisagreements) == 0 && response.TierDisagreementsOmitted == 0 {
+				response.TierAuthorityRule = ""
+			}
+			continue
+		}
+		return FindingQueryResponse{}, err
+	}
 }
 
 func (retriever Retriever) archiveFallbackBinding() (ArchiveFallbackBinding, error) {
@@ -274,7 +378,7 @@ func defaultFindingFilter(values []string, defaults ...string) map[string]bool {
 func loadFindingCandidates(ctx context.Context, db *sql.DB, options FindingQueryOptions) (map[string]*findingCandidate, []*findingCandidate, error) {
 	rows, err := db.QueryContext(ctx, `SELECT f.id,f.campaign_id,f.kind,f.subject,f.claim,
 		f.scope_json,f.evidence_grade,f.review_state,f.validity,f.projection,
-		f.record_digest,f.body,f.source_class,d.path
+		f.record_digest,f.body,f.source_class,f.verified_at,d.path
 		FROM findings f JOIN documents d ON d.id=f.document_id ORDER BY f.id`)
 	if err != nil {
 		return nil, nil, err
@@ -293,7 +397,7 @@ func loadFindingCandidates(ctx context.Context, db *sql.DB, options FindingQuery
 			&candidate.record.Subject, &candidate.record.Claim, &scopeJSON,
 			&candidate.record.EvidenceGrade, &candidate.record.ReviewState,
 			&candidate.record.Validity, &candidate.record.Projection, &candidate.record.Digest,
-			&candidate.record.Body, &candidate.sourceClass, &candidate.path,
+			&candidate.record.Body, &candidate.sourceClass, &candidate.record.VerifiedAt, &candidate.path,
 		); err != nil {
 			return nil, nil, err
 		}
@@ -467,7 +571,12 @@ func pruneWeakFindingFTS(queryTerms []string, candidates map[string]*findingCand
 	}
 }
 
-func (retriever Retriever) rankFindingDense(ctx context.Context, db *sql.DB, query string, candidates map[string]*findingCandidate) error {
+func (retriever Retriever) rankFindingDense(
+	ctx context.Context,
+	db *sql.DB,
+	query string,
+	candidates map[string]*findingCandidate,
+) error {
 	if retriever.Profile.Effective.Requires.Embedding == nil {
 		return errors.New("effective profile enables finding dense lane without a pinned embedding model")
 	}
@@ -555,11 +664,10 @@ func sortedFindingCandidates(candidates map[string]*findingCandidate) []*finding
 }
 
 // suppressDenseOnlyBehindLexical is a visibility guard, not a ranking-lane
-// deletion. Once exact or FTS has found any admissible finding, a candidate
-// supported only by dense similarity cannot trail that lexical evidence as an
-// additional answer. The original ranked slice remains intact for bounded
-// trace and ablation accounting. In a true lexical vacuum dense-only
-// candidates remain eligible as semantic rescue results.
+// deletion. When lexical evidence exists, a normalized finding supported only
+// by dense similarity cannot trail that lexical evidence as an authoritative
+// card. In a true lexical vacuum dense-only candidates remain eligible as
+// semantic rescue results.
 func suppressDenseOnlyBehindLexical(
 	ranked []*findingCandidate,
 	eligible map[string]*findingCandidate,
@@ -597,42 +705,34 @@ func suppressDenseOnlyBehindLexical(
 	return visible, relationEligible, suppressed
 }
 
-func rerankFindingCandidates(query string, candidates []*findingCandidate, depth int) {
-	if depth < 1 || depth > len(candidates) {
-		depth = len(candidates)
-	}
-	for _, candidate := range candidates[:depth] {
-		candidate.rerank = linearRerank(query, Chunk{
-			Path: candidate.path, Heading: candidate.record.Subject,
-			Content: candidate.record.Claim + "\n" + strings.Join(candidate.aliases, "\n") + "\n" + strings.Join(candidate.questions, "\n"),
-		})
-	}
-	sort.SliceStable(candidates[:depth], func(i, j int) bool {
-		if candidates[i].rerank != candidates[j].rerank {
-			return candidates[i].rerank > candidates[j].rerank
-		}
-		if candidates[i].fusion != candidates[j].fusion {
-			return candidates[i].fusion > candidates[j].fusion
-		}
-		return candidates[i].record.ID < candidates[j].record.ID
-	})
-}
-
 func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCandidate, eligible map[string]*findingCandidate, limit int) ([]*findingCandidate, error) {
 	critical := map[string][]string{}
-	rows, err := db.QueryContext(ctx, `SELECT source_id,target_id,kind FROM finding_relations
-		ORDER BY kind,source_id,target_id`)
+	stalenessGraph := map[string]FindingRecord{}
+	rows, err := db.QueryContext(ctx, `SELECT r.source_id,r.target_id,r.kind,
+		COALESCE(source.verified_at,''),COALESCE(target.verified_at,'')
+		FROM finding_relations r
+		LEFT JOIN findings source ON source.id=r.source_id
+		LEFT JOIN findings target ON target.id=r.target_id
+		ORDER BY r.kind,r.source_id,r.target_id`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var source, target, kind string
-		if err := rows.Scan(&source, &target, &kind); err != nil {
+		var source, target, kind, sourceVerifiedAt, targetVerifiedAt string
+		if err := rows.Scan(&source, &target, &kind, &sourceVerifiedAt, &targetVerifiedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		sourceCandidate, sourceEligible := eligible[source]
 		targetCandidate, targetEligible := eligible[target]
+		sourceFinding := stalenessGraph[source]
+		sourceFinding.ID, sourceFinding.VerifiedAt = source, sourceVerifiedAt
+		targetFinding := stalenessGraph[target]
+		targetFinding.ID, targetFinding.VerifiedAt = target, targetVerifiedAt
+		if kind == "depends-on" {
+			sourceFinding.Relations.DependsOn = append(sourceFinding.Relations.DependsOn, target)
+		}
+		stalenessGraph[source], stalenessGraph[target] = sourceFinding, targetFinding
 		if sourceEligible {
 			sourceCandidate.relationAlerts = append(sourceCandidate.relationAlerts, kind+":"+target)
 		}
@@ -650,6 +750,13 @@ func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCa
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
+	}
+	stalenessPaths := FindingStalenessPaths(stalenessGraph)
+	for dependentID := range stalenessPaths {
+		if candidate := eligible[dependentID]; candidate != nil {
+			candidate.relationAlerts = append(candidate.relationAlerts,
+				findingStalenessRelationAlerts(stalenessPaths, dependentID)...)
+		}
 	}
 	for _, candidate := range eligible {
 		candidate.relationAlerts = SortedUnique(candidate.relationAlerts)
@@ -735,7 +842,8 @@ func cardsFitFindingBudget(options FindingQueryOptions, existing, additions []Co
 		omitted = 0
 	}
 	response := FindingQueryResponse{
-		Query: options.Query, Cards: append(append([]ContextCard(nil), existing...), additions...),
+		Query: options.Query, QueryClass: options.QueryClass,
+		Cards:       append(append([]ContextCard(nil), existing...), additions...),
 		TokenBudget: options.TokenBudget, Omitted: omitted, Trace: trace,
 	}
 	_, err := finalizeFindingResponse(response)
@@ -819,6 +927,387 @@ type rawReportCard struct {
 	score  int
 }
 
+type managedProvenanceCard struct {
+	card  ContextCard
+	score int
+}
+
+const managedProvenanceCandidateCeiling = 64
+
+type managedProvenanceChunk struct {
+	id            string
+	sourcePath    string
+	title         string
+	digest        string
+	tier          string
+	documentBytes int64
+	heading       string
+	startLine     int
+	endLine       int
+	byteRange     bool
+	startByte     int
+	endByte       int
+	content       string
+}
+
+type managedProvenanceCandidateRank struct {
+	id        string
+	exactHits int
+	exactRank int
+	ftsRank   int
+}
+
+// queryManagedProvenanceCards is the explicitly labeled escape hatch for
+// ordinary managed Markdown that has no normalized FindingRecord. It returns
+// exact path/range handles and never assigns review state, validity, or finding
+// authority to the matched prose.
+func queryManagedProvenanceCards(
+	ctx context.Context,
+	db *sql.DB,
+	options FindingQueryOptions,
+	limit int,
+) ([]ContextCard, int, error) {
+	if limit < 1 {
+		return nil, 0, nil
+	}
+	allowed, err := managedProvenanceTiers(options.AllowedProvenanceTiers)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(allowed) == 0 {
+		return nil, 0, nil
+	}
+	tiers := make([]string, 0, len(allowed))
+	for tier := range allowed {
+		tiers = append(tiers, tier)
+	}
+	sort.Strings(tiers)
+	candidates, err := loadManagedProvenanceCandidates(
+		ctx, db, options.Query, tiers, managedProvenanceCandidateCeiling)
+	if err != nil {
+		return nil, 0, err
+	}
+	queryTerms := IdentifierTerms(options.Query)
+	queryFolded := strings.ToLower(options.Query)
+	best := map[string]managedProvenanceCard{}
+	for _, candidate := range candidates {
+		candidateText := candidate.sourcePath + "\n" + candidate.title + "\n" +
+			candidate.heading + "\n" + candidate.content
+		terms := map[string]bool{}
+		for _, term := range IdentifierTerms(candidateText) {
+			terms[term] = true
+		}
+		score := 0
+		for _, term := range queryTerms {
+			if terms[term] {
+				score++
+			}
+		}
+		if score == 0 {
+			continue
+		}
+		if strings.Contains(strings.ToLower(candidateText), queryFolded) {
+			score += len(queryTerms) + 1
+		}
+		evidenceHandle := formatExactPathHandle(
+			candidate.sourcePath, candidate.byteRange, candidate.startLine,
+			candidate.endLine, candidate.startByte, candidate.endByte)
+		card := ContextCard{
+			SchemaVersion:  CampaignSchemaVersion,
+			ID:             StableID("provenance", candidate.digest, candidate.sourcePath),
+			CardType:       "provenance",
+			Claim:          firstSentence(strings.TrimSpace(candidate.content), 320),
+			Title:          candidate.title,
+			EvidenceGrade:  "unknown",
+			SourceClass:    candidate.tier,
+			Handle:         formatExactPathHandle(candidate.sourcePath, false, 0, 0, 0, 0),
+			EvidenceHandle: evidenceHandle,
+			WhyMatched: []string{
+				"provenance-fallback:identifier-lexical",
+				"authority:provenance-only",
+			},
+			ExpansionTokens: int((candidate.documentBytes + 3) / 4),
+			Metadata: map[string]string{
+				"path": candidate.sourcePath, "digest": "sha256:" + candidate.digest,
+				"tier": candidate.tier, "authority": "provenance-only", "sourceKind": "managed-document",
+				"heading": candidate.heading, "startLine": fmt.Sprint(candidate.startLine), "endLine": fmt.Sprint(candidate.endLine),
+				"byteRange": fmt.Sprint(candidate.byteRange), "startByte": fmt.Sprint(candidate.startByte), "endByte": fmt.Sprint(candidate.endByte),
+			},
+		}
+		current, present := best[candidate.sourcePath]
+		if !present || score > current.score ||
+			score == current.score && card.EvidenceHandle < current.card.EvidenceHandle {
+			best[candidate.sourcePath] = managedProvenanceCard{card: card, score: score}
+		}
+	}
+	result := make([]managedProvenanceCard, 0, len(best))
+	for _, candidate := range best {
+		result = append(result, candidate)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].score != result[j].score {
+			return result[i].score > result[j].score
+		}
+		return result[i].card.Handle < result[j].card.Handle
+	})
+	total := len(result)
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	cards := make([]ContextCard, 0, len(result))
+	for _, candidate := range result {
+		cards = append(cards, candidate.card)
+	}
+	return cards, total, nil
+}
+
+// loadManagedProvenanceCandidates admits candidates only through the exact
+// term index and FTS5. Each lane receives a share of one hard ceiling, so the
+// public fallback never materializes or scores an O(corpus) row set in Go.
+func loadManagedProvenanceCandidates(
+	ctx context.Context,
+	db *sql.DB,
+	query string,
+	tiers []string,
+	ceiling int,
+) ([]managedProvenanceChunk, error) {
+	if len(tiers) == 0 || ceiling < 1 || ceiling > managedProvenanceCandidateCeiling {
+		return nil, errors.New("managed provenance candidate request is invalid")
+	}
+	exactTerms := SortedUnique(IdentifierTerms(query))
+	if len(exactTerms) > 24 {
+		exactTerms = exactTerms[:24]
+	}
+	ftsTokens := SortedUnique(modelTokens(query))
+	if len(ftsTokens) > 24 {
+		ftsTokens = ftsTokens[:24]
+	}
+	exactLimit, ftsLimit := 0, 0
+	switch {
+	case len(exactTerms) > 0 && len(ftsTokens) > 0:
+		exactLimit = ceiling / 2
+		ftsLimit = ceiling - exactLimit
+	case len(exactTerms) > 0:
+		exactLimit = ceiling
+	case len(ftsTokens) > 0:
+		ftsLimit = ceiling
+	default:
+		return nil, nil
+	}
+
+	ranked := map[string]*managedProvenanceCandidateRank{}
+	if exactLimit > 0 {
+		rows, err := queryManagedProvenanceExactCandidates(
+			ctx, db, exactTerms, tiers, exactLimit)
+		if err != nil {
+			return nil, err
+		}
+		for index, row := range rows {
+			row.exactRank = index + 1
+			copy := row
+			ranked[row.id] = &copy
+		}
+	}
+	if ftsLimit > 0 {
+		ids, err := queryManagedProvenanceFTSCandidates(
+			ctx, db, ftsTokens, tiers, ftsLimit)
+		if err != nil {
+			return nil, err
+		}
+		for index, id := range ids {
+			candidate := ranked[id]
+			if candidate == nil {
+				candidate = &managedProvenanceCandidateRank{id: id}
+				ranked[id] = candidate
+			}
+			candidate.ftsRank = index + 1
+		}
+	}
+	ordered := make([]managedProvenanceCandidateRank, 0, len(ranked))
+	for _, candidate := range ranked {
+		ordered = append(ordered, *candidate)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		left, right := managedProvenanceAdmissionScore(ordered[i]),
+			managedProvenanceAdmissionScore(ordered[j])
+		if left != right {
+			return left > right
+		}
+		return ordered[i].id < ordered[j].id
+	})
+	if len(ordered) > ceiling {
+		ordered = ordered[:ceiling]
+	}
+	ids := make([]string, len(ordered))
+	for index := range ordered {
+		ids[index] = ordered[index].id
+	}
+	return loadManagedProvenanceChunks(ctx, db, ids, tiers)
+}
+
+func managedProvenanceAdmissionScore(candidate managedProvenanceCandidateRank) int {
+	score := candidate.exactHits * 10000
+	if candidate.exactRank > 0 {
+		score += 100000 / (10 + candidate.exactRank)
+	}
+	if candidate.ftsRank > 0 {
+		score += 100000 / (10 + candidate.ftsRank)
+	}
+	return score
+}
+
+func queryManagedProvenanceExactCandidates(
+	ctx context.Context,
+	db *sql.DB,
+	terms []string,
+	tiers []string,
+	limit int,
+) ([]managedProvenanceCandidateRank, error) {
+	termPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(terms)), ",")
+	tierPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	args := make([]any, 0, len(terms)+len(tiers)+1)
+	for _, term := range terms {
+		args = append(args, term)
+	}
+	for _, tier := range tiers {
+		args = append(args, tier)
+	}
+	args = append(args, limit)
+	rows, err := db.QueryContext(ctx, `SELECT t.chunk_id,count(*) AS hits
+		FROM terms t JOIN chunks c ON c.id=t.chunk_id
+		JOIN documents d ON d.id=c.document_id
+		WHERE t.term IN (`+termPlaceholders+`) AND d.source_kind=''
+		AND c.tier IN (`+tierPlaceholders+`)
+		GROUP BY t.chunk_id
+		ORDER BY hits DESC,c.path ASC,c.start_line ASC,c.id ASC LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []managedProvenanceCandidateRank{}
+	for rows.Next() {
+		var candidate managedProvenanceCandidateRank
+		if err := rows.Scan(&candidate.id, &candidate.exactHits); err != nil {
+			return nil, err
+		}
+		result = append(result, candidate)
+	}
+	return result, rows.Err()
+}
+
+func queryManagedProvenanceFTSCandidates(
+	ctx context.Context,
+	db *sql.DB,
+	tokens []string,
+	tiers []string,
+	limit int,
+) ([]string, error) {
+	parts := make([]string, len(tokens))
+	for index, token := range tokens {
+		parts[index] = `"` + strings.ReplaceAll(token, `"`, `""`) + `"`
+	}
+	tierPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	args := []any{strings.Join(parts, " OR ")}
+	for _, tier := range tiers {
+		args = append(args, tier)
+	}
+	args = append(args, limit)
+	rows, err := db.QueryContext(ctx, `SELECT c.id,
+		bm25(chunks_fts,0.0,3.0,5.0,1.0) AS rank
+		FROM chunks_fts JOIN chunks c ON c.id=chunks_fts.chunk_id
+		JOIN documents d ON d.id=c.document_id
+		WHERE chunks_fts MATCH ? AND d.source_kind=''
+		AND c.tier IN (`+tierPlaceholders+`)
+		ORDER BY rank ASC,c.path ASC,c.start_line ASC,c.id ASC LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []string{}
+	for rows.Next() {
+		var id string
+		var ignoredRank float64
+		if err := rows.Scan(&id, &ignoredRank); err != nil {
+			return nil, err
+		}
+		result = append(result, id)
+	}
+	return result, rows.Err()
+}
+
+func loadManagedProvenanceChunks(
+	ctx context.Context,
+	db *sql.DB,
+	ids []string,
+	tiers []string,
+) ([]managedProvenanceChunk, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	idPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	tierPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(tiers)), ",")
+	args := make([]any, 0, len(ids)+len(tiers))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	for _, tier := range tiers {
+		args = append(args, tier)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT c.id,d.path,d.title,d.content_hash,d.tier,d.size,
+		c.heading,c.start_line,c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content
+		FROM chunks c JOIN documents d ON d.id=c.document_id
+		WHERE c.id IN (`+idPlaceholders+`) AND d.source_kind=''
+		AND c.tier IN (`+tierPlaceholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byID := map[string]managedProvenanceChunk{}
+	for rows.Next() {
+		var candidate managedProvenanceChunk
+		if err := rows.Scan(
+			&candidate.id, &candidate.sourcePath, &candidate.title, &candidate.digest,
+			&candidate.tier, &candidate.documentBytes, &candidate.heading,
+			&candidate.startLine, &candidate.endLine, &candidate.byteRange,
+			&candidate.startByte, &candidate.endByte, &candidate.content,
+		); err != nil {
+			return nil, err
+		}
+		byID[candidate.id] = candidate
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]managedProvenanceChunk, 0, len(ids))
+	for _, id := range ids {
+		if candidate, ok := byID[id]; ok {
+			result = append(result, candidate)
+		}
+	}
+	return result, nil
+}
+
+func managedProvenanceTiers(explicit []string) (map[string]bool, error) {
+	if len(explicit) != 0 {
+		allowed := map[string]bool{}
+		for _, tier := range explicit {
+			if !validOne(tier, "truth", "campaign", "provisional", "history", "backlog",
+				"profile", "memory", "intake", "state", "navigation", "playbook", "asset") {
+				return nil, fmt.Errorf("unsupported managed provenance tier %q", tier)
+			}
+			if allowed[tier] {
+				return nil, fmt.Errorf("managed provenance tier %q is repeated", tier)
+			}
+			allowed[tier] = true
+		}
+		return allowed, nil
+	}
+	return map[string]bool{
+		"truth": true, "profile": true, "navigation": true, "history": true,
+		"backlog": true, "memory": true, "playbook": true, "asset": true,
+	}, nil
+}
+
 func queryRawReportCards(ctx context.Context, db *sql.DB, query string, limit int) ([]rawReportCard, error) {
 	rows, err := db.QueryContext(ctx, `SELECT d.path,d.title,d.content_hash,d.tier,d.size,
 		c.heading,c.start_line,c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content
@@ -853,18 +1342,17 @@ func queryRawReportCards(ctx context.Context, db *sql.DB, query string, limit in
 			continue
 		}
 		claim := firstSentence(strings.TrimSpace(content), 320)
-		evidenceHandle := fmt.Sprintf("path:%s#L%d-L%d", path, startLine, endLine)
-		if byteRange {
-			evidenceHandle = fmt.Sprintf("path:%s#B%d-B%d", path, startByte, endByte)
-		}
+		evidenceHandle := formatExactPathHandle(
+			path, byteRange, startLine, endLine, startByte, endByte)
 		card := ContextCard{
 			SchemaVersion: CampaignSchemaVersion, ID: StableID("raw", digest, path), CardType: "raw-report",
-			Claim: claim, Title: title, SourceClass: "archive", Handle: "archive:" + digest,
+			Claim: claim, Title: title, SourceClass: "archive",
+			Handle:         formatExactPathHandle(path, false, 0, 0, 0, 0),
 			EvidenceHandle: evidenceHandle,
-			// The archive handle expands the immutable report, not merely the
-			// matched preview chunk. Charge that full expansion cost so callers and
-			// normalized-vs-raw evaluation compare the artifacts they can actually
-			// open rather than a selectively cheap excerpt.
+			// The source path handle expands the generation-bound report, not merely the
+			// matched preview chunk. Expose that expected expansion cost for caller
+			// planning; paired evaluation measures the bounded response bytes for
+			// both arms and never mixes this value into only the raw side.
 			WhyMatched: []string{"raw-fallback:identifier-lexical"}, ExpansionTokens: int((documentBytes + 3) / 4),
 			Metadata: map[string]string{
 				"path": path, "digest": digest, "legacyTier": tier,

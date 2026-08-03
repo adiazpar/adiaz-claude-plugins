@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/normalized-vs-raw-candidate.schema.json",
+  "title": "Non-authoritative normalized-versus-raw paired measurement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "runId", "nonAuthoritative", "evaluatedAt", "suiteId", "suiteDigest", "questionsDigest", "contractDigest", "caseCount", "profileName", "effectiveProfile", "activeLanes", "generation", "binding", "questions", "pairedEvaluation", "checks", "decision", "digest"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "kind": {"const": "normalized-vs-raw-candidate"},
+    "runId": {"type": "string", "pattern": "^normalized-vs-raw-[0-9]{8}T[0-9]{6}\\.[0-9]{9}Z$"},
+    "nonAuthoritative": {"const": true},
+    "evaluatedAt": {"type": "string", "format": "date-time"},
+    "suiteId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "suiteDigest": {"$ref": "#/$defs/digest"},
+    "questionsDigest": {"$ref": "#/$defs/digest"},
+    "contractDigest": {"$ref": "#/$defs/digest"},
+    "caseCount": {"const": 64},
+    "profileName": {"type": "string", "minLength": 1},
+    "effectiveProfile": {"type": "string", "minLength": 1},
+    "activeLanes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["exact", "fts", "graph", "dense"]}},
+    "generation": {"$ref": "#/$defs/generation"},
+    "binding": {"$ref": "#/$defs/binding"},
+    "questions": {"type": "array", "minItems": 64, "maxItems": 64, "items": {"$ref": "#/$defs/question"}},
+    "pairedEvaluation": {
+      "type": "object",
+      "description": "The engine-sealed full FindingAblationReport. Runtime validation recomputes its digest, identities, cases, aggregates, splits, and roles before this candidate can be emitted."
+    },
+    "checks": {"$ref": "#/$defs/checks"},
+    "decision": {"$ref": "#/$defs/decision"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "role", "topic", "split", "queryClass", "queryDigest", "contractDigest", "tokenBudget", "cardLimit"],
+      "properties": {
+        "caseId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "role": {"enum": ["manager", "drafter"]},
+        "topic": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "split": {"enum": ["development", "holdout"]},
+        "queryClass": {"enum": ["auto", "exact", "conceptual", "orientation", "current", "provenance", "dependency", "contradiction"]},
+        "queryDigest": {"$ref": "#/$defs/digest"},
+        "contractDigest": {"$ref": "#/$defs/digest"},
+        "tokenBudget": {"type": "integer", "minimum": 128, "maximum": 4096},
+        "cardLimit": {"type": "integer", "minimum": 1, "maximum": 5}
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "corpusFingerprint", "modelFingerprint", "runtimeFingerprint", "project", "worktree", "gitRevision", "dirtyFingerprint", "parserVersion", "chunkerVersion", "createdAt"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "corpusFingerprint": {"$ref": "#/$defs/digest"},
+        "modelFingerprint": {"$ref": "#/$defs/digest"},
+        "runtimeFingerprint": {"$ref": "#/$defs/digest"},
+        "project": {"type": "string"},
+        "worktree": {"type": "string"},
+        "gitRevision": {"type": "string"},
+        "dirtyFingerprint": {"type": "string"},
+        "parserVersion": {"type": "string", "minLength": 1},
+        "chunkerVersion": {"type": "string", "minLength": 1},
+        "createdAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["corpusFingerprint", "profileIdentity", "runtimeFingerprint", "findingFormat", "identifierAnalyzer"],
+      "properties": {
+        "corpusFingerprint": {"$ref": "#/$defs/digest"},
+        "profileIdentity": {"type": "string", "minLength": 1},
+        "runtimeFingerprint": {"$ref": "#/$defs/digest"},
+        "findingFormat": {"type": "string", "minLength": 1},
+        "identifierAnalyzer": {"type": "string", "minLength": 1}
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exactly64Cases", "freshCorpusBinding", "identicalQuestionContracts", "overallRecallNonInferior", "splitRecallNonInferior", "roleRecallNonInferior", "completeKnownRecall", "abstentionExact", "findingHandlesExact", "evidenceHandlesExact", "sourceClassesExact", "reviewStatesExact", "validitiesExact", "vocabularyDisjointExact", "durabilityLabelsExact", "hardNegativesZero", "deterministicReplayExact", "lowerTokenCostOverall", "lowerTokenCostBySplit", "lowerTokenCostByRole", "allPassed"],
+      "properties": {
+        "exactly64Cases": {"type": "boolean"},
+        "freshCorpusBinding": {"type": "boolean"},
+        "identicalQuestionContracts": {"type": "boolean"},
+        "overallRecallNonInferior": {"type": "boolean"},
+        "splitRecallNonInferior": {"type": "boolean"},
+        "roleRecallNonInferior": {"type": "boolean"},
+        "completeKnownRecall": {"type": "boolean"},
+        "abstentionExact": {"type": "boolean"},
+        "findingHandlesExact": {"type": "boolean"},
+        "evidenceHandlesExact": {"type": "boolean"},
+        "sourceClassesExact": {"type": "boolean"},
+        "reviewStatesExact": {"type": "boolean"},
+        "validitiesExact": {"type": "boolean"},
+        "vocabularyDisjointExact": {"type": "boolean"},
+        "durabilityLabelsExact": {"type": "boolean"},
+        "hardNegativesZero": {"type": "boolean"},
+        "deterministicReplayExact": {"type": "boolean"},
+        "lowerTokenCostOverall": {"type": "boolean"},
+        "lowerTokenCostBySplit": {"type": "boolean"},
+        "lowerTokenCostByRole": {"type": "boolean"},
+        "allPassed": {"type": "boolean"}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "promotionEligible", "currentArchiveMode", "requiredNextAction", "failedChecks", "authorizationReceipt"],
+      "properties": {
+        "outcome": {"enum": ["passed", "retain-default-fallback"]},
+        "promotionEligible": {"type": "boolean"},
+        "currentArchiveMode": {"const": "default-fallback"},
+        "requiredNextAction": {"enum": ["retain-default-fallback", "explicitly-ratify-opt-in-receipt"]},
+        "failedChecks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "authorizationReceipt": {"const": false}
+      }
+    }
+  }
+}

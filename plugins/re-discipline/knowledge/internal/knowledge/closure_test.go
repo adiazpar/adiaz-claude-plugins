@@ -61,7 +61,7 @@ func closureTestGraph(t *testing.T) CampaignGraph {
 		Scope: map[string]any{"component": "plugin"}, SourceRuns: []string{"R-20260802-0001"},
 		Evidence: []EvidenceReference{{
 			Path: reportPath, SHA256: reportDigest, StartLine: 1, EndLine: 2,
-			SourceRun: "R-20260802-0001",
+			ObjectKey: "path:" + reportPath + "#L1-L2", SourceRun: "R-20260802-0001",
 		}},
 		EvidenceGrade: "direct", ReviewState: "manager-ratified", Validity: "current",
 		Projection: "truth",
@@ -77,7 +77,9 @@ func closureTestGraph(t *testing.T) CampaignGraph {
 		SourceRuns:          []FileHandle{{Path: reportPath, SHA256: reportDigest}},
 		CandidateFindingIDs: []string{"F-0001"},
 		Coverage: []CoverageEntry{{
-			SourceHandle: reportPath + "#L1-L2", Disposition: "candidate-finding", TargetID: "F-0001",
+			SourceHandle: "path:" + reportPath + "#L1-L2", SourcePath: reportPath,
+			SourceSHA256: reportDigest, StartLine: 1, EndLine: 2, SourceLineCount: 2,
+			Disposition: "candidate-finding", TargetID: "F-0001",
 		}},
 		Triage: map[string]string{"F-0001": "routine"},
 		Status: "reviewed",
@@ -89,6 +91,7 @@ func closureTestGraph(t *testing.T) CampaignGraph {
 		RecordMeta: closureTestMeta("V-0001"), CampaignID: "C-TEST",
 		Reviewer: "manager", Authority: "manager", IntakeID: "I-0001", IntakeRevision: 1,
 		PacketDigest: stateTestDigest("9"),
+		ReviewLoad:   stateTestReviewLoad("V-0001", "C-TEST", stateTestDigest("9"), 1, 0),
 		Decisions: []ReviewDecision{{
 			FindingID: "F-0001", FindingRevision: 1, Action: "ratify", Rationale: "Direct evidence resolves it",
 		}},
@@ -162,6 +165,40 @@ func TestClosureCoverageSurfacesMissingReviewAndConflict(t *testing.T) {
 	}
 }
 
+func TestReviewedRunCoverageIsBoundToTheExactReportDigest(t *testing.T) {
+	graph := closureTestGraph(t)
+	run := graph.Runs["R-20260802-0001"]
+	staleReport := *run.Report
+	staleReport.SHA256 = stateTestDigest("7")
+	run.Report = &staleReport
+	graph.Runs[run.ID] = run
+
+	reviewed := reviewedReportCoverage(graph)
+	if reviewed[reviewedRunCoverageKey(run.ID, staleReport)] {
+		t.Fatal("review of prior report bytes covered a same-path report with a new digest")
+	}
+}
+
+func TestReviewedRunCoverageRequiresAnImmutableReviewReceipt(t *testing.T) {
+	graph := closureTestGraph(t)
+	delete(graph.Reviews, "V-0001")
+	run := graph.Runs["R-20260802-0001"]
+	if reviewedReportCoverage(graph)[reviewedRunCoverageKey(run.ID, *run.Report)] {
+		t.Fatal("reviewed intake status without a review receipt covered its source run")
+	}
+}
+
+func TestReviewedRunCoverageRequiresAReviewDecisionForEveryCandidate(t *testing.T) {
+	graph := closureTestGraph(t)
+	review := graph.Reviews["V-0001"]
+	review.Decisions = nil
+	graph.Reviews[review.ID] = review
+	run := graph.Runs["R-20260802-0001"]
+	if reviewedReportCoverage(graph)[reviewedRunCoverageKey(run.ID, *run.Report)] {
+		t.Fatal("partial manager review covered a source run")
+	}
+}
+
 func TestClosureAdvanceCannotSkipOrProjectThroughBlockers(t *testing.T) {
 	graph := closureTestGraph(t)
 	coverage, err := ComputeClosureCoverage(graph, nil)
@@ -201,6 +238,7 @@ func TestClosureAdvanceCannotSkipOrProjectThroughBlockers(t *testing.T) {
 	project := next
 	project.Stage = "project"
 	project.Coverage = &blockedCoverage
+	project.StagingDigest = stateTestDigest("8")
 	projectAny := project
 	projectAny.Digest = ""
 	project.Digest, _ = CanonicalDigest(projectAny)
@@ -221,8 +259,18 @@ func TestTruthProjectionVerifiesEvidenceAndArchiveManifestCoverage(t *testing.T)
 	if err := os.WriteFile(absolute, reportBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	reportDigest := "sha256:" + SHA256Bytes(reportBody)
+	run := graph.Runs["R-20260802-0001"]
+	runReport := *run.Report
+	runReport.SHA256 = reportDigest
+	run.Report = &runReport
+	graph.Runs[run.ID] = run
+	intake := graph.Intakes["I-0001"]
+	intake.SourceRuns = []FileHandle{runReport}
+	intake.Coverage[0].SourceSHA256 = reportDigest
+	graph.Intakes[intake.ID] = intake
 	finding := graph.Findings["F-0001"]
-	finding.Evidence[0].SHA256 = "sha256:" + SHA256Bytes(reportBody)
+	finding.Evidence[0].SHA256 = reportDigest
 	finding.Digest, _ = CanonicalDigest(finding)
 	graph.Findings[finding.ID] = finding
 	boundary, err := NewBoundary(root)

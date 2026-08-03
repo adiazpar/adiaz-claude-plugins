@@ -48,6 +48,8 @@ EXPECTED_MCP_TOOLS = [
     "manager_apply",
     "curation_submit",
     "closure_apply",
+    "normalization_queue",
+    "migrate_project",
 ]
 
 EXPECTED_PLUGIN_VERSION = "0.8.0"
@@ -106,6 +108,7 @@ REQUIRED_PATHS = {
     "skills/migrate-project/SKILL.md",
     "templates/campaign/campaign.json",
     "templates/campaign/work-item.json",
+    "templates/campaign/deferred-work-item.json",
     "templates/campaign/run.json",
     "templates/campaign/brief.md",
     "templates/campaign/report.md",
@@ -121,6 +124,11 @@ REQUIRED_PATHS = {
     "knowledge/schemas/migration-plan.schema.json",
     "knowledge/schemas/migration-operation.schema.json",
     "knowledge/schemas/migration-receipt.schema.json",
+    "knowledge/schemas/migration-gate-artifact.schema.json",
+    "knowledge/schemas/migration-retrieval-gate-evidence.schema.json",
+    "knowledge/schemas/migration-blinded-agent-evaluation.schema.json",
+    "knowledge/schemas/migration-host-conformance.schema.json",
+    "knowledge/schemas/state-inventory.schema.json",
     "knowledge/schemas/runtime-package-manifest.schema.json",
     "knowledge/bin/manifest.json",
     "knowledge/bin/SHA256SUMS",
@@ -134,6 +142,16 @@ LEGACY_PATTERNS = {
     "categorical-run-root": re.compile(r"(?:^|[/\\])subagents(?:[/\\]|$)", re.I),
     "report-stamp": re.compile(r"(?:report|review)[ -]stamp", re.I),
     "master-file": re.compile(r"masterfile|master-file", re.I),
+}
+
+# The write-boundary hooks must name the two legacy canonical records they
+# refuse to mutate. This is an enforcement-only exception: it does not permit
+# retired commands, writers, or workspace layouts anywhere in either hook.
+ENFORCEMENT_LEGACY_MATCHES = {
+    ("hooks/re-discipline-hook.ps1", "campaign-narrative-file"),
+    ("hooks/re-discipline-hook.ps1", "review-ledger-file"),
+    ("hooks/re-discipline-hook.sh", "campaign-narrative-file"),
+    ("hooks/re-discipline-hook.sh", "review-ledger-file"),
 }
 
 TEXT_SUFFIXES = {".md", ".json", ".jsonc", ".toml", ".ps1", ".sh", ".go", ".yaml", ".yml", ".awk"}
@@ -215,6 +233,16 @@ def shared_asset_kind(relative: str) -> str:
         "evals/conformance/finding-cases.json",
     }:
         return "benchmark-cases"
+    if relative == "evals/conformance/lane-ablation-decision.json":
+        return "lane-ablation-decision"
+    if relative == "evals/conformance/lane-ablation-report.json":
+        return "lane-ablation-report"
+    if relative == "evals/conformance/project-lane-ablation.json":
+        return "project-lane-ablation-measurement"
+    if relative.startswith("evals/conformance/evidence/") and relative.lower().endswith(
+        ".zip"
+    ):
+        return "lane-ablation-evidence-archive"
     if relative.startswith("evals/conformance/fixture/") and relative.lower().endswith(
         (".md", ".json", ".jsonc")
     ):
@@ -487,9 +515,11 @@ def probe_runtime_tools(
         )
 
 
-def is_allowlisted(relative: str) -> bool:
+def is_allowlisted(relative: str, label: str = "") -> bool:
     path = relative.replace("\\", "/")
     return (
+        (path, label) in ENFORCEMENT_LEGACY_MATCHES
+        or
         path.startswith("docs/migrations/")
         or path.startswith("docs/rfcs/")
         or path.startswith("skills/migrate-project/")
@@ -1093,7 +1123,7 @@ def audit_staged_tree(stage: Path) -> dict[str, object]:
             if not pattern.search(text):
                 continue
             match = {"kind": label, "path": relative, "detail": pattern.pattern}
-            if is_allowlisted(relative):
+            if is_allowlisted(relative, label):
                 allowlisted.append(match)
             else:
                 violations.append(match)

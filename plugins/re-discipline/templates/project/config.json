@@ -19,12 +19,16 @@
     "drafterCardTokens": 3072,
     "maxCards": 16,
     "maxExpansionBytes": 32768,
-    "leaseMode": "none"
+    "leaseMode": "memory-only"
   },
   "payload": {
     "createLazily": true,
     "maxInlineBytes": 1048576,
     "requireRegistration": true
+  },
+  "reviewLoad": {
+    "targetMinutesPerPacket": 12,
+    "targetPacketsPerSession": 6
   },
   "closure": {
     "requireRunCoverage": true,

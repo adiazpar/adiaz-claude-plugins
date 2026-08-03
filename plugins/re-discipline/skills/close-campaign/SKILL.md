@@ -26,7 +26,9 @@ Use engine operations to complete, in order:
 1. inventory every work item, run, finding, intake, review, event, registered
    file, and changed project path;
 2. prove coverage for every non-aborted run and every report claim span;
-3. normalize uncovered material through curator runs;
+3. normalize uncovered material through curator runs, then proof-resolve each
+   closure-triggered normalization item against the exact curator run, intake
+   coverage, and manager review receipt;
 4. reconcile duplicates, conflicts, dependencies, challenges, and
    supersessions;
 5. record a manager destination and retention decision for every item;
@@ -36,6 +38,12 @@ Use engine operations to complete, in order:
 8. publish the complete archive transaction;
 9. finalize and emit the immutable closure receipt.
 
+Deferred work is not covered by a prose note. A closure-blocking deferment
+must be resolved. A non-blocking deferment must already declare
+`export-backlog` and an exact `docs/backlog/*.md` destination; include its work
+item ID in `exportedWorkItemIds` no later than the `project` stage so the engine
+can stage, reproduce, verify, and atomically publish that backlog record.
+
 Truth projection is permitted only inside this job. Each current claim must be
 manager-ratified, direct under project policy, reproducible, atomic, scoped,
 conflict-free, and linked to exact finding and review revisions. Partial truth
@@ -44,9 +52,10 @@ publication is a failed transaction.
 ## Refusal Is Correct
 
 Do not bypass a refusal. Surface the exact missing coverage, open work,
-unreviewed intake, unresolved conflict, absent report, retention gap, or digest
-mismatch and return to the relevant stage. Deletion requires explicit manager
-approval and a durable replacement for the artifact's value.
+unreviewed intake, unresolved normalization item, unresolved conflict, absent
+report, retention gap, or digest mismatch and return to the relevant stage.
+Deletion requires explicit manager approval and a durable replacement for the
+artifact's value.
 
 ## Verify And Return
 

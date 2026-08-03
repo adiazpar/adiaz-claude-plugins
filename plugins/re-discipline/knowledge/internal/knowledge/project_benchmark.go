@@ -140,10 +140,6 @@ func (service *Service) RunProjectBenchmark(
 	if mode == "full" {
 		rows = append([]EffectiveProfile(nil), service.ProfileCatalog.EffectiveProfiles...)
 		sort.Slice(rows, func(i, j int) bool {
-			left, right := capabilityPreference(rows[i]), capabilityPreference(rows[j])
-			if left != right {
-				return left < right
-			}
 			return rows[i].Name < rows[j].Name
 		})
 	}

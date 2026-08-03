@@ -1,0 +1,951 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adiaz.github.io/re-discipline/schemas/project-lane-ablation-report.schema.json",
+  "title": "Project retrieval-lane ablation measurement",
+  "description": "A measurement-only receipt that keeps a fresh current-runtime two-arm benchmark separate from frozen pre-removal three-arm rerank evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "kind",
+    "measurementOnly",
+    "project",
+    "evaluatedAt",
+    "provenance",
+    "corpus",
+    "harness",
+    "models",
+    "profiles",
+    "cases",
+    "slices",
+    "uncertainty",
+    "sensitivity",
+    "historicalRerank",
+    "validation",
+    "decision"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "plugin://re-discipline/schemas/project-lane-ablation-report.schema.json"
+    },
+    "schemaVersion": {"const": 2},
+    "kind": {"const": "project-retrieval-lane-ablation"},
+    "measurementOnly": {"const": true},
+    "project": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "evaluatedAt": {"type": "string", "format": "date-time"},
+    "provenance": {"$ref": "#/$defs/provenance"},
+    "corpus": {"$ref": "#/$defs/corpus"},
+    "harness": {"$ref": "#/$defs/harness"},
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {"$ref": "#/$defs/model"}
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/profile"}
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 64,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/case"}
+    },
+    "slices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/slice"}
+    },
+    "uncertainty": {"$ref": "#/$defs/uncertainty"},
+    "sensitivity": {"$ref": "#/$defs/sensitivity"},
+    "historicalRerank": {"$ref": "#/$defs/historicalRerank"},
+    "validation": {"$ref": "#/$defs/validation"},
+    "decision": {"$ref": "#/$defs/decision"}
+  },
+  "$defs": {
+    "identity": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "bareDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "safePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frozenSourceRevision",
+        "projectGitRevision",
+        "projectDirtyFingerprint",
+        "frozenRuntimeFingerprint",
+        "rawBenchmarkSha256",
+        "rawBenchmarkRunId",
+        "rawBenchmarkComplete",
+        "rawBenchmarkArmCount",
+        "rawBenchmarkCasesPerArm",
+        "rawBenchmarkDurationMillis",
+        "parserVersion",
+        "chunkerVersion",
+        "profileCatalogSha256",
+        "modelManifestSha256"
+      ],
+      "properties": {
+        "frozenSourceRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "projectGitRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "projectDirtyFingerprint": {"$ref": "#/$defs/identity"},
+        "frozenRuntimeFingerprint": {"$ref": "#/$defs/identity"},
+        "rawBenchmarkSha256": {"$ref": "#/$defs/identity"},
+        "rawBenchmarkRunId": {"type": "string", "minLength": 1},
+        "rawBenchmarkComplete": {"const": true},
+        "rawBenchmarkArmCount": {"const": 2},
+        "rawBenchmarkCasesPerArm": {"const": 64},
+        "rawBenchmarkDurationMillis": {"type": "integer", "minimum": 0},
+        "parserVersion": {"type": "string", "minLength": 1},
+        "chunkerVersion": {"type": "string", "minLength": 1},
+        "profileCatalogSha256": {"$ref": "#/$defs/identity"},
+        "modelManifestSha256": {"$ref": "#/$defs/identity"}
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generationId",
+        "corpusFingerprint",
+        "documentCount",
+        "chunkCount",
+        "indexedSourceProof",
+        "finalEvalFileCount",
+        "finalEvalCaseCount",
+        "finalEvalFiles",
+        "projectedEvalFingerprint",
+        "projectionManifestSha256",
+        "projectionTransformDigest",
+        "projectionOperation",
+        "projectionRemovedOccurrences",
+        "projectionPreservesAllOtherBytes"
+      ],
+      "properties": {
+        "generationId": {"type": "string", "pattern": "^generation-[0-9a-f]{20}$"},
+        "corpusFingerprint": {"$ref": "#/$defs/identity"},
+        "documentCount": {"type": "integer", "minimum": 1},
+        "chunkCount": {"type": "integer", "minimum": 1},
+        "indexedSourceProof": {"$ref": "#/$defs/indexedSourceProof"},
+        "finalEvalFileCount": {"const": 9},
+        "finalEvalCaseCount": {"const": 64},
+        "finalEvalFiles": {
+          "type": "array",
+          "minItems": 9,
+          "maxItems": 9,
+          "items": {"$ref": "#/$defs/evalFile"}
+        },
+        "projectedEvalFingerprint": {"$ref": "#/$defs/identity"},
+        "projectionManifestSha256": {"$ref": "#/$defs/identity"},
+        "projectionTransformDigest": {"$ref": "#/$defs/identity"},
+        "projectionOperation": {"const": "delete-whole-json-member-line-v1"},
+        "projectionRemovedOccurrences": {"type": "integer", "minimum": 1},
+        "projectionPreservesAllOtherBytes": {"const": true}
+      }
+    },
+    "indexedSourceProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "sourceCount",
+        "byteExactCount",
+        "mismatchCount",
+        "pathDigestPairsSha256"
+      ],
+      "properties": {
+        "algorithm": {"const": "sorted-path-null-sha256-v1"},
+        "sourceCount": {"type": "integer", "minimum": 1},
+        "byteExactCount": {"type": "integer", "minimum": 1},
+        "mismatchCount": {"const": 0},
+        "pathDigestPairsSha256": {"$ref": "#/$defs/identity"}
+      }
+    },
+    "evalFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "finalSha256",
+        "projectedSha256",
+        "finalByteCount",
+        "projectedByteCount",
+        "caseCount",
+        "removedOccurrences"
+      ],
+      "properties": {
+        "path": {"$ref": "#/$defs/safePath"},
+        "finalSha256": {"$ref": "#/$defs/identity"},
+        "projectedSha256": {"$ref": "#/$defs/identity"},
+        "finalByteCount": {"type": "integer", "minimum": 1},
+        "projectedByteCount": {"type": "integer", "minimum": 1},
+        "caseCount": {"type": "integer", "minimum": 0},
+        "removedOccurrences": {"type": "integer", "minimum": 0}
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceRepositoryMutated",
+        "indexedSourceBytesUnchanged",
+        "receiptSha256",
+        "pluginRevision",
+        "projectRevision",
+        "benchmarkCommandSha256",
+        "projectionManifestArtifactSha256",
+        "indexedSourcesManifestSha256",
+        "controlPlaneSubstitutions",
+        "renamedPaths",
+        "excludedSourcePaths",
+        "negativeControls"
+      ],
+      "properties": {
+        "sourceRepositoryMutated": {"const": false},
+        "indexedSourceBytesUnchanged": {"const": true},
+        "receiptSha256": {"$ref": "#/$defs/identity"},
+        "pluginRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "projectRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "benchmarkCommandSha256": {"$ref": "#/$defs/identity"},
+        "projectionManifestArtifactSha256": {"$ref": "#/$defs/identity"},
+        "indexedSourcesManifestSha256": {"$ref": "#/$defs/identity"},
+        "controlPlaneSubstitutions": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/substitution"}
+        },
+        "renamedPaths": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"$ref": "#/$defs/rename"}
+        },
+        "excludedSourcePaths": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "negativeControls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/negativeControl"}
+        }
+      }
+    },
+    "substitution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "projectPath",
+        "originalSha256",
+        "replacementSha256",
+        "replacementSource"
+      ],
+      "properties": {
+        "kind": {"enum": ["bootstrap-config", "knowledge-policy", "retrieval-profile"]},
+        "projectPath": {"$ref": "#/$defs/safePath"},
+        "originalSha256": {"$ref": "#/$defs/identity"},
+        "replacementSha256": {"$ref": "#/$defs/identity"},
+        "replacementSource": {"type": "string", "minLength": 1}
+      }
+    },
+    "rename": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "restorable"],
+      "properties": {
+        "from": {"type": "string", "minLength": 1},
+        "to": {"type": "string", "minLength": 1},
+        "restorable": {"const": true}
+      }
+    },
+    "negativeControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "expectedFailure", "observed", "message"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "expectedFailure": {"const": true},
+        "observed": {"const": true},
+        "message": {"type": "string", "minLength": 1}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "revision", "implementation", "specSha256"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "role": {"enum": ["embedding", "reranker"]},
+        "revision": {"type": "string", "minLength": 1},
+        "implementation": {"type": "string", "minLength": 1},
+        "specSha256": {"$ref": "#/$defs/bareDigest"},
+        "artifactSha256": {"$ref": "#/$defs/bareDigest"}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "name",
+        "activeLanes",
+        "effectiveIdentity",
+        "observationDigest",
+        "modelIds",
+        "hardGatesPassed",
+        "nonInferiorToLexical",
+        "metrics",
+        "metricsBySplit"
+      ],
+      "properties": {
+        "role": {"enum": ["baseline", "dense", "rerank"]},
+        "name": {"type": "string", "minLength": 1},
+        "activeLanes": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["exact", "fts", "graph", "dense", "rerank"]}
+        },
+        "effectiveIdentity": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*@sha256:[0-9a-f]{64}$"
+        },
+        "observationDigest": {"$ref": "#/$defs/identity"},
+        "modelIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "hardGatesPassed": {"type": "boolean"},
+        "nonInferiorToLexical": {"type": "boolean"},
+        "metrics": {"$ref": "#/$defs/metrics"},
+        "metricsBySplit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["development", "holdout"],
+          "properties": {
+            "development": {"$ref": "#/$defs/metrics"},
+            "holdout": {"$ref": "#/$defs/metrics"}
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recallAtK",
+        "meanReciprocalRank",
+        "nDCG",
+        "precisionAtK",
+        "exactIdentifierHitRate",
+        "completeEvidenceCoverage",
+        "abstentionAccuracy",
+        "citationPrecision",
+        "citationRecall",
+        "supportingEvidenceRecall",
+        "budgetComplianceRate",
+        "authorityViolationRate",
+        "staleResultRate",
+        "authorityViolations",
+        "citationViolations",
+        "citationMetadataViolations",
+        "hardNegativeHits",
+        "relevantTokenRatio",
+        "duplicateTokenRatio",
+        "deterministicReplayRate",
+        "p50LatencyMillis",
+        "p95LatencyMillis"
+      ],
+      "properties": {
+        "recallAtK": {"$ref": "#/$defs/rate"},
+        "meanReciprocalRank": {"$ref": "#/$defs/rate"},
+        "nDCG": {"$ref": "#/$defs/rate"},
+        "precisionAtK": {"$ref": "#/$defs/rate"},
+        "exactIdentifierHitRate": {"$ref": "#/$defs/rate"},
+        "completeEvidenceCoverage": {"$ref": "#/$defs/rate"},
+        "abstentionAccuracy": {"$ref": "#/$defs/rate"},
+        "citationPrecision": {"$ref": "#/$defs/rate"},
+        "citationRecall": {"$ref": "#/$defs/rate"},
+        "supportingEvidenceRecall": {"$ref": "#/$defs/rate"},
+        "budgetComplianceRate": {"$ref": "#/$defs/rate"},
+        "authorityViolationRate": {"$ref": "#/$defs/rate"},
+        "staleResultRate": {"$ref": "#/$defs/rate"},
+        "authorityViolations": {"type": "integer", "minimum": 0},
+        "citationViolations": {"type": "integer", "minimum": 0},
+        "citationMetadataViolations": {"type": "integer", "minimum": 0},
+        "hardNegativeHits": {"type": "integer", "minimum": 0},
+        "relevantTokenRatio": {"$ref": "#/$defs/rate"},
+        "duplicateTokenRatio": {"$ref": "#/$defs/rate"},
+        "deterministicReplayRate": {"$ref": "#/$defs/rate"},
+        "p50LatencyMillis": {"type": "integer", "minimum": 0},
+        "p95LatencyMillis": {"type": "integer", "minimum": 0}
+      }
+    },
+    "rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "split",
+        "role",
+        "topic",
+        "queryClass",
+        "vocabularyPolicy",
+        "answerable",
+        "baseline",
+        "dense",
+        "denseComparison"
+      ],
+      "properties": {
+        "caseId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "split": {"enum": ["development", "holdout"]},
+        "role": {"enum": ["manager", "drafter"]},
+        "topic": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "queryClass": {
+          "enum": [
+            "auto",
+            "exact",
+            "conceptual",
+            "orientation",
+            "current",
+            "provenance",
+            "dependency",
+            "contradiction"
+          ]
+        },
+        "vocabularyPolicy": {"enum": ["none", "target-disjoint-v1"]},
+        "answerable": {"type": "boolean"},
+        "baseline": {"$ref": "#/$defs/caseOutcome"},
+        "dense": {"$ref": "#/$defs/caseOutcome"},
+        "denseComparison": {"$ref": "#/$defs/comparison"}
+      }
+    },
+    "caseOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "split",
+        "topic",
+        "paths",
+        "tiers",
+        "chunkIds",
+        "contentHashes",
+        "relevantPaths",
+        "relevantRanks",
+        "hardNegativeHits",
+        "expectedCitationsFound",
+        "estimatedTokens",
+        "returnedUniquePaths",
+        "expectedFound",
+        "completeEvidence",
+        "authoritySafe",
+        "citationMetadataSafe",
+        "citationSafe",
+        "corpusMatched",
+        "abstentionCorrect",
+        "budgetSafe",
+        "replayIdentical",
+        "minimumTokenBudget",
+        "qualityGateApplicable",
+        "safetyPassed",
+        "qualityPassed",
+        "gatePassed",
+        "returnedTokens",
+        "relevantTokens",
+        "duplicateTokens",
+        "staleResults",
+        "latencyMillis"
+      ],
+      "properties": {
+        "caseId": {"type": "string", "minLength": 1},
+        "split": {"enum": ["development", "holdout"]},
+        "topic": {"type": "string", "minLength": 1},
+        "paths": {"$ref": "#/$defs/pathArray"},
+        "tiers": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "chunkIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "contentHashes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "relevantPaths": {"$ref": "#/$defs/pathArray"},
+        "relevantRanks": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "hardNegativeHits": {"$ref": "#/$defs/pathArray"},
+        "expectedCitationsFound": {"$ref": "#/$defs/pathArray"},
+        "estimatedTokens": {"type": "integer", "minimum": 0},
+        "returnedUniquePaths": {"type": "integer", "minimum": 0},
+        "expectedFound": {"type": "boolean"},
+        "completeEvidence": {"type": "boolean"},
+        "authoritySafe": {"type": "boolean"},
+        "citationMetadataSafe": {"type": "boolean"},
+        "citationSafe": {"type": "boolean"},
+        "corpusMatched": {"type": "boolean"},
+        "abstentionCorrect": {"type": "boolean"},
+        "budgetSafe": {"type": "boolean"},
+        "replayIdentical": {"type": "boolean"},
+        "minimumTokenBudget": {"type": "integer", "minimum": 128},
+        "qualityGateApplicable": {"type": "boolean"},
+        "safetyPassed": {"type": "boolean"},
+        "qualityPassed": {"type": "boolean"},
+        "gatePassed": {"type": "boolean"},
+        "returnedTokens": {"type": "integer", "minimum": 0},
+        "relevantTokens": {"type": "integer", "minimum": 0},
+        "duplicateTokens": {"type": "integer", "minimum": 0},
+        "staleResults": {"type": "integer", "minimum": 0},
+        "latencyMillis": {"type": "integer", "minimum": 0}
+      }
+    },
+    "pathArray": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/safePath"}
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hitEffect",
+        "rankDelta",
+        "pathsChanged",
+        "uniqueRescue",
+        "rankImproved",
+        "rankDegraded"
+      ],
+      "properties": {
+        "hitEffect": {"enum": ["rescue", "loss", "unchanged"]},
+        "rankDelta": {"type": "integer"},
+        "pathsChanged": {"type": "boolean"},
+        "uniqueRescue": {"type": "boolean"},
+        "rankImproved": {"type": "boolean"},
+        "rankDegraded": {"type": "boolean"}
+      }
+    },
+    "slice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "caseCount",
+        "denseRescues",
+        "denseLosses",
+        "denseRankImprovements",
+        "denseRankDegradations"
+      ],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "caseCount": {"type": "integer", "minimum": 1},
+        "denseRescues": {"type": "integer", "minimum": 0},
+        "denseLosses": {"type": "integer", "minimum": 0},
+        "denseRankImprovements": {"type": "integer", "minimum": 0},
+        "denseRankDegradations": {"type": "integer", "minimum": 0}
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wilsonIntervals", "topicClusterBootstrap"],
+      "properties": {
+        "wilsonIntervals": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/wilson"}
+        },
+        "topicClusterBootstrap": {"$ref": "#/$defs/bootstrap"}
+      }
+    },
+    "wilson": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slice",
+        "event",
+        "successes",
+        "trials",
+        "confidence",
+        "estimate",
+        "lower",
+        "upper"
+      ],
+      "properties": {
+        "slice": {"type": "string", "minLength": 1},
+        "event": {"const": "dense-unique-rescue"},
+        "successes": {"type": "integer", "minimum": 0},
+        "trials": {"type": "integer", "minimum": 1},
+        "confidence": {"const": 0.95},
+        "estimate": {"$ref": "#/$defs/rate"},
+        "lower": {"$ref": "#/$defs/rate"},
+        "upper": {"$ref": "#/$defs/rate"}
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "clusterKey",
+        "clusterCount",
+        "replicates",
+        "seed",
+        "estimand",
+        "pointEstimate",
+        "lower",
+        "median",
+        "upper",
+        "zeroOrLowerFraction"
+      ],
+      "properties": {
+        "method": {"const": "topic-cluster-percentile-v1"},
+        "clusterKey": {"const": "topic"},
+        "clusterCount": {"type": "integer", "minimum": 2},
+        "replicates": {"type": "integer", "minimum": 1000},
+        "seed": {"type": "integer", "minimum": 0},
+        "estimand": {"type": "string", "minLength": 1},
+        "pointEstimate": {"type": "number", "minimum": -1, "maximum": 1},
+        "lower": {"type": "number", "minimum": -1, "maximum": 1},
+        "median": {"type": "number", "minimum": -1, "maximum": 1},
+        "upper": {"type": "number", "minimum": -1, "maximum": 1},
+        "zeroOrLowerFraction": {"$ref": "#/$defs/rate"}
+      }
+    },
+    "sensitivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budgetSlices",
+        "budgetCaseComparisons",
+        "leaveOneTopicOut",
+        "densePathChangedCases",
+        "preliminaryComparison"
+      ],
+      "properties": {
+        "budgetSlices": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/budgetSlice"}
+        },
+        "budgetCaseComparisons": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/budgetCaseComparisonSet"}
+        },
+        "leaveOneTopicOut": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/leaveOneOut"}
+        },
+        "densePathChangedCases": {"type": "integer", "minimum": 0, "maximum": 64},
+        "preliminaryComparison": {"$ref": "#/$defs/preliminaryComparison"}
+      }
+    },
+    "budgetSlice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokenBudget",
+        "denseRescues",
+        "denseLosses",
+        "denseRankImprovements",
+        "denseRankDegradations"
+      ],
+      "properties": {
+        "tokenBudget": {"enum": [512, 1024, 2048, 4096]},
+        "denseRescues": {"type": "integer", "minimum": 0},
+        "denseLosses": {"type": "integer", "minimum": 0},
+        "denseRankImprovements": {"type": "integer", "minimum": 0},
+        "denseRankDegradations": {"type": "integer", "minimum": 0}
+      }
+    },
+    "budgetCaseComparisonSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokenBudget", "cases"],
+      "properties": {
+        "tokenBudget": {"enum": [512, 1024, 2048, 4096]},
+        "cases": {
+          "type": "array",
+          "minItems": 64,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/budgetCaseComparison"}
+        }
+      }
+    },
+    "budgetCaseComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "denseComparison"],
+      "properties": {
+        "caseId": {"type": "string", "minLength": 1},
+        "denseComparison": {"$ref": "#/$defs/comparison"}
+      }
+    },
+    "leaveOneOut": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["omittedTopic", "answerableCases", "denseHitRateDelta"],
+      "properties": {
+        "omittedTopic": {"type": "string", "minLength": 1},
+        "answerableCases": {"type": "integer", "minimum": 1},
+        "denseHitRateDelta": {"type": "number", "minimum": -1, "maximum": 1}
+      }
+    },
+    "preliminaryComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "available",
+        "preliminaryCorpusFingerprint",
+        "finalCorpusFingerprint",
+        "preliminaryDenseRescues",
+        "preliminaryMetricsSha256",
+        "finalMetricsSha256",
+        "metricsChanged",
+        "denseRescueDelta"
+      ],
+      "properties": {
+        "available": {"const": true},
+        "preliminaryCorpusFingerprint": {"$ref": "#/$defs/identity"},
+        "finalCorpusFingerprint": {"$ref": "#/$defs/identity"},
+        "preliminaryDenseRescues": {"type": "integer", "minimum": 0, "maximum": 64},
+        "preliminaryMetricsSha256": {"$ref": "#/$defs/identity"},
+        "finalMetricsSha256": {"$ref": "#/$defs/identity"},
+        "metricsChanged": {"type": "boolean"},
+        "denseRescueDelta": {"type": "integer"}
+      }
+    },
+    "historicalRerank": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provenance",
+        "models",
+        "profiles",
+        "cases",
+        "budgetSlices",
+        "budgetCaseComparisons",
+        "sharedSafetyFailures",
+        "rerankAddedSafetyRegressions",
+        "decision"
+      ],
+      "properties": {
+        "provenance": {"$ref": "#/$defs/historicalRerankProvenance"},
+        "models": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/model"}
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/profile"}
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 64,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/historicalRerankCase"}
+        },
+        "budgetSlices": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/historicalRerankBudgetSlice"}
+        },
+        "budgetCaseComparisons": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/historicalRerankBudgetComparisonSet"}
+        },
+        "sharedSafetyFailures": {"type": "integer", "minimum": 0},
+        "rerankAddedSafetyRegressions": {"type": "integer", "minimum": 0},
+        "decision": {"$ref": "#/$defs/laneDecision"}
+      }
+    },
+    "historicalRerankProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtimeSourceRevision",
+        "projectGitRevision",
+        "projectDirtyFingerprint",
+        "runtimeFingerprint",
+        "rawBenchmarkSha256",
+        "evidenceArchivePath",
+        "evidenceArchiveSha256",
+        "rawBenchmarkByteCount",
+        "evidenceArchiveByteCount",
+        "evidenceArchiveFormat",
+        "rawBenchmarkRunId",
+        "rawBenchmarkComplete",
+        "rawBenchmarkArmCount",
+        "rawBenchmarkCasesPerArm",
+        "rawBenchmarkDurationMillis",
+        "generationId",
+        "corpusFingerprint",
+        "evalFingerprint",
+        "parserVersion",
+        "chunkerVersion",
+        "profileCatalogSha256",
+        "modelManifestSha256",
+        "projectionManifestSha256",
+        "projectionTransformDigest"
+      ],
+      "properties": {
+        "runtimeSourceRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "projectGitRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "projectDirtyFingerprint": {"$ref": "#/$defs/identity"},
+        "runtimeFingerprint": {"$ref": "#/$defs/identity"},
+        "rawBenchmarkSha256": {"$ref": "#/$defs/identity"},
+        "evidenceArchivePath": {"$ref": "#/$defs/safePath"},
+        "evidenceArchiveSha256": {"$ref": "#/$defs/identity"},
+        "rawBenchmarkByteCount": {"type": "integer", "minimum": 1},
+        "evidenceArchiveByteCount": {"type": "integer", "minimum": 1},
+        "evidenceArchiveFormat": {"const": "zip-deflate-fixed-v1"},
+        "rawBenchmarkRunId": {"type": "string", "minLength": 1},
+        "rawBenchmarkComplete": {"const": true},
+        "rawBenchmarkArmCount": {"const": 3},
+        "rawBenchmarkCasesPerArm": {"const": 64},
+        "rawBenchmarkDurationMillis": {"type": "integer", "minimum": 0},
+        "generationId": {"type": "string", "pattern": "^generation-[0-9a-f]{20}$"},
+        "corpusFingerprint": {"$ref": "#/$defs/identity"},
+        "evalFingerprint": {"$ref": "#/$defs/identity"},
+        "parserVersion": {"type": "string", "minLength": 1},
+        "chunkerVersion": {"type": "string", "minLength": 1},
+        "profileCatalogSha256": {"$ref": "#/$defs/identity"},
+        "modelManifestSha256": {"$ref": "#/$defs/identity"},
+        "projectionManifestSha256": {"$ref": "#/$defs/identity"},
+        "projectionTransformDigest": {"$ref": "#/$defs/identity"}
+      }
+    },
+    "historicalRerankCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "split", "topic", "answerable", "dense", "rerank", "rerankComparison"],
+      "properties": {
+        "caseId": {"type": "string", "minLength": 1},
+        "split": {"enum": ["development", "holdout"]},
+        "topic": {"type": "string", "minLength": 1},
+        "answerable": {"type": "boolean"},
+        "dense": {"$ref": "#/$defs/caseOutcome"},
+        "rerank": {"$ref": "#/$defs/caseOutcome"},
+        "rerankComparison": {"$ref": "#/$defs/comparison"}
+      }
+    },
+    "historicalRerankBudgetSlice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokenBudget",
+        "rerankRescues",
+        "rerankLosses",
+        "rerankRankImprovements",
+        "rerankRankDegradations"
+      ],
+      "properties": {
+        "tokenBudget": {"enum": [512, 1024, 2048, 4096]},
+        "rerankRescues": {"type": "integer", "minimum": 0},
+        "rerankLosses": {"type": "integer", "minimum": 0},
+        "rerankRankImprovements": {"type": "integer", "minimum": 0},
+        "rerankRankDegradations": {"type": "integer", "minimum": 0}
+      }
+    },
+    "historicalRerankBudgetComparisonSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokenBudget", "cases"],
+      "properties": {
+        "tokenBudget": {"enum": [512, 1024, 2048, 4096]},
+        "cases": {
+          "type": "array",
+          "minItems": 64,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/historicalRerankBudgetComparison"}
+        }
+      }
+    },
+    "historicalRerankBudgetComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "rerankComparison"],
+      "properties": {
+        "caseId": {"type": "string", "minLength": 1},
+        "rerankComparison": {"$ref": "#/$defs/comparison"}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaSha256", "validatorSha256", "generatorSha256", "command", "validatedAt", "passed"],
+      "properties": {
+        "schemaSha256": {"$ref": "#/$defs/identity"},
+        "validatorSha256": {"$ref": "#/$defs/identity"},
+        "generatorSha256": {"$ref": "#/$defs/identity"},
+        "command": {"type": "string", "minLength": 1},
+        "validatedAt": {"type": "string", "format": "date-time"},
+        "passed": {"const": true}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dense",
+        "rerank",
+        "productionLanes",
+        "sharedSafetyFailures",
+        "denseAddedSafetyRegressions",
+        "productionProfileConsistent",
+        "releaseGatePassed",
+        "rationale"
+      ],
+      "properties": {
+        "dense": {"$ref": "#/$defs/laneDecision"},
+        "rerank": {"$ref": "#/$defs/laneDecision"},
+        "productionLanes": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["exact", "fts", "graph", "dense", "rerank"]}
+        },
+        "sharedSafetyFailures": {"type": "integer", "minimum": 0},
+        "denseAddedSafetyRegressions": {"type": "integer", "minimum": 0},
+        "productionProfileConsistent": {"type": "boolean"},
+        "releaseGatePassed": {"type": "boolean"},
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    },
+    "laneDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "positiveEvidence", "eventCount", "caseIds", "rationale"],
+      "properties": {
+        "action": {"enum": ["retain", "remove", "inconclusive"]},
+        "positiveEvidence": {"type": "boolean"},
+        "eventCount": {"type": "integer", "minimum": 0},
+        "caseIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

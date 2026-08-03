@@ -27,20 +27,34 @@ guess. Create follow-up work or request the curator to split the claim.
 
 Every substantive return needs complete intake coverage. Consume an existing
 curator packet or dispatch a curator run. The packet must account for each
-claim span as candidate finding, duplicate, non-claim, unresolved, or out of
-scope.
+claim span as candidate finding, duplicate, non-claim, unresolved, or
+`out-of-scope`. Require each intake source to match the canonical returned
+report path and digest. Its canonical inclusive line spans must partition the entire
+normalized report from line 1 through the declared line count without gaps or
+overlaps. Each candidate evidence handle must exactly match a targeted span's
+source run, path, digest, bounds, and object key. A complete coverage-only
+packet may contain zero candidates.
 
 Submit one `manager_apply(action="review.submit")` transaction bound to the
-exact intake revision and packet digest. It must carry one explicit decision
-for every candidate: `ratify`, `reject`, `challenge`, `merge`, `split`,
-`hold`, `correct-grade`, or `supersede`. Routine uncontested rows may share a
-single submission, but they still receive independent decision rows.
+persisted canonical intake revision, exact candidate revisions and digests,
+exact evidence handles, and packet digest. Do not rebuild the packet from
+caller-edited copies: the engine reconstructs it from canonical pre-commit
+state. It must carry one explicit decision for every candidate: `ratify`,
+`reject`, `challenge`, `merge`, `split`, `hold`, `correct-grade`, or
+`supersede`. Routine uncontested rows may share a single submission, but they
+still receive independent decision rows.
+
 Attention, conflicted, and truth-touching rows require individually reasoned
-outcomes and cannot inherit a bulk action. Create spawned or deferred work as
-linked work-item records, not as invented review actions. The engine binds
-each decision to the resulting finding revision, writes immutable review
-receipts with one receipt per decision, and rejects stale or contradictory
-outcomes.
+outcomes and cannot inherit a bulk action. Treat intake `spawnedWorkItems` IDs
+as proposals; only the manager review transaction may create corresponding
+work-item records, each linked back through the immutable review ID. Do not
+create them during curation. The engine binds each decision to the resulting
+finding revision, writes immutable review receipts as one `ReviewRecord`
+containing an embedded decision row for every candidate, and rejects stale or
+contradictory outcomes. A review outcome may change review-owned metadata and
+disposition, but not the sealed claim, evidence, sources, relations, body, or
+synthetic questions. Request a new candidate or follow-up work for a content
+correction.
 
 Manager-ratified findings remain campaign-provisional until closure. Evidence
 grade, review state, and validity are independent fields.

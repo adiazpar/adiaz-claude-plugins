@@ -13,6 +13,7 @@
   "actorId": "investigator",
   "role": "investigator",
   "status": "prepared",
+  "writeGrants": [],
   "brief": {
     "path": "active/campaign-slug/runs/R-20000101-0001/brief.md",
     "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"

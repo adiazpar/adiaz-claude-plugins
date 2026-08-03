@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin://re-discipline/schemas/review-decision.schema.json",
+  "title": "Embedded Finding Review Decision",
+  "description": "One per-finding decision embedded in an immutable reviews/V-*.json ReviewRecord receipt.",
+  "type": "object",
+  "required": ["findingId", "findingRevision", "action", "rationale"],
+  "properties": {
+    "findingId": {"type": "string", "pattern": "^F-[0-9]{4,}$"},
+    "findingRevision": {"type": "integer", "minimum": 1},
+    "action": {"enum": ["ratify", "reject", "challenge", "merge", "split", "hold", "correct-grade", "supersede"]},
+    "evidenceCorrection": {"enum": ["direct", "inferred", "reported", "unknown"]},
+    "projection": {"enum": ["none", "campaign", "truth", "history", "backlog", "playbook", "maintained", "archive", "rejected"]},
+    "rationale": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

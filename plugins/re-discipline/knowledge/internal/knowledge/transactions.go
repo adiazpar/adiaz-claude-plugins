@@ -10,12 +10,14 @@ import (
 )
 
 const (
-	FailAfterJournal        = "after-journal"
-	FailAfterRecordPublish  = "after-record-publish"
-	FailAfterEventPublish   = "after-event-publish"
-	FailAfterReceiptPublish = "after-receipt-publish"
-	FailBeforeHeadPublish   = "before-head-publish"
-	FailAfterHeadPublish    = "after-head-publish"
+	FailAfterJournal          = "after-journal"
+	FailAfterRecordPublish    = "after-record-publish"
+	FailAfterEventPublish     = "after-event-publish"
+	FailAfterInventoryPublish = "after-inventory-publish"
+	FailAfterReceiptPublish   = "after-receipt-publish"
+	FailAfterTreeRetire       = "after-tree-retire"
+	FailBeforeHeadPublish     = "before-head-publish"
+	FailAfterHeadPublish      = "after-head-publish"
 )
 
 // StateWrite is a typed canonical record replacement. ExpectedRevision zero
@@ -39,19 +41,22 @@ type StateArtifactWrite struct {
 }
 
 type StateTransactionRequest struct {
-	CampaignSlug         string               `json:"campaignSlug"`
-	CampaignID           string               `json:"campaignId"`
-	Actor                string               `json:"actor"`
-	Authority            string               `json:"authority"`
-	Action               string               `json:"action"`
-	Rationale            string               `json:"rationale,omitempty"`
-	ReviewHandle         string               `json:"reviewHandle,omitempty"`
-	CorrelationID        string               `json:"correlationId"`
-	IdempotencyKey       string               `json:"idempotencyKey"`
-	ExpectedHeadRevision int64                `json:"expectedHeadRevision"`
-	ExpectedHeadDigest   string               `json:"expectedHeadDigest"`
-	Writes               []StateWrite         `json:"-"`
-	Artifacts            []StateArtifactWrite `json:"-"`
+	CampaignSlug         string                  `json:"campaignSlug"`
+	CampaignID           string                  `json:"campaignId"`
+	Actor                string                  `json:"actor"`
+	Authority            string                  `json:"authority"`
+	Action               string                  `json:"action"`
+	Rationale            string                  `json:"rationale,omitempty"`
+	ReviewHandle         string                  `json:"reviewHandle,omitempty"`
+	CorrelationID        string                  `json:"correlationId"`
+	IdempotencyKey       string                  `json:"idempotencyKey"`
+	ExpectedHeadRevision int64                   `json:"expectedHeadRevision"`
+	ExpectedHeadDigest   string                  `json:"expectedHeadDigest"`
+	RetireActiveTree     string                  `json:"retireActiveTree,omitempty"`
+	RetiredEventJournal  string                  `json:"retiredEventJournal,omitempty"`
+	Writes               []StateWrite            `json:"-"`
+	Artifacts            []StateArtifactWrite    `json:"-"`
+	ReviewPacket         *ReviewPacketSubmission `json:"-"`
 }
 
 type StateRecordResult struct {
@@ -79,6 +84,7 @@ type StateTransactionReceipt struct {
 	Event               StateEvent            `json:"event"`
 	Records             []StateRecordResult   `json:"records"`
 	Artifacts           []StateArtifactResult `json:"artifacts,omitempty"`
+	RetiredTree         string                `json:"retiredTree,omitempty"`
 	GeneratedViewDigest string                `json:"generatedViewDigest"`
 	CommittedAt         string                `json:"committedAt"`
 	ResultDigest        string                `json:"resultDigest"`
@@ -146,11 +152,26 @@ type StateTransactionDescriptor struct {
 	IdempotencyKey       string                               `json:"idempotencyKey"`
 	ExpectedHeadRevision int64                                `json:"expectedHeadRevision"`
 	ExpectedHeadDigest   string                               `json:"expectedHeadDigest"`
+	RetireActiveTree     string                               `json:"retireActiveTree,omitempty"`
+	RetiredEventJournal  string                               `json:"retiredEventJournal,omitempty"`
 	Writes               []StateTransactionWriteDescriptor    `json:"writes"`
 	Artifacts            []StateTransactionArtifactDescriptor `json:"artifacts,omitempty"`
 }
 
 func (store *StateStore) Apply(ctx context.Context, request StateTransactionRequest) (StateTransactionReceipt, error) {
+	if store == nil {
+		return StateTransactionReceipt{}, errors.New("state store is required")
+	}
+	if err := requireCompletedMigration(store.Boundary.Root); err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	return store.applyAllowingMigration(ctx, request)
+}
+
+// applyAllowingMigration is intentionally package-private. The migration
+// engine uses it only for the proof-bound final ratification transaction;
+// every public and adapter mutation passes through Apply's mixed-mode guard.
+func (store *StateStore) applyAllowingMigration(ctx context.Context, request StateTransactionRequest) (StateTransactionReceipt, error) {
 	if store == nil {
 		return StateTransactionReceipt{}, errors.New("state store is required")
 	}
@@ -177,6 +198,13 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 		(len(request.Writes) == 0 && len(request.Artifacts) == 0) {
 		return preparedTransaction{}, errors.New("transaction identity, authority, action, expected head, and writes are required")
 	}
+	if request.RetireActiveTree != "" || request.RetiredEventJournal != "" {
+		if request.Action != "closure.finalize" || !validOne(request.Authority, "manager", "system") ||
+			request.RetireActiveTree != "active/"+request.CampaignSlug ||
+			validateRetiredEventJournal(request.RetiredEventJournal) != nil {
+			return preparedTransaction{}, errors.New("only closure.finalize may retire its exact active tree into a durable archive journal")
+		}
+	}
 	prepared := make([]preparedStateWrite, 0, len(request.Writes))
 	seenPaths := map[string]bool{}
 	seenIDs := map[string]bool{}
@@ -184,7 +212,7 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 	for _, write := range request.Writes {
 		item, err := prepareStateWrite(
 			request.CampaignSlug, request.CampaignID, request.CorrelationID,
-			predictedEventID, request.ExpectedHeadRevision+1, write)
+			predictedEventID, request.ExpectedHeadRevision+1, write, request.Action)
 		if err != nil {
 			return preparedTransaction{}, err
 		}
@@ -233,6 +261,7 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 		Rationale: request.Rationale, ReviewHandle: request.ReviewHandle,
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadRevision: request.ExpectedHeadRevision, ExpectedHeadDigest: request.ExpectedHeadDigest,
+		RetireActiveTree: request.RetireActiveTree, RetiredEventJournal: request.RetiredEventJournal,
 		Writes: descriptors, Artifacts: artifactDescriptors,
 	}
 	requestDigest, err := CanonicalDigest(semantic)
@@ -244,6 +273,19 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 		Request: request, Writes: prepared, Artifacts: artifacts,
 		RequestDigest: requestDigest, TransactionID: transactionID,
 	}, nil
+}
+
+func validateRetiredEventJournal(value string) error {
+	if err := validateRelativeRecordPath(value); err != nil {
+		return err
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) != 7 || parts[0] != "docs" || parts[1] != "history" ||
+		parts[2] != "campaigns" || parts[3] == "" || parts[4] != "finalization" ||
+		parts[5] != "events" || parts[6] != "events.jsonl" {
+		return errors.New("retired event journal must be docs/history/campaigns/<archive>/finalization/events/events.jsonl")
+	}
+	return nil
 }
 
 func prepareStateArtifact(action, authority, slug string, artifact StateArtifactWrite) (preparedStateArtifact, error) {
@@ -261,11 +303,19 @@ func prepareStateArtifact(action, authority, slug string, artifact StateArtifact
 		return preparedStateArtifact{}, errors.New("artifact content digest does not match its body")
 	}
 	switch {
+	case authority == "manager" && action == "migration.ratify":
+		if artifact.ExpectedDigest != "" || artifact.Path != ".re-discipline/migration/0.8/certification.json" {
+			return preparedStateArtifact{}, errors.New("migration ratification may create only its canonical certification artifact")
+		}
 	case authority == "manager" && validOne(action, "run.prepare", "closure.remediation.run.create"):
 		if artifact.ExpectedDigest != "" {
 			return preparedStateArtifact{}, errors.New("run preparation artifacts are create-only")
 		}
 		if err := validateRunPreparationArtifactPath(slug, artifact.Path); err != nil {
+			return preparedStateArtifact{}, err
+		}
+	case authority == "manager" && action == "knowledge.archive-fallback.opt-in":
+		if err := validateArchiveFallbackOptInArtifact(artifact); err != nil {
 			return preparedStateArtifact{}, err
 		}
 	case strings.HasPrefix(action, "closure.") && validOne(authority, "manager", "system"):
@@ -281,12 +331,38 @@ func prepareStateArtifact(action, authority, slug string, artifact StateArtifact
 	}, nil
 }
 
+func validateArchiveFallbackOptInArtifact(artifact StateArtifactWrite) error {
+	switch {
+	case artifact.Path == knowledgePolicyPath:
+		if !digestRE.MatchString(artifact.ExpectedDigest) {
+			return errors.New("archive opt-in policy replacement requires its exact previous digest")
+		}
+		return nil
+	case strings.HasPrefix(artifact.Path, ".re-discipline/knowledge/receipts/"):
+		if artifact.ExpectedDigest != "" {
+			return errors.New("archive opt-in receipt must be create-only")
+		}
+		return ValidateArchiveReceiptPath(artifact.Path)
+	case strings.HasPrefix(artifact.Path, ".re-discipline/knowledge/measurements/normalized-vs-raw/"):
+		if artifact.ExpectedDigest != "" {
+			return errors.New("archive opt-in measurement must be create-only")
+		}
+		parts := strings.Split(artifact.Path, "/")
+		if len(parts) != 6 || parts[5] != "report.json" {
+			return errors.New("archive opt-in measurement path is invalid")
+		}
+		return ValidateNormalizedRawMeasurementPath(artifact.Path, parts[4])
+	default:
+		return errors.New("archive opt-in may publish only its measurement, receipt, and knowledge policy")
+	}
+}
+
 func validateRunPreparationArtifactPath(slug, value string) error {
 	parts := strings.Split(value, "/")
 	if len(parts) != 5 || parts[0] != "active" || parts[1] != slug ||
 		parts[2] != "runs" || !runIDRE.MatchString(parts[3]) ||
-		!validOne(parts[4], "brief.md", "context-pack.json") {
-		return errors.New("run preparation artifacts must be active/<slug>/runs/<R-id>/{brief.md,context-pack.json}")
+		!validOne(parts[4], "AGENTS.override.md", "brief.md", "context-pack.json") {
+		return errors.New("run preparation artifacts must be active/<slug>/runs/<R-id>/{AGENTS.override.md,brief.md,context-pack.json}")
 	}
 	return nil
 }
@@ -326,13 +402,14 @@ func validateRunPreparationArtifactBindings(
 	if !requiresArtifacts {
 		return nil
 	}
-	if len(artifacts) != 2 || run.Brief == nil || run.ContextPack == nil {
-		return errors.New("delegated run must atomically create its brief and context pack")
+	if len(artifacts) != 3 || run.Brief == nil || run.ContextPack == nil {
+		return errors.New("delegated run must atomically create its drafter override, brief, and context pack")
 	}
 	prefix := "active/" + request.CampaignSlug + "/runs/" + run.ID + "/"
 	expected := map[string]string{
-		prefix + "brief.md":          run.Brief.SHA256,
-		prefix + "context-pack.json": run.ContextPack.SHA256,
+		prefix + "AGENTS.override.md": "sha256:" + SHA256String(strings.TrimSpace(migrationDrafterOverrideTemplate)+"\n"),
+		prefix + "brief.md":           run.Brief.SHA256,
+		prefix + "context-pack.json":  run.ContextPack.SHA256,
 	}
 	if run.Brief.Path != prefix+"brief.md" || run.ContextPack.Path != prefix+"context-pack.json" {
 		return errors.New("delegated run launch handles do not use its canonical workspace paths")
@@ -353,6 +430,7 @@ func validateRunPreparationArtifactBindings(
 func validateClosureArtifactPath(slug, value string) error {
 	activeStaging := "active/" + slug + "/closure/staging/"
 	switch {
+	case value == "docs/INDEX.md":
 	case strings.HasPrefix(value, "docs/truth/"):
 		return validateTruthDestination(value)
 	case strings.HasPrefix(value, "docs/backlog/"), strings.HasPrefix(value, "docs/playbooks/"):
@@ -373,7 +451,7 @@ func validateClosureArtifactPath(slug, value string) error {
 	return nil
 }
 
-func prepareStateWrite(slug, campaignID, correlationID, eventID string, resultingHeadRevision int64, write StateWrite) (preparedStateWrite, error) {
+func prepareStateWrite(slug, campaignID, correlationID, eventID string, resultingHeadRevision int64, write StateWrite, actions ...string) (preparedStateWrite, error) {
 	if write.ExpectedRevision < 0 || (write.ExpectedRevision == 0 && write.ExpectedDigest != "") ||
 		(write.ExpectedRevision > 0 && !digestRE.MatchString(write.ExpectedDigest)) {
 		return preparedStateWrite{}, errors.New("record expected revision and digest are inconsistent")
@@ -391,7 +469,13 @@ func prepareStateWrite(slug, campaignID, correlationID, eventID string, resultin
 	if err != nil {
 		return preparedStateWrite{}, err
 	}
-	if recordCampaign != campaignID || recordCorrelation != correlationID || revision != write.ExpectedRevision+1 {
+	action := ""
+	if len(actions) != 0 {
+		action = actions[0]
+	}
+	reconcileExact := action == "reconcile.import" && revision == write.ExpectedRevision
+	if recordCampaign != campaignID || (!reconcileExact && recordCorrelation != correlationID) ||
+		(!reconcileExact && revision != write.ExpectedRevision+1) {
 		return preparedStateWrite{}, fmt.Errorf("record %s campaign, correlation, or resulting revision is inconsistent", id)
 	}
 	if _, archive := record.(ArchiveManifest); archive {

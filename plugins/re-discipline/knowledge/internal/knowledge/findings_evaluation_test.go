@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestFindingEvaluationMeasuresLanesRerankRawAndStableHandles(t *testing.T) {
+func TestFindingEvaluationMeasuresLanesRawAndStableHandles(t *testing.T) {
 	fixture := buildFindingIndexFixture(t)
 	var evidenceHandle string
 	for _, finding := range fixture.inventory.Findings {
@@ -58,5 +58,36 @@ func TestFindingEvaluationMeasuresLanesRerankRawAndStableHandles(t *testing.T) {
 	}
 	if !sha256ValueRE.MatchString(report.Digest) || strings.TrimSpace(report.Digest) == "" {
 		t.Fatalf("evaluation digest is invalid: %q", report.Digest)
+	}
+	rawOptions := cases[1].queryOptions()
+	rawOptions.suppressNormalized = true
+	rawOptions.suppressProvenance = true
+	rawOptions.IncludeRaw = true
+	rawResponse, err := fixture.retriever.QueryFindingCards(
+		context.Background(), rawOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rawOutcome *FindingCaseOutcome
+	for index := range report.Cases {
+		if report.Cases[index].CaseID == cases[1].ID {
+			rawOutcome = &report.Cases[index]
+			break
+		}
+	}
+	if rawOutcome == nil || rawOutcome.RawTokens != rawResponse.EstimatedTokens {
+		t.Fatalf("raw arm measured unlike artifacts: outcome=%#v responseTokens=%d",
+			rawOutcome, rawResponse.EstimatedTokens)
+	}
+	rawExpansionTokens := 0
+	for _, card := range rawResponse.Cards {
+		rawExpansionTokens += card.ExpansionTokens
+	}
+	if rawOutcome.RawDocumentExpansionTokens != rawExpansionTokens {
+		t.Fatalf("raw expansion diagnostic was not kept separate: outcome=%d cards=%d",
+			rawOutcome.RawDocumentExpansionTokens, rawExpansionTokens)
+	}
+	if report.Cases[0].NormalizedEvidenceExpansionTokens <= 0 {
+		t.Fatalf("normalized evidence-handle expansion was not measured: %#v", report.Cases[0])
 	}
 }

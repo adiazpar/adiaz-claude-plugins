@@ -23,7 +23,7 @@ create later records.
 ## Status Views
 
 Orientation should fit one screen and name campaign handles, focus, blocked or
-due-deferred work, pending returns and review, knowledge availability, and the
+due-or-near deferred work, pending returns and review, knowledge availability, and the
 next action. Resume may include changes since a generation or event handle.
 Expand full evidence only for the next decision.
 

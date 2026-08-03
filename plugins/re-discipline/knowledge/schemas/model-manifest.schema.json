@@ -22,43 +22,27 @@
     },
     "models": {
       "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "role", "revision", "implementation", "specFile", "specSha256", "license", "networkRequired"],
+        "required": ["id", "role", "revision", "implementation", "specFile", "specSha256", "artifactFile", "artifactSha256", "license", "dimensions", "networkRequired"],
         "properties": {
-          "id": {"type": "string"},
-          "role": {"enum": ["embedding", "reranker"]},
-          "revision": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
-          },
-          "implementation": {"enum": ["builtin", "bundled-local", "onnx-local"]},
-          "specFile": {"type": "string", "pattern": "^models/specs/[a-z0-9-]+\\.json$"},
-          "specSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "artifactFile": {"type": "string", "pattern": "^models/artifacts/[a-z0-9-]+\\.bin$"},
-          "artifactSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "license": {"type": "string"},
-          "dimensions": {"type": "integer", "minimum": 0, "maximum": 4096},
-          "normalization": {"type": "string"},
-          "description": {"type": "string"},
+          "id": {"const": "builtin:glove-6b-50d-top50k-q8-v1"},
+          "role": {"const": "embedding"},
+          "revision": {"const": "1"},
+          "implementation": {"const": "bundled-local"},
+          "specFile": {"const": "models/specs/glove-6b-50d-top50k-q8-v1.json"},
+          "specSha256": {"const": "2cdb94f94891907db8bdba40148dc6052b7d2cddacf868bb563092255ef1319a"},
+          "artifactFile": {"const": "models/artifacts/glove-6b-50d-top50k-q8-v1.bin"},
+          "artifactSha256": {"const": "fb108eef095f00bcc06a38e10d7f9671d9e6664ab79ae8a2c1cef5b31375b2ab"},
+          "license": {"const": "PDDL-1.0"},
+          "dimensions": {"const": 50},
+          "normalization": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
           "networkRequired": {"const": false}
-        },
-        "allOf": [
-          {
-            "if": {
-              "required": ["implementation"],
-              "properties": {
-                "implementation": {"const": "builtin"}
-              }
-            },
-            "then": {
-              "properties": {
-                "license": {"const": "MIT"}
-              }
-            }
-          }
-        ]
+        }
       }
     },
     "externalModelPolicy": {
