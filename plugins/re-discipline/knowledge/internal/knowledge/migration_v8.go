@@ -253,6 +253,16 @@ func PreviewMigration(projectRoot string, liveCampaigns []string) (MigrationPrev
 			})
 		}
 	}
+	// The source fingerprint answers one question: did the project's own
+	// bytes change while the manager reviewed the packets? It is therefore
+	// taken over the sources exactly as read, before any planned destination
+	// is stamped onto them. Deriving it after destination planning would make
+	// the fingerprint move whenever a manager submits a truth review, which
+	// no submission is allowed to do.
+	sourceFingerprint, err := CanonicalDigest(sources)
+	if err != nil {
+		return MigrationPreview{}, err
+	}
 	truthConversions, truthConflicts, err := migrationTruthPlans(boundary, sources)
 	if err != nil {
 		return MigrationPreview{}, err
@@ -267,10 +277,6 @@ func PreviewMigration(projectRoot string, liveCampaigns []string) (MigrationPrev
 		}
 		return conflicts[i].Path < conflicts[j].Path
 	})
-	sourceFingerprint, err := CanonicalDigest(sources)
-	if err != nil {
-		return MigrationPreview{}, err
-	}
 	plan := MigrationPlan{
 		SchemaVersion: MigrationSchemaVersion,
 		Project:       projectName, ProjectIdentity: projectIdentityDigest,
