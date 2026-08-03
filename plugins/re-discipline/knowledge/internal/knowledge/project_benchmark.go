@@ -70,7 +70,7 @@ func (service *Service) RunProjectBenchmark(
 		return ProjectBenchmarkReport{}, errors.New(
 			"project benchmark mode must be quick or full")
 	}
-	refreshed, err := NewService(ServiceOptions{
+	refreshed, err := service.refreshService(ServiceOptions{
 		ProjectRoot: service.Boundary.Root,
 		AssetRoot:   service.AssetRoot,
 		CacheRoot:   service.Index.CacheRoot,
@@ -225,7 +225,7 @@ func benchmarkProjectProfile(
 		findingEvaluations = append(findingEvaluations, findingReport)
 		hardGates = hardGates && findingEvaluationPassed(findingReport)
 	}
-	profileService, err := NewService(ServiceOptions{
+	profileService, err := service.refreshService(ServiceOptions{
 		ProjectRoot:          service.Boundary.Root,
 		AssetRoot:            service.AssetRoot,
 		CacheRoot:            service.Index.CacheRoot,

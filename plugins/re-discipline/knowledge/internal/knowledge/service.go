@@ -34,6 +34,7 @@ type Service struct {
 	Index                IndexManager
 	EffectiveProfileName string
 	Warnings             []string
+	migrationGuard       func(string) error
 	pinnedGeneration     *Generation
 	telemetryMu          sync.Mutex
 	telemetryBuffer      []telemetryObservation
@@ -150,7 +151,8 @@ func newServiceWithGuard(
 		Boundary: boundary, AssetRoot: assetRoot, Configuration: configuration,
 		ProfileCatalog: profile, ModelManifest: manifest,
 		EffectiveProfileName: options.EffectiveProfileName, Warnings: warnings,
-		contextLeases: map[string]*contextLeaseState{},
+		migrationGuard: guard,
+		contextLeases:  map[string]*contextLeaseState{},
 	}
 	normalizationQueuePath, queuePathErr := containedOutputPath(
 		boundary.Root, ".re-discipline/knowledge/normalization-queue.json",
@@ -168,6 +170,18 @@ func newServiceWithGuard(
 		Boundary: boundary, CacheRoot: cacheRoot, Settings: settings, Manifest: manifest,
 	}
 	return service, nil
+}
+
+// refreshService rebuilds a service over the same project through the same
+// migration guard that admitted the original construction, so a measurement
+// service's mid-run control-plane revalidation cannot silently re-tighten to
+// the operational guard.
+func (service *Service) refreshService(options ServiceOptions) (*Service, error) {
+	guard := service.migrationGuard
+	if guard == nil {
+		guard = requireCompletedMigration
+	}
+	return newServiceWithGuard(options, guard)
 }
 
 func (service *Service) ensure(ctx context.Context) (Generation, SourceInventory, SelectedProfile, bool, error) {
