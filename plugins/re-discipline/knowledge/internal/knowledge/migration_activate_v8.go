@@ -174,6 +174,9 @@ func (engine *MigrationEngine) buildNormalizedStaging(plan MigrationPlan) (Migra
 	if err := sealMigrationImportChain(projectStagingRoot, campaigns, plan, state, manifest.LegacySources); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
+	if err := engine.carryForwardUnplannedFiles(plan, projectStagingRoot); err != nil {
+		return MigrationNormalizedManifest{}, err
+	}
 	// The import head is not authoritative until ratification, but its complete
 	// byte inventory must already be part of the activated, recoverable shadow
 	// transaction. Publishing the inventory as an independently journaled
@@ -3449,4 +3452,70 @@ func copyFile(source, destination string, mode os.FileMode) error {
 		return err
 	}
 	return replaceFile(tempPath, destination)
+}
+
+// carryForwardUnplannedFiles copies ordinary project files that live inside a
+// replaced managed root but were never inventoried, so directory replacement
+// cannot silently delete them. Activation swaps whole roots, so a placeholder
+// such as active/.gitkeep would otherwise disappear even though no plan
+// operation ever claimed it. Anything the plan already accounts for, and
+// anything the staged tree already produced, is left untouched.
+func (engine *MigrationEngine) carryForwardUnplannedFiles(
+	plan MigrationPlan,
+	projectStagingRoot string,
+) error {
+	planned := map[string]bool{}
+	for _, source := range plan.Sources {
+		planned[NormalizeProjectPath(source.Path)] = true
+	}
+	for _, root := range migrationManagedTargets(plan) {
+		if root == stateInventoryPath {
+			continue
+		}
+		canonical := filepath.Join(engine.ProjectRoot, filepath.FromSlash(root))
+		info, err := os.Lstat(canonical)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			continue
+		}
+		walkErr := filepath.WalkDir(canonical, func(current string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			relative, relErr := filepath.Rel(engine.ProjectRoot, current)
+			if relErr != nil {
+				return relErr
+			}
+			slashed := filepath.ToSlash(relative)
+			if planned[slashed] {
+				return nil
+			}
+			destination := filepath.Join(projectStagingRoot, filepath.FromSlash(slashed))
+			if _, statErr := os.Lstat(destination); statErr == nil {
+				return nil
+			} else if !os.IsNotExist(statErr) {
+				return statErr
+			}
+			body, readErr := readSingleLinkRegularFile(current)
+			if readErr != nil {
+				return readErr
+			}
+			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+				return err
+			}
+			return AtomicWrite(destination, body, 0o600)
+		})
+		if walkErr != nil {
+			return walkErr
+		}
+	}
+	return nil
 }
