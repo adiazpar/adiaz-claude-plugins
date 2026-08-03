@@ -87,7 +87,7 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		if *projectRoot != "" {
-			service, err := knowledge.NewService(knowledge.ServiceOptions{
+			service, err := knowledge.NewMeasurementService(knowledge.ServiceOptions{
 				ProjectRoot: *projectRoot, AssetRoot: asset, CacheRoot: *cacheRoot,
 			})
 			if err != nil {
