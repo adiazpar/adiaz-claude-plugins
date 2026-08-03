@@ -143,7 +143,7 @@ class MigrationPilotTests(unittest.TestCase):
         launcher_path.write_bytes(b"launcher")
         asset_path = bin_root.parent / "asset.dat"
         asset_path.write_bytes(b"asset")
-        notice_path = bin_root.parent / "NOTICE"
+        notice_path = bin_root / "NOTICE"
         notice_path.write_bytes(b"notice")
 
         def row(file_path: Path, **extra: object) -> dict[str, object]:
@@ -182,7 +182,10 @@ class MigrationPilotTests(unittest.TestCase):
             f"{goos}-{goarch}/{executable}": pilot._identity(target_path.read_bytes()),
             "launcher": pilot._identity(launcher_path.read_bytes()),
             "../asset.dat": pilot._identity(asset_path.read_bytes()),
-            "../NOTICE": pilot._identity(notice_path.read_bytes()),
+            "NOTICE": pilot._identity(notice_path.read_bytes()),
+            "manifest.json": pilot._identity(
+                (bin_root / "manifest.json").read_bytes()
+            ),
         }
         (bin_root / "SHA256SUMS").write_text(
             "".join(

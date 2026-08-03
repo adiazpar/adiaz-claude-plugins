@@ -430,7 +430,7 @@ def _package_entry_path(
     relative = entry.get("path")
     if not isinstance(relative, str):
         _fail(f"package.{section}.path", "must be a string")
-    if section in {"targets", "launchers"}:
+    if section in {"targets", "launchers", "notices"}:
         base = f"{ASSET_ROOT}/bin"
     else:
         base = ASSET_ROOT
@@ -525,6 +525,10 @@ def _verify_package(plugin: Path) -> dict[str, Any]:
             _fail("package.sums", f"line {number} repeats {relative}")
         sums[relative] = "sha256:" + match.group(1)
     expected_sums = {path: row["sha256"] for path, row in verified.items()}
+    # The checksum inventory also seals the manifest bytes themselves.
+    expected_sums["manifest.json"] = "sha256:" + _identity(
+        manifest_path.read_bytes()
+    ).removeprefix("sha256:")
     if sums != expected_sums:
         missing = sorted(set(expected_sums) - set(sums))
         extra = sorted(set(sums) - set(expected_sums))
