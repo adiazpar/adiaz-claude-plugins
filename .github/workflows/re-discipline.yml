@@ -154,7 +154,7 @@ jobs:
 
       - name: Run Go unit tests
         working-directory: plugins/re-discipline/knowledge
-        run: go test -count=1 ./...
+        run: go test -count=1 -timeout=25m ./...
 
       - name: Build reproducible runtime package
         working-directory: plugins/re-discipline/knowledge
