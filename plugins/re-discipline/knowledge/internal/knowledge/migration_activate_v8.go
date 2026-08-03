@@ -171,6 +171,9 @@ func (engine *MigrationEngine) buildNormalizedStaging(plan MigrationPlan) (Migra
 	if err := engine.stageLegacyTruthConversions(plan, state, projectStagingRoot, campaigns, &manifest); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
+	if err := engine.stageMigratedEvaluationCorpus(plan, projectStagingRoot); err != nil {
+		return MigrationNormalizedManifest{}, err
+	}
 	// Carried-forward bytes must exist before the import chain is sealed, so
 	// the events bind the complete activated snapshot.
 	if err := engine.carryForwardUnplannedFiles(plan, projectStagingRoot); err != nil {
@@ -3552,4 +3555,106 @@ func migratedTruthLinkMapping(plan MigrationPlan) map[string]string {
 		}
 	}
 	return mapping
+}
+
+// stageMigratedEvaluationCorpus retargets benchmark judgments onto the
+// canonical destinations conversion produced. The migration plan requires
+// converting judgments from path-only targets, and without it the converted
+// project's own benchmark cannot run: every judgment still names a legacy
+// path that activation replaced, so the retrieval gate could never be
+// measured for the project it certifies.
+//
+// Only exact whole-path judgment values are retargeted. Prose, queries, and
+// topics are never touched, and a path the plan does not convert is left
+// alone so preserved history and backlog targets keep pointing at themselves.
+func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
+	plan MigrationPlan,
+	projectStagingRoot string,
+) error {
+	mapping := map[string]string{}
+	for _, source := range plan.Sources {
+		destination := strings.TrimSpace(source.Destination)
+		if destination == "" || destination == source.Path {
+			continue
+		}
+		mapping[source.Path] = destination
+	}
+	if len(mapping) == 0 {
+		return nil
+	}
+	relativeRoot := ".re-discipline/knowledge/evals"
+	sourceRoot := filepath.Join(engine.ProjectRoot, filepath.FromSlash(relativeRoot))
+	info, err := os.Lstat(sourceRoot)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	retarget := func(value string) string {
+		if destination, ok := mapping[NormalizeProjectPath(value)]; ok {
+			return destination
+		}
+		return value
+	}
+	return filepath.WalkDir(sourceRoot, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(current), ".json") {
+			return nil
+		}
+		body, readErr := readSingleLinkRegularFile(current)
+		if readErr != nil {
+			return readErr
+		}
+		var cases []EvalCase
+		if decodeErr := decodeStrictJSON(body, &cases); decodeErr != nil {
+			return fmt.Errorf("decode evaluation corpus %s: %w", current, decodeErr)
+		}
+		for index := range cases {
+			eval := &cases[index]
+			for position := range eval.ExpectedPaths {
+				eval.ExpectedPaths[position] = retarget(eval.ExpectedPaths[position])
+			}
+			for position := range eval.MinimumEvidencePaths {
+				eval.MinimumEvidencePaths[position] = retarget(eval.MinimumEvidencePaths[position])
+			}
+			for position := range eval.HardNegativePaths {
+				eval.HardNegativePaths[position] = retarget(eval.HardNegativePaths[position])
+			}
+			for position := range eval.ExpectedCitations {
+				eval.ExpectedCitations[position] = retarget(eval.ExpectedCitations[position])
+			}
+			if len(eval.GradedRelevantPaths) > 0 {
+				graded := make(map[string]int, len(eval.GradedRelevantPaths))
+				for path, grade := range eval.GradedRelevantPaths {
+					graded[retarget(path)] = grade
+				}
+				eval.GradedRelevantPaths = graded
+			}
+			for position := range eval.EvidencePins {
+				eval.EvidencePins[position].Path = retarget(eval.EvidencePins[position].Path)
+			}
+		}
+		relative, relErr := filepath.Rel(engine.ProjectRoot, current)
+		if relErr != nil {
+			return relErr
+		}
+		destination := filepath.Join(projectStagingRoot, relative)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return err
+		}
+		converted, marshalErr := canonicalJSON(cases)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		return AtomicWrite(destination, converted, 0o600)
+	})
 }
