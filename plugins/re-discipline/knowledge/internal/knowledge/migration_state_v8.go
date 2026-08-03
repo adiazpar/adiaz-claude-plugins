@@ -2142,6 +2142,13 @@ func verifyMigratedTruthNavigation(root string, plan MigrationPlan) error {
 					return fmt.Errorf("managed navigation %s retains stale legacy truth link %s", relative, match[1])
 				}
 			}
+			// A bare path outside a link is prose, not navigation. Chronicles
+			// and backlog briefs narrate which document held a claim, and
+			// their bytes are preserved verbatim, so only genuine navigation
+			// surfaces are held to naming live locations.
+			if !migrationNavigationSurface(relative) {
+				return nil
+			}
 			for source := range mapping {
 				if strings.Contains(string(body), source) {
 					return fmt.Errorf("managed navigation %s retains stale legacy truth path %s", relative, source)
@@ -2544,4 +2551,11 @@ func stableJSONLines(values []any) ([]byte, error) {
 		}
 	}
 	return out.Bytes(), nil
+}
+
+// migrationNavigationSurface reports whether a managed document is an index
+// whose job is to point at live locations, as opposed to preserved narrative
+// material that may legitimately name a document it no longer links to.
+func migrationNavigationSurface(relative string) bool {
+	return strings.EqualFold(filepath.Base(relative), "INDEX.md")
 }
