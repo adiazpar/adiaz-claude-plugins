@@ -267,9 +267,9 @@ class SyntheticInputs:
                 str(budget): copy.deepcopy(outcomes)
                 for budget in (512, 1024, 2048, 4096)
             },
-            "contextPackCases": copy.deepcopy(outcomes),
+            "contextPackCases": _context_rows(outcomes),
             "contextPacksByBudget": {
-                str(budget): copy.deepcopy(outcomes)
+                str(budget): _context_rows(outcomes)
                 for budget in (512, 1024, 2048, 4096)
             },
         }
@@ -689,6 +689,26 @@ class SyntheticInputs:
             str(self.output_path),
             *extra,
         ]
+
+
+def _context_rows(outcomes: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Model the runtime's bounded context-pack outcome rows for a fixture."""
+
+    rows = []
+    for outcome in outcomes:
+        safety = bool(outcome["safetyPassed"])
+        quality = bool(outcome["qualityPassed"])
+        rows.append(
+            {
+                "caseId": outcome["caseId"],
+                "split": outcome["split"],
+                "topic": outcome["topic"],
+                "safetyPassed": safety,
+                "qualityPassed": quality,
+                "passed": safety and quality,
+            }
+        )
+    return rows
 
 
 class ProjectLaneAblationBuildTests(unittest.TestCase):

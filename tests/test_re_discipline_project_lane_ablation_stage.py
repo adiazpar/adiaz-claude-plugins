@@ -136,11 +136,12 @@ class StagingFixture:
         project = Path(command[command.index("--project-root") + 1])
         cache = Path(command[command.index("--cache-root") + 1])
         raw = json.loads(self.synthetic.raw_path.read_text(encoding="utf-8"))
+        raw["requestedProfile"] = "plugin:balanced-v1@sha256:" + "0" * 64
         generation = raw["generation"]
         generation.update(
             {
                 "project": "fixture-project",
-                "worktree": str(project),
+                "worktree": "worktree:" + "0" * 16,
                 "gitRevision": self.project_revision,
             }
         )

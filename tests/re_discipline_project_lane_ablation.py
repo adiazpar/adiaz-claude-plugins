@@ -747,9 +747,13 @@ def validate_project_lane_ablation_semantics(report: dict[str, Any]) -> None:
             _fail(path, "event evidence does not match per-case outcomes")
         if decision["positiveEvidence"] != bool(ids):
             _fail(path + ".positiveEvidence", "does not match event evidence")
+        # Added safety regressions are the hard bar; ranking losses are
+        # ordinary retrieval variance. A lane is retained when its unique
+        # positive events strictly outnumber losses, removed when it
+        # contributes nothing, and inconclusive otherwise.
         expected_action = (
             "inconclusive"
-            if ids and (regressions or losses)
+            if regressions or (ids and losses >= len(ids))
             else "retain"
             if ids
             else "remove"

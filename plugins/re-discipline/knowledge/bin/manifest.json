@@ -4,7 +4,7 @@
   "runtime": {
     "name": "re-discipline-knowledge",
     "version": "0.8.0",
-    "buildId": "sha256:a8818142f5fdaa19aa448b1e0688ce6a0f65ab383d170c760b9ed5ca50469293"
+    "buildId": "sha256:c36df7d08f7ccb43ff12958d26a81b59ea96dbd6b0caddae6512cbd2d0c74643"
   },
   "build": {
     "goToolchain": "go1.26.5",
@@ -12,7 +12,7 @@
     "flags": [
       "-trimpath",
       "-buildvcs=false",
-      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:a8818142f5fdaa19aa448b1e0688ce6a0f65ab383d170c760b9ed5ca50469293"
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:c36df7d08f7ccb43ff12958d26a81b59ea96dbd6b0caddae6512cbd2d0c74643"
     ],
     "environment": [
       "CGO_ENABLED=0",
@@ -32,8 +32,8 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:d576a6dd19e360faa0a7d40a52c5f311eaec9b8f844a5674792da4157b820eab",
-      "size": 10830848,
+      "sha256": "sha256:7fae69d6a30ec8fc9433e1aee35b68ac0d2129c4bdaa97483e1028ca43e328a5",
+      "size": 11710464,
       "mode": "0644"
     },
     {
@@ -41,8 +41,8 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:d60e194eec3dceb49f7890027a8ffd294b29879fbe011b0d36c0e24dead539de",
-      "size": 10020864,
+      "sha256": "sha256:fca9bdea26b8a256328fdbe22d6ceeda1b06029797bd2136b33844a9d1448ab3",
+      "size": 10781184,
       "mode": "0644"
     },
     {
@@ -50,8 +50,8 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:05e4a3eee56a35205b5f7bdfcfdea9ba2b266e6c85cb2970d4fd8760cc67a797",
-      "size": 10567806,
+      "sha256": "sha256:7a51b2e2f3e162d280278ede99f1896ed06a8c794c68ada51407559f19010dac",
+      "size": 11444350,
       "mode": "0755"
     },
     {
@@ -59,8 +59,8 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:c4bb479e23f3d2f5895aa69b0131b8c5ccfd950bf114b1860159ce726395a9f0",
-      "size": 9961598,
+      "sha256": "sha256:b743024e539dd568a5c881062bf2049e4bc899b2fd89a25d4ab826e434ee1ab3",
+      "size": 10682494,
       "mode": "0755"
     },
     {
@@ -68,8 +68,8 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:2378d5e0f0ef449367685450b9ec9305db24ce646dac6372f4aef15d20bbd5d5",
-      "size": 10728960,
+      "sha256": "sha256:1d0f977b520573dd9acf0d25eaa395e8e3082ef1e58dfe22307ae04f5adf79b2",
+      "size": 11606032,
       "mode": "0755"
     },
     {
@@ -77,8 +77,8 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:7baef9c43b6c154b1c301b6f0f984668d8920fb8bf324e280dd808c4b3acbadf",
-      "size": 10122994,
+      "sha256": "sha256:ec35a4505e77067947daaed2c6775de215c54e5550605dbe973ce7c69d1b3c0f",
+      "size": 10907826,
       "mode": "0755"
     }
   ],
@@ -95,7 +95,7 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "re-discipline-knowledge.exe",
-      "sha256": "sha256:cf67abcd6f50d9f72f076c38bae568983936c21bd70b9d82482dfc6ca0cce549",
+      "sha256": "sha256:70da08a0b10a888cec1084c9781a67f94c13fbbad0c09c221645a8f00cea6507",
       "size": 2072064,
       "mode": "0644"
     }
@@ -106,6 +106,13 @@
       "path": "evals/conformance/cases.json",
       "sha256": "sha256:6bc4e0934adc1597d92c8873d3f86c0893e932e7b3da2d599aa30b94263f4189",
       "size": 7806,
+      "mode": "0644"
+    },
+    {
+      "kind": "lane-ablation-evidence-archive",
+      "path": "evals/conformance/evidence/2026-08-03-snaphak-pre-removal-rerank.zip",
+      "sha256": "sha256:c20ed97f01a324397eedad89f2c628a28cad94d562595f6f342a8efdae5c9ac6",
+      "size": 456281,
       "mode": "0644"
     },
     {
@@ -391,15 +398,22 @@
     {
       "kind": "lane-ablation-decision",
       "path": "evals/conformance/lane-ablation-decision.json",
-      "sha256": "sha256:c6a5ecfa54ccd19add5ccf5b0bbc101022c23f03268d27c18f4f57b52de7e625",
-      "size": 2080,
+      "sha256": "sha256:f26315f48a64293f72d26ba2b40f37293ec0cc07c35bd86d6538a3c53e29e7ab",
+      "size": 2204,
       "mode": "0644"
     },
     {
       "kind": "lane-ablation-report",
       "path": "evals/conformance/lane-ablation-report.json",
-      "sha256": "sha256:d5da38a7ad38bcff1d5a9a9580e930753004421c7881af34df0d9c4f3325f208",
-      "size": 45491,
+      "sha256": "sha256:6a18519937ff1f7ef1182d95bc85bd712288c7f7c8b0c4ad39add24e088c9987",
+      "size": 19172,
+      "mode": "0644"
+    },
+    {
+      "kind": "project-lane-ablation-measurement",
+      "path": "evals/conformance/project-lane-ablation.json",
+      "sha256": "sha256:9fdc442407b3684454bb3b6bf262d75a04d80cac1b66afe4891a0fef8772383e",
+      "size": 699843,
       "mode": "0644"
     },
     {
@@ -433,7 +447,7 @@
     {
       "kind": "retrieval-profile",
       "path": "profiles/balanced-v1.json",
-      "sha256": "sha256:b2d236650f3bd3de8a32a8497b5697b36d82a4bafe9d4dd8075f1ef33189f150",
+      "sha256": "sha256:4d5466176b1a266d0478c471e4411f4428b6881f9f05d2c71d156b831f1bfafe",
       "size": 2960,
       "mode": "0644"
     },
@@ -468,8 +482,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/closure-job.schema.json",
-      "sha256": "sha256:5bcb2c72d6b84725a0336c21283d45c5482bc9796d11791fe37a490ca55c7ad3",
-      "size": 1968,
+      "sha256": "sha256:bea1a822213bb04bb0b37abe45f3bbd118b4bc1fb47facdb87f86e4d2670bf7e",
+      "size": 2045,
       "mode": "0644"
     },
     {
@@ -503,15 +517,15 @@
     {
       "kind": "json-schema",
       "path": "schemas/context-pack.schema.json",
-      "sha256": "sha256:e4866ed822c64f8d25d925f5bbadab6bc76ab0a0ec743d0d0595916c8861ab33",
-      "size": 6440,
+      "sha256": "sha256:53250afba4bd330bdf06bfe785d326280c27bf867ae1787df10601f575e222e1",
+      "size": 6601,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
-      "path": "schemas/decision-receipt.schema.json",
-      "sha256": "sha256:3e91636994c4f6ca61d9ca45ba9c91511268fe3dc7c62372e0e226463d73019a",
-      "size": 1384,
+      "path": "schemas/disposable-migration-pilot.schema.json",
+      "sha256": "sha256:3e4d918912640111fa7ed4b9debd8c5884647574fc957c4dab0ba2a8b897b400",
+      "size": 4787,
       "mode": "0644"
     },
     {
@@ -530,13 +544,6 @@
     },
     {
       "kind": "json-schema",
-      "path": "schemas/evidence-relation.schema.json",
-      "sha256": "sha256:26dc92c0bbf6c5ab650dcef92d64058337140eeb39f4534cd4fb9e61f1fe12d0",
-      "size": 1247,
-      "mode": "0644"
-    },
-    {
-      "kind": "json-schema",
       "path": "schemas/finding-eval-suite.schema.json",
       "sha256": "sha256:cc792c215ac70d38c6637eb38d6be6ab2c10682bd86e7acfa2165b54345f4444",
       "size": 4110,
@@ -544,9 +551,16 @@
     },
     {
       "kind": "json-schema",
+      "path": "schemas/finding-evidence.schema.json",
+      "sha256": "sha256:0cdc5249804b0616d5580abf0fa9ca686f823fa94b01d3fea17c7eb6677e3fb8",
+      "size": 995,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
       "path": "schemas/finding-frontmatter.schema.json",
-      "sha256": "sha256:58006abe4e551627007acda921f0cfe0f5538e4133d193158b1ecc67de6e4b13",
-      "size": 6079,
+      "sha256": "sha256:039caf99a67f1744281487b89990c1a7d5927e3d62d6cad8eb0454ce2288bf4c",
+      "size": 5414,
       "mode": "0644"
     },
     {
@@ -566,8 +580,29 @@
     {
       "kind": "json-schema",
       "path": "schemas/lane-ablation-report.schema.json",
-      "sha256": "sha256:6747bf7f899e5b5463bd0c185a6abe371d2044e960314e4b48a44868488d65f2",
-      "size": 9408,
+      "sha256": "sha256:996d8c05a026fbcb18c0e93db2aba2013754ad9611441fa23808c650b85f27d0",
+      "size": 10059,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-blinded-agent-evaluation.schema.json",
+      "sha256": "sha256:275285774382a33505ded21e4d1ba50c3289420d3a217e5dc1661046545f4843",
+      "size": 4457,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-gate-artifact.schema.json",
+      "sha256": "sha256:2cf65fab58da763a8864cffd3d570ad1f8d178d98ea13c4e758575014dae2243",
+      "size": 1823,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-host-conformance.schema.json",
+      "sha256": "sha256:5f6ad240e4d96c5838eb57d6d3b764245e1a1e4b088f8599bece4226784e0592",
+      "size": 2323,
       "mode": "0644"
     },
     {
@@ -580,15 +615,43 @@
     {
       "kind": "json-schema",
       "path": "schemas/migration-plan.schema.json",
-      "sha256": "sha256:a9693756f67ec1ea8a893172d0c60ca98587c276421a02b6b2cd1d34de0f5dbc",
-      "size": 5134,
+      "sha256": "sha256:9ec0e42607afdf1a05ebb0aa981a537509d6e9ff789030b657b938542b652f76",
+      "size": 7954,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-profile-conflict-packet.schema.json",
+      "sha256": "sha256:96430b5e41484302bb38061d56ca741b641d4fdf05ee4b64cc42f243ff2a8848",
+      "size": 3361,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-profile-conversion-decision.schema.json",
+      "sha256": "sha256:7da0b4a5c235e938c7bd95519be5940d7b9e124bb619bd0138874610f9e62d77",
+      "size": 2093,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-profile-decision-submission.schema.json",
+      "sha256": "sha256:f9f298770b48a4f22083bbcd85e240c3dc9e8a26bb09bba065e9c74c79a15af6",
+      "size": 1826,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/migration-receipt.schema.json",
-      "sha256": "sha256:b999493e8d04bd495a0480bcbdf29b7853560889b7dc01831c704fa898253c74",
-      "size": 4168,
+      "sha256": "sha256:e44cccbbdf8fac4e0a73557e00437b44f517219af0223fa550d9255b18dae48f",
+      "size": 4248,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/migration-retrieval-gate-evidence.schema.json",
+      "sha256": "sha256:5aaa8f63ed38cf57d39dbb44f99102092eaf44a4b8c675046a2c8949c2d00640",
+      "size": 1185,
       "mode": "0644"
     },
     {
@@ -622,22 +685,36 @@
     {
       "kind": "json-schema",
       "path": "schemas/normalization-queue.schema.json",
-      "sha256": "sha256:8ffd4eced7711cf299984f9d0e1556da1b02af425e239640140528f45bc55fb2",
-      "size": 2784,
+      "sha256": "sha256:4c5a2ff5320575bb66b001068376843e2e2e86e29f0a3e420d925dd34d666de1",
+      "size": 4952,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/normalized-beats-raw-receipt.schema.json",
-      "sha256": "sha256:e17ff14d0b5b7b1c2400c1da345b72ad1b565a65ed532d4201014a51a58ae962",
-      "size": 3351,
+      "sha256": "sha256:04820505fe136e3c90bd7e00bc2000d5f3f2e9e4f736bc7dd7577ebfcfef3877",
+      "size": 5731,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/normalized-vs-raw-candidate.schema.json",
+      "sha256": "sha256:70002b9d81702a7f5057170cb0c00517b71421298533745265a3fbe0e1b1f606",
+      "size": 6796,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/project-lane-ablation-harness.schema.json",
+      "sha256": "sha256:e5c3c1fcadde6c41cb062994fe1003e69416164438142a80a5d8e5fdec8d10e4",
+      "size": 10155,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/project-lane-ablation-report.schema.json",
-      "sha256": "sha256:a9287a0c908ccdf94751f01986d851ca9fc15cd32b8482e8ed80309dd9ed4c9d",
-      "size": 25464,
+      "sha256": "sha256:e60f0b8d2daabbecca5e84b91750fc991d0693d666f1c43643ef18f9aa520db3",
+      "size": 32715,
       "mode": "0644"
     },
     {
@@ -645,6 +722,13 @@
       "path": "schemas/retrieval-profile.schema.json",
       "sha256": "sha256:1f9a900065c635b968ec1a89d4e6c59614d6532e03ba4870cf51d5a5487fc7f2",
       "size": 6503,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/review-decision.schema.json",
+      "sha256": "sha256:c884ae6d22ab97622823949ce8e8a5f5e405302f8301bb88ce0cc65691c9815a",
+      "size": 941,
       "mode": "0644"
     },
     {
@@ -664,15 +748,15 @@
     {
       "kind": "json-schema",
       "path": "schemas/review.schema.json",
-      "sha256": "sha256:0856cdbc3c973e8c32385d0e1a524cca88ba5d6697541a7624b036267b57d5ae",
-      "size": 2567,
+      "sha256": "sha256:f6da99efa5de5a73522473bf8e632e52e8673c2d244ed2a5c3e7d5b8f60d4a24",
+      "size": 1882,
       "mode": "0644"
     },
     {
       "kind": "json-schema",
       "path": "schemas/run.schema.json",
-      "sha256": "sha256:ce09734ff035d3433cddae2a7265c4a2a637a578f0f1361b418303a8091573d7",
-      "size": 4214,
+      "sha256": "sha256:f0630c196f4cda50dd6bb2a988e22eca8f8f60ce5203a9def211e671612a7757",
+      "size": 4698,
       "mode": "0644"
     },
     {
@@ -685,8 +769,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/state-inventory.schema.json",
-      "sha256": "sha256:35a8d36379889c770fe2fd1a97cc49397d26f879dd91303fc73f8c4f4a30666b",
-      "size": 955,
+      "sha256": "sha256:747e9ff162226fa80d30591c71a3629f2ce18797f0681ec074cd6a5fec5c7ce3",
+      "size": 1013,
       "mode": "0644"
     },
     {
@@ -706,8 +790,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/work-item.schema.json",
-      "sha256": "sha256:6e2853517dc6495ecd3d609475c2be02d88a4815454a9d871c4a718228075314",
-      "size": 3613,
+      "sha256": "sha256:f775e70318e9110fe45969d12ce028cf7211e6b7a983506a096f7af2f944cad1",
+      "size": 5631,
       "mode": "0644"
     }
   ],

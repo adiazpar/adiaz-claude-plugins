@@ -517,6 +517,44 @@ def _normalize_outcome(value: dict[str, Any], path: str) -> dict[str, Any]:
     return result
 
 
+def _context_case_map(
+    rows: Any,
+    path: str,
+    eval_by_id: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Map context-pack outcomes by case id for safety-regression comparison.
+
+    Context rows carry the bounded-pack outcome shape, not the retrieval
+    case-outcome shape; the safety comparison needs only their identity,
+    metadata binding, and boolean safety verdicts.
+    """
+
+    if not isinstance(rows, list) or len(rows) != 64:
+        _fail(path, "must contain exactly 64 context outcomes")
+    result: dict[str, dict[str, Any]] = {}
+    for index, value in enumerate(rows):
+        if not isinstance(value, dict):
+            _fail(f"{path}[{index}]", "must be an object")
+        case_id = value.get("caseId")
+        if not isinstance(case_id, str) or case_id in result:
+            _fail(path, f"missing or duplicate caseId at index {index}")
+        eval_case = eval_by_id.get(case_id)
+        if eval_case is None:
+            _fail(path, f"contains unknown caseId {case_id!r}")
+        for field in ("split", "topic"):
+            if value.get(field) != eval_case[field]:
+                _fail(f"{path}[{index}].{field}", "does not match eval metadata")
+        for field in ("safetyPassed", "qualityPassed", "passed"):
+            if not isinstance(value.get(field), bool):
+                _fail(f"{path}[{index}].{field}", "must be a boolean")
+        if value["passed"] != (value["safetyPassed"] and value["qualityPassed"]):
+            _fail(f"{path}[{index}].passed", "does not equal safetyPassed && qualityPassed")
+        result[case_id] = copy.deepcopy(value)
+    if set(result) != set(eval_by_id):
+        _fail(path, "does not cover the evaluation corpus exactly")
+    return result
+
+
 def _case_map(
     rows: Any,
     path: str,
@@ -899,7 +937,7 @@ def _safety_regressions(
     context_main: dict[str, dict[str, dict[str, Any]]] = {}
     for role, profile in profiles.items():
         rows = profile.get("contextPackCases")
-        context_main[role] = _case_map(
+        context_main[role] = _context_case_map(
             rows,
             f"raw.profiles[{role}].contextPackCases",
             eval_by_id,
@@ -914,7 +952,7 @@ def _safety_regressions(
             }:
                 _fail(f"raw.profiles[{role}].contextPacksByBudget", "must cover budgets")
             rows = by_budget[str(budget)]
-            context_budget[role] = _case_map(
+            context_budget[role] = _context_case_map(
                 rows,
                 f"raw.profiles[{role}].contextPacksByBudget[{budget}]",
                 eval_by_id,
@@ -1903,7 +1941,12 @@ def build_report(
         losses: int,
         evidence_label: str,
     ) -> dict[str, Any]:
-        if ids and (regressions or losses):
+        # Added safety regressions are the hard bar. Ranking losses are
+        # ordinary retrieval variance: the lane is retained when its unique
+        # positive events strictly outnumber them, matching the RFC's
+        # rescue-count ablation criterion, and removed when it contributes
+        # nothing. Anything else stays inconclusive.
+        if regressions or (ids and losses >= len(ids)):
             action = "inconclusive"
         elif ids:
             action = "retain"
