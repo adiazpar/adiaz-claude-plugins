@@ -768,9 +768,14 @@ def _validate_current_matrix(
             _fail(f"rawBenchmark.generation.{field}", "must be positive")
     if not isinstance(generation.get("runtime"), dict) or not generation["runtime"]:
         _fail("rawBenchmark.generation.runtime", "must be a non-empty object")
+    # The runtime deliberately reports a hashed worktree identity instead of
+    # a machine-local path; the disposable project is already bound through
+    # the pinned git revision and the projected corpus fingerprint.
     worktree = generation.get("worktree")
-    if not isinstance(worktree, str) or not _same_path(Path(worktree), project_root):
-        _fail("rawBenchmark.generation.worktree", "does not name the disposable project")
+    if not isinstance(worktree, str) or not re.fullmatch(
+        r"worktree:[0-9a-f]{16}", worktree
+    ):
+        _fail("rawBenchmark.generation.worktree", "must be a hashed worktree identity")
     if not isinstance(generation.get("project"), str) or not generation["project"]:
         _fail("rawBenchmark.generation.project", "must be non-empty")
     profiles = raw.get("profiles")
