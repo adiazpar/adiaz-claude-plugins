@@ -61,11 +61,44 @@ func (service *Service) effectiveSettings() KnowledgeSettings {
 }
 
 func NewService(options ServiceOptions) (*Service, error) {
+	return newServiceWithGuard(options, requireCompletedMigration)
+}
+
+// NewMeasurementService builds a service for read-only retrieval
+// measurement. The release two-arm benchmark must run against a project's
+// corpus before that project's explicit migration — the measurement feeds
+// the very release that migrates it — so this constructor tolerates a
+// pre-0.8 layout. It still refuses a project holding a nonterminal
+// migration transaction, and it grants no mutation surface: every state
+// transaction keeps its own fail-closed completed-migration guard.
+func NewMeasurementService(options ServiceOptions) (*Service, error) {
+	return newServiceWithGuard(options, requireMeasurableProject)
+}
+
+func requireMeasurableProject(projectRoot string) error {
+	state, exists, err := projectMigrationState(projectRoot)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrMigrationIncomplete, err)
+	}
+	if exists && state.State != "migrated" {
+		return fmt.Errorf("%w: transaction %s is %s; use migrate-project status/resume/verify/ratify",
+			ErrMigrationIncomplete, state.TransactionID, state.State)
+	}
+	if _, err := DetectProjectStateVersion(projectRoot); err != nil {
+		return fmt.Errorf("validate measurable project version: %w", err)
+	}
+	return nil
+}
+
+func newServiceWithGuard(
+	options ServiceOptions,
+	guard func(string) error,
+) (*Service, error) {
 	boundary, err := NewBoundary(options.ProjectRoot)
 	if err != nil {
 		return nil, err
 	}
-	if err := requireCompletedMigration(boundary.Root); err != nil {
+	if err := guard(boundary.Root); err != nil {
 		return nil, err
 	}
 	assetRoot, err := filepath.Abs(options.AssetRoot)
