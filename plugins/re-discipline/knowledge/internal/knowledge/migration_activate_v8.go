@@ -1270,9 +1270,39 @@ func legacyTruthDependencies(
 	return mapping, SortedUnique(relations), nil
 }
 
+// legacyTruthDependencyBlock returns the document's declared relation text.
+// Bare paths are relations only where the document declares them as such; a
+// path-shaped string in ordinary prose -- a table cell recounting which
+// document some work would close, for example -- describes a document rather
+// than depending on it, and must not become a migration relation.
+func legacyTruthDependencyBlock(body string) string {
+	lines := strings.Split(normalizeDocumentLineEndings(body), "\n")
+	block := []string{}
+	collecting := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "**depends-on:**") || lower == "## depends-on" ||
+			strings.HasPrefix(lower, "## depends-on ") {
+			collecting = true
+			block = append(block, trimmed)
+			continue
+		}
+		if !collecting || trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "**") {
+			collecting = false
+			continue
+		}
+		block = append(block, trimmed)
+	}
+	return strings.Join(block, "\n")
+}
+
 func legacyTruthDependencyPaths(body []byte, sourcePath string) []string {
 	dependencies := []string{}
-	for _, raw := range legacyTruthDependencyRE.FindAllString(string(body), -1) {
+	for _, raw := range legacyTruthDependencyRE.FindAllString(legacyTruthDependencyBlock(string(body)), -1) {
 		clean := filepath.ToSlash(filepath.Clean(raw))
 		for strings.HasPrefix(clean, "../") {
 			clean = strings.TrimPrefix(clean, "../")
