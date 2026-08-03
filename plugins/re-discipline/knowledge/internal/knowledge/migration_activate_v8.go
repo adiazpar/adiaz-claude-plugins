@@ -1318,7 +1318,11 @@ func legacyTruthDependencyPaths(body []byte, sourcePath string) []string {
 			continue
 		}
 		target = strings.SplitN(target, "#", 2)[0]
-		if target == "" {
+		// A dependency on a truth, history, or backlog document is always a
+		// Markdown file. Requiring the suffix keeps decompiled call
+		// expressions inside code spans -- which read exactly like a link
+		// target, for example vtbl[index](ent) -- from becoming relations.
+		if target == "" || !strings.HasSuffix(strings.ToLower(target), ".md") {
 			continue
 		}
 		clean := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(sourcePath), filepath.FromSlash(target))))
