@@ -1175,6 +1175,12 @@ def _copy_managed_workspace(
     exclusions = {
         ".git",
         ".re-discipline/cache",
+        # Migration transaction state is recovery bookkeeping, not knowledge
+        # corpus. Its backups mirror the complete pre-migration tree —
+        # including the withheld evaluation corpus — so copying it into an
+        # agent workspace would both leak evaluation bytes and exceed
+        # platform path limits.
+        ".re-discipline/migration",
         EVAL_ROOT,
         ".re-discipline/local-paths.md",
     }
