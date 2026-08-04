@@ -110,12 +110,15 @@ regular files, recomputes their digests, rejects benchmark/calibration drift,
 and derives every retrieval fingerprint and check handle itself.
 
 Host evidence must use the fixed request/result/failure matrix in
-`migration-host-conformance.schema.json`: real MCP, CLI, Claude Code, and Codex
+`migration-host-conformance.schema.json`: real MCP, CLI, and Claude Code
 captures for discovery, status, retrieval, expansion, role-boundary refusal,
-bounded recovery, and the Claude/Codex CLI fallbacks. The engine recomputes
-trial IDs, semantic digests, current MCP schema identity, cross-host parity,
-and per-host fingerprints. Missing rows, arbitrary transport labels,
-self-authored semantic hashes, or generic evidence strings fail closed.
+bounded recovery, and the Claude CLI fallback. Codex is an optional host:
+supply its captures only when the project uses the Codex host, and then its
+complete scenario matrix must pass and match cross-host parity like every
+other captured host. The engine recomputes trial IDs, semantic digests,
+current MCP schema identity, cross-host parity, and per-host fingerprints.
+Missing rows, arbitrary transport labels, self-authored semantic hashes, or
+generic evidence strings fail closed.
 
 Record only the resulting project-contained regular artifact with
 `--gate retrieval-context` or `--gate host-parity`; `--verify` replays those

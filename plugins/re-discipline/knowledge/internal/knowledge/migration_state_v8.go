@@ -1292,7 +1292,11 @@ func requiredMigrationGateFingerprints(gate string) []string {
 	case "retrieval-context":
 		return []string{"benchmark", "calibration", "blinded-agent-evaluation"}
 	case "host-parity":
-		return []string{"mcp", "cli", "claude-host", "codex-host"}
+		// Codex is an optional host: when its trials are present, its
+		// fingerprint is carried and exact-matched through the artifact's
+		// rederived fingerprint set, but a project that does not use Codex
+		// owes no codex-host fingerprint.
+		return []string{"mcp", "cli", "claude-host"}
 	default:
 		return nil
 	}

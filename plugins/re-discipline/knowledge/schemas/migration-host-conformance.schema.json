@@ -13,7 +13,7 @@
     "transactionId": {"type": "string", "pattern": "^M-[A-F0-9]{20}$"},
     "planDigest": {"$ref": "#/$defs/digest"},
     "protocolDigest": {"$ref": "#/$defs/digest"},
-    "trials": {"type": "array", "minItems": 25, "items": {"$ref": "#/$defs/trial"}},
+    "trials": {"type": "array", "minItems": 18, "items": {"$ref": "#/$defs/trial"}},
     "passed": {"const": true},
     "resultDigest": {"$ref": "#/$defs/digest"}
   },

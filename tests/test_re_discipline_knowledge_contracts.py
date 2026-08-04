@@ -66,7 +66,8 @@ class ReDisciplineKnowledgeContractTests(unittest.TestCase):
             "projectProfileActivation` `false",
             "never accept generic check names plus caller-made hashes",
             "paired case-level blinded evaluation",
-            "real MCP, CLI, Claude Code, and Codex captures",
+            "real MCP, CLI, and Claude Code captures",
+            "Codex is an optional host",
             "self-authored semantic hashes",
         ):
             self.assertIn(phrase, " ".join(text.split()))
@@ -93,7 +94,7 @@ class ReDisciplineKnowledgeContractTests(unittest.TestCase):
         host_schema = json.loads(
             (PLUGIN / "knowledge" / "schemas" / "migration-host-conformance.schema.json").read_text()
         )
-        self.assertEqual(host_schema["properties"]["trials"]["minItems"], 25)
+        self.assertEqual(host_schema["properties"]["trials"]["minItems"], 18)
         self.assertIn("role-boundary", host_schema["$defs"]["trial"]["properties"]["scenario"]["enum"])
         init = self.skill("init-project")
         self.assertIn("does not perform project state migration", " ".join(init.split()))
