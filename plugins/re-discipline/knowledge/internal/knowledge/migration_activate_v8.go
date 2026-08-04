@@ -171,12 +171,15 @@ func (engine *MigrationEngine) buildNormalizedStaging(plan MigrationPlan) (Migra
 	if err := engine.stageLegacyTruthConversions(plan, state, projectStagingRoot, campaigns, &manifest); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
-	if err := engine.stageMigratedEvaluationCorpus(plan, projectStagingRoot); err != nil {
+	// Carried-forward bytes must exist before the import chain is sealed, so
+	// the events bind the complete activated snapshot. They must also exist
+	// before evaluation staging: the restamped corpus snapshot is derived
+	// from the complete staged tree, so any preserved Markdown carried
+	// forward has to be in place first.
+	if err := engine.carryForwardUnplannedFiles(plan, projectStagingRoot); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
-	// Carried-forward bytes must exist before the import chain is sealed, so
-	// the events bind the complete activated snapshot.
-	if err := engine.carryForwardUnplannedFiles(plan, projectStagingRoot); err != nil {
+	if err := engine.stageMigratedEvaluationCorpus(plan, projectStagingRoot); err != nil {
 		return MigrationNormalizedManifest{}, err
 	}
 	if err := sealMigrationImportChain(projectStagingRoot, campaigns, plan, state, manifest.LegacySources); err != nil {
@@ -3581,6 +3584,9 @@ type migrationEvalJudgmentContext struct {
 	preservedTruth map[string]string
 	stagingRoot    string
 	stagedText     map[string]string
+	// activatedCorpusFingerprint restamps every non-fixture corpusSnapshot
+	// onto the corpus identity activation is about to publish.
+	activatedCorpusFingerprint string
 }
 
 func newMigrationEvalJudgmentContext(
@@ -3798,6 +3804,72 @@ func appendUniquePaths(existing []string, values ...string) ([]string, bool) {
 	return result, changed
 }
 
+// migrationActivatedCorpusFingerprint computes the corpus identity the
+// activated project will report, before activation publishes it. An unpinned
+// evaluation case gates on the corpus-wide fingerprint, and conversion is the
+// manager-reviewed transformation that changes the corpus, so the staged
+// evaluation files must carry the post-activation value; a post-activation
+// rewrite would break the materialization receipts that bind the staged
+// bytes. The activated corpus is exactly the staged tree plus every live
+// document outside the managed activation targets, discovered under the
+// staged (migrated) knowledge settings.
+func migrationActivatedCorpusFingerprint(
+	plan MigrationPlan,
+	projectRoot string,
+	projectStagingRoot string,
+) (string, error) {
+	configuration := LoadConfiguration(projectStagingRoot)
+	if !configuration.Valid || configuration.Unsafe {
+		return "", fmt.Errorf(
+			"staged knowledge configuration is invalid: %s",
+			stringsOr(configuration.Errors, "configuration is invalid"))
+	}
+	stagedBoundary, err := NewBoundary(projectStagingRoot)
+	if err != nil {
+		return "", err
+	}
+	staged, err := DiscoverSources(stagedBoundary, configuration.Settings)
+	if err != nil {
+		return "", fmt.Errorf("discover staged corpus: %w", err)
+	}
+	liveBoundary, err := NewBoundary(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	live, err := DiscoverSources(liveBoundary, configuration.Settings)
+	if err != nil {
+		return "", fmt.Errorf("discover surviving live corpus: %w", err)
+	}
+	targets := migrationManagedTargets(plan)
+	underTarget := func(path string) bool {
+		for _, target := range targets {
+			if path == target || strings.HasPrefix(path, target+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	merged := map[string]SourceDocument{}
+	for _, document := range staged.Documents {
+		merged[document.Path] = document
+	}
+	for _, document := range live.Documents {
+		if _, present := merged[document.Path]; !present && !underTarget(document.Path) {
+			merged[document.Path] = document
+		}
+	}
+	paths := make([]string, 0, len(merged))
+	for path := range merged {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	documents := make([]SourceDocument, 0, len(paths))
+	for _, path := range paths {
+		documents = append(documents, merged[path])
+	}
+	return CorpusFingerprintForDocuments(documents)
+}
+
 // convertMigratedEvalCases rewrites one evaluation file's judgments onto the
 // destinations conversion produced. It never touches queries, topics, or
 // prose; it converts where a judgment says the answer lives, and extends a
@@ -3898,6 +3970,15 @@ func convertMigratedEvalCases(
 		if retargeted {
 			eval.VocabularyPolicy = ""
 		}
+		// An unpinned case gates on the corpus-wide fingerprint, and
+		// conversion is exactly the reviewed transformation that changes the
+		// corpus. Without a restamp every such case reports a corpus
+		// mismatch forever, the same defect shape re-pinning fixes for
+		// pinned cases.
+		if context.activatedCorpusFingerprint != "" &&
+			eval.CorpusSnapshot != "" && !strings.HasPrefix(eval.CorpusSnapshot, "fixture:") {
+			eval.CorpusSnapshot = context.activatedCorpusFingerprint
+		}
 	}
 }
 
@@ -3909,6 +3990,12 @@ func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
 	if context.empty() {
 		return nil
 	}
+	fingerprint, err := migrationActivatedCorpusFingerprint(
+		plan, engine.ProjectRoot, projectStagingRoot)
+	if err != nil {
+		return fmt.Errorf("activated corpus fingerprint: %w", err)
+	}
+	context.activatedCorpusFingerprint = fingerprint
 	relativeRoot := ".re-discipline/knowledge/evals"
 	sourceRoot := filepath.Join(engine.ProjectRoot, filepath.FromSlash(relativeRoot))
 	info, err := os.Lstat(sourceRoot)

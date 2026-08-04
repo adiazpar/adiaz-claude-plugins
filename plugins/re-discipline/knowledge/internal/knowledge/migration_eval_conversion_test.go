@@ -188,3 +188,30 @@ func TestEvalConversionLeavesUnconvertedJudgmentsAlone(t *testing.T) {
 		t.Fatalf("unconverted case drifted: %#v", cases[0])
 	}
 }
+
+func TestEvalConversionRestampsCorpusSnapshotsOntoActivatedCorpus(t *testing.T) {
+	staging := t.TempDir()
+	plan := testEvalConversionPlan(t, staging)
+	context := newMigrationEvalJudgmentContext(plan, staging)
+	context.activatedCorpusFingerprint = "sha256:" + strings.Repeat("ab", 32)
+	notAnswerable := false
+	cases := []EvalCase{
+		{
+			ID: "absence", Query: "qzvxjklmnpwtrb", QueryClass: "exact",
+			AllowedTiers: []string{"truth"}, Answerable: &notAnswerable,
+			CorpusSnapshot: "sha256:" + strings.Repeat("cd", 32),
+		},
+		{
+			ID: "fixture", Query: "conformance", QueryClass: "exact",
+			AllowedTiers: []string{"truth"}, Answerable: &notAnswerable,
+			CorpusSnapshot: "fixture:packaged-conformance-v1",
+		},
+	}
+	convertMigratedEvalCases(&context, cases)
+	if cases[0].CorpusSnapshot != context.activatedCorpusFingerprint {
+		t.Fatalf("unpinned corpus snapshot was not restamped: %q", cases[0].CorpusSnapshot)
+	}
+	if cases[1].CorpusSnapshot != "fixture:packaged-conformance-v1" {
+		t.Fatalf("fixture snapshot must never be restamped: %q", cases[1].CorpusSnapshot)
+	}
+}
