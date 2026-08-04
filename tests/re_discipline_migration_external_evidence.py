@@ -804,7 +804,10 @@ def _result_texts(value: Any) -> list[bytes]:
     return result
 
 
-def _observed_context(transcript: AgentTranscript) -> dict[str, Any]:
+def _observed_context(
+    transcript: AgentTranscript,
+    retrieval_tool: str = "query",
+) -> dict[str, Any]:
     cards: list[dict[str, Any]] = []
     paths: set[str] = set()
     handles: set[str] = set()
@@ -817,11 +820,11 @@ def _observed_context(transcript: AgentTranscript) -> dict[str, Any]:
     read_count = 0
     for observation in transcript.tools:
         name = _tool_basename(observation.name)
-        if name not in {"query", "read"}:
+        if name not in {retrieval_tool, "read"}:
             _fail("agent.tools", f"forbidden tool {observation.name!r}")
         if observation.error:
             _fail("agent.tools", f"tool {observation.name!r} failed")
-        if name == "query":
+        if name == retrieval_tool:
             query_count += 1
             cards.extend(_dicts_under_key(observation.result, "cards"))
         else:
@@ -1011,9 +1014,10 @@ def _derive_judgment(
     benchmark_outcome: Mapping[str, Any],
     transcript: AgentTranscript,
     workspace: Path,
+    retrieval_tool: str = "query",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     decision, claims = _validate_agent_final(transcript.final)
-    observed = _observed_context(transcript)
+    observed = _observed_context(transcript, retrieval_tool)
     answerable = eval_case.get("answerable")
     if not isinstance(answerable, bool):
         _fail("evalCase.answerable", "must be boolean")
@@ -1526,7 +1530,7 @@ def _agent_prompt(request: Mapping[str, Any], condition: str) -> str:
     return (
         "This is a blinded, read-only knowledge-navigation trial. "
         f"The context condition is {condition}. The frozen request is {request_json}. "
-        "Use only the re-discipline knowledge query and read tools. Do not use shell, "
+        "Use only the re-discipline knowledge retrieval and read tools. Do not use shell, "
         "filesystem, web, memory, subagents, or write tools. Do not look for evaluation "
         "files or infer hidden expected paths. Query with the exact question and role "
         "constraints, then expand only exact returned handles needed to answer. "
@@ -1748,6 +1752,7 @@ def _run_claude_trial(
     scratch: Path,
     executor: Executor,
     timeout_seconds: int,
+    retrieval_tool: str = "query",
 ) -> tuple[ProcessCapture, AgentTranscript, dict[str, Any]]:
     config = scratch / "mcp.json"
     _write_private_json(config, _mcp_config(runtime, assets, cache, workspace))
@@ -1773,7 +1778,7 @@ def _run_claude_trial(
         "--tools",
         "",
         "--allowedTools",
-        "mcp__re-discipline-knowledge__query,mcp__re-discipline-knowledge__read",
+        f"mcp__re-discipline-knowledge__{retrieval_tool},mcp__re-discipline-knowledge__read",
         "--disallowedTools",
         "Bash,Write,Edit,Read,Glob,Grep,WebFetch,WebSearch,Task",
     ]
@@ -1843,6 +1848,7 @@ def _run_codex_trial(
     scratch: Path,
     executor: Executor,
     timeout_seconds: int,
+    retrieval_tool: str = "query",
 ) -> tuple[ProcessCapture, AgentTranscript, dict[str, Any]]:
     schema_path = scratch / "agent-output.schema.json"
     final_path = scratch / "final.json"
@@ -1890,7 +1896,7 @@ def _run_codex_trial(
             "runtime": str(runtime),
             "assets": str(assets),
             "cache": str(cache),
-            "enabledTools": ["query", "read"],
+            "enabledTools": [retrieval_tool, "read"],
         },
     }
     return capture, transcript, invocation
@@ -3311,6 +3317,10 @@ def _blinded_trial(
     scratch = harness.scratch / "blinded" / host / condition / case_id
     scratch.mkdir(parents=True, exist_ok=False)
     runner = _run_claude_trial if host == "claude" else _run_codex_trial
+    # The last released 0.7 runtime names its retrieval tool `search`; the
+    # 0.8 runtime names it `query`. Each arm is driven and judged through
+    # its own runtime's actual tool surface.
+    retrieval_tool = "query" if condition == "compiled" else "search"
     capture, transcript, invocation = runner(
         executable=executable,
         model=model,
@@ -3323,6 +3333,7 @@ def _blinded_trial(
         scratch=scratch,
         executor=harness.executor,
         timeout_seconds=harness.timeout_seconds,
+        retrieval_tool=retrieval_tool,
     )
     # Each arm is judged against the evaluation corpus that describes that
     # arm's own tree. The compiled arm answers from converted destinations;
@@ -3338,6 +3349,7 @@ def _blinded_trial(
         benchmark_outcome=benchmark_outcome,
         transcript=transcript,
         workspace=arm.workspace,
+        retrieval_tool=retrieval_tool,
     )
     outcome = _blinded_case_outcome(
         case_id=case_id,
