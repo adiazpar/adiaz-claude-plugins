@@ -248,6 +248,9 @@ func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
 	const legacyPath = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/truth/binaries/omicron-checksum-table.md"
 	legacyBody := []byte("# Omicron checksum table\n\nClaim: The omicronChecksumTable drives resource verification.\n\nThe omicronChecksumTable is resolved by signature.\n")
 	writeFindingFixtureFile(t, root, legacyPath, legacyBody)
+	const masterfilePath = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/CAMPAIGN.md"
+	writeFindingFixtureFile(t, root, masterfilePath,
+		[]byte("# Campaign: fixture\n\nThis campaign owns the omicronSwitchboard handoff.\n"))
 	// A payload sibling outside legacy/truth must stay unindexed: the class
 	// admits preserved truth documents, not arbitrary run payload.
 	const payloadSibling = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/evidence/omicron-notes.md"
@@ -275,8 +278,18 @@ func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
 	if !discovered || source.Tier != "archive" || source.SourceKind != "legacy-truth" {
 		t.Fatalf("preserved legacy truth lost its provenance class: discovered=%v %#v", discovered, source)
 	}
+	master, masterDiscovered := classes[masterfilePath]
+	if !masterDiscovered || master.Tier != "archive" || master.SourceKind != "legacy-campaign" {
+		t.Fatalf("preserved masterfile lost its provenance class: discovered=%v %#v", masterDiscovered, master)
+	}
 	if _, indexed := classes[payloadSibling]; indexed {
 		t.Fatalf("non-truth run payload was indexed as provenance")
+	}
+	for _, chunk := range inventory.Chunks {
+		if chunk.Path == masterfilePath &&
+			!strings.Contains(chunk.Context, "SUPERSEDED BY CANONICAL CAMPAIGN RECORDS") {
+			t.Fatalf("preserved masterfile chunk lost its synthesized status: %#v", chunk)
+		}
 	}
 	preludeSeen := false
 	for _, chunk := range inventory.Chunks {
@@ -324,5 +337,18 @@ func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
 	}
 	if !served {
 		t.Fatalf("preserved legacy truth is not reachable through the provenance fallback lane: %#v", cards)
+	}
+	masterCards, err := queryRawReportCards(context.Background(), db, "omicronSwitchboard handoff", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	masterServed := false
+	for _, row := range masterCards {
+		if row.card.Metadata["path"] == masterfilePath {
+			masterServed = true
+		}
+	}
+	if !masterServed {
+		t.Fatalf("preserved masterfile is not reachable through the provenance fallback lane: %#v", masterCards)
 	}
 }

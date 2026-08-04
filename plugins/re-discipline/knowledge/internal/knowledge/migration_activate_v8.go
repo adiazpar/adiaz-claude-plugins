@@ -3567,19 +3567,346 @@ func migratedTruthLinkMapping(plan MigrationPlan) map[string]string {
 // Only exact whole-path judgment values are retargeted. Prose, queries, and
 // topics are never touched, and a path the plan does not convert is left
 // alone so preserved history and backlog targets keep pointing at themselves.
-func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
+// migrationEvalJudgmentContext resolves where each judged legacy path's
+// retrievable content actually went. A campaign masterfile's canonical
+// successor is structured JSON that chunk retrieval and context packs can
+// never serve, and a converted truth document's full prose survives only as
+// archive-tier provenance while its claim lives in one or more findings.
+// Judgments must follow the content, not merely the canonical record.
+type migrationEvalJudgmentContext struct {
+	mapping        map[string]string
+	masterfile     map[string]string
+	truthManifest  map[string]string
+	truthRows      map[string][]MigrationTruthPlan
+	preservedTruth map[string]string
+	stagingRoot    string
+	stagedText     map[string]string
+}
+
+func newMigrationEvalJudgmentContext(
 	plan MigrationPlan,
 	projectStagingRoot string,
-) error {
-	mapping := map[string]string{}
+) migrationEvalJudgmentContext {
+	context := migrationEvalJudgmentContext{
+		mapping:        map[string]string{},
+		masterfile:     map[string]string{},
+		truthManifest:  map[string]string{},
+		truthRows:      map[string][]MigrationTruthPlan{},
+		preservedTruth: map[string]string{},
+		stagingRoot:    projectStagingRoot,
+		stagedText:     map[string]string{},
+	}
+	for _, row := range plan.TruthConversions {
+		context.truthRows[row.SourcePath] = append(context.truthRows[row.SourcePath], row)
+	}
+	carriers := []string{}
+	for _, campaign := range migrationCampaigns(plan) {
+		carriers = append(carriers, campaign)
+	}
+	sort.Strings(carriers)
+	carrier := "migration-provenance"
+	if len(carriers) > 0 {
+		carrier = carriers[0]
+	}
 	for _, source := range plan.Sources {
+		if source.Role == "legacy-campaign-masterfile" && source.Campaign != "" {
+			// The preserved masterfile bytes under the campaign's import run
+			// are the only chunk-retrievable representation the campaign has
+			// after conversion.
+			context.masterfile[source.Path] = "active/" + source.Campaign + "/runs/" +
+				legacyRunID(source.Campaign, "campaign-import") + "/payload/legacy/CAMPAIGN.md"
+			continue
+		}
+		if source.Role == "truth" {
+			if len(context.truthRows[source.Path]) > 1 {
+				context.truthManifest[source.Path] = source.Destination
+			}
+			context.preservedTruth[source.Path] = "active/" + carrier + "/runs/" +
+				legacyRunID(carrier, "campaign-import") + "/payload/legacy/truth/" +
+				strings.TrimPrefix(source.Path, "docs/truth/")
+			continue
+		}
 		destination := strings.TrimSpace(source.Destination)
 		if destination == "" || destination == source.Path {
 			continue
 		}
-		mapping[source.Path] = destination
+		context.mapping[source.Path] = destination
 	}
-	if len(mapping) == 0 {
+	return context
+}
+
+func (context *migrationEvalJudgmentContext) empty() bool {
+	return len(context.mapping) == 0 && len(context.masterfile) == 0 &&
+		len(context.truthRows) == 0
+}
+
+func (context *migrationEvalJudgmentContext) staged(path string) string {
+	if cached, present := context.stagedText[path]; present {
+		return cached
+	}
+	body, err := os.ReadFile(filepath.Join(context.stagingRoot, filepath.FromSlash(path)))
+	text := ""
+	if err == nil {
+		text = strings.ToLower(string(body))
+	}
+	context.stagedText[path] = text
+	return text
+}
+
+func (context *migrationEvalJudgmentContext) stagedContainsAny(path string, tokens []string) bool {
+	text := context.staged(path)
+	if text == "" {
+		return false
+	}
+	for _, token := range tokens {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
+}
+
+// bestTruthRow mirrors the migrated-truth bounded-query ordering: title
+// matches outrank claim matches outrank body mentions. It selects the split
+// finding a query's vocabulary actually reaches; a zero score means no split
+// carries the vocabulary at all.
+func (context *migrationEvalJudgmentContext) bestTruthRow(
+	rows []MigrationTruthPlan,
+	tokens []string,
+) (MigrationTruthPlan, bool) {
+	best, bestScore := MigrationTruthPlan{}, 0
+	for _, row := range rows {
+		title := strings.ToLower(row.Title)
+		claim := strings.ToLower(row.Claim)
+		body := context.staged(row.Destination)
+		score := 0
+		for _, token := range tokens {
+			switch {
+			case strings.Contains(title, token):
+				score += 4
+			case strings.Contains(claim, token):
+				score += 2
+			case strings.Contains(body, token):
+				score++
+			}
+		}
+		if score > bestScore || score == bestScore && score > 0 && row.Destination < best.Destination {
+			best, bestScore = row, score
+		}
+	}
+	return best, bestScore > 0
+}
+
+// expandExpected converts one expected-path judgment value. Any-of judgment
+// lists receive every destination the source's content reached, so a case
+// stays satisfied by whichever converted representation retrieval ranks.
+func (context *migrationEvalJudgmentContext) expandExpected(
+	value string,
+	tokens []string,
+) (paths []string, archive bool) {
+	normalized := NormalizeProjectPath(value)
+	if preserved, ok := context.masterfile[normalized]; ok {
+		return []string{preserved}, true
+	}
+	if rows, ok := context.truthRows[normalized]; ok {
+		if manifest, split := context.truthManifest[normalized]; split {
+			paths = append(paths, manifest)
+		}
+		vocabularyReached := false
+		for _, row := range rows {
+			paths = append(paths, row.Destination)
+			if context.stagedContainsAny(row.Destination, tokens) {
+				vocabularyReached = true
+			}
+		}
+		if !vocabularyReached {
+			// The query's vocabulary survives only in the preserved prose the
+			// conversion demoted to provenance; the judgment follows it there.
+			paths = append(paths, context.preservedTruth[normalized])
+			archive = true
+		}
+		return paths, archive
+	}
+	if destination, ok := context.mapping[normalized]; ok {
+		return []string{destination}, false
+	}
+	return []string{value}, false
+}
+
+// selectEvidence converts one must-be-retrieved judgment value to the single
+// destination whose text the case's query can actually reach.
+func (context *migrationEvalJudgmentContext) selectEvidence(
+	value string,
+	tokens []string,
+) (path string, archive bool) {
+	normalized := NormalizeProjectPath(value)
+	if preserved, ok := context.masterfile[normalized]; ok {
+		return preserved, true
+	}
+	if rows, ok := context.truthRows[normalized]; ok {
+		if row, reached := context.bestTruthRow(rows, tokens); reached {
+			return row.Destination, false
+		}
+		return context.preservedTruth[normalized], true
+	}
+	if destination, ok := context.mapping[normalized]; ok {
+		return destination, false
+	}
+	return value, false
+}
+
+// expandHardNegative converts one hard-negative judgment value. A split
+// source's pollution signal applies to every one of its rows.
+func (context *migrationEvalJudgmentContext) expandHardNegative(value string) []string {
+	normalized := NormalizeProjectPath(value)
+	if preserved, ok := context.masterfile[normalized]; ok {
+		return []string{preserved}
+	}
+	if rows, ok := context.truthRows[normalized]; ok {
+		paths := []string{}
+		if manifest, split := context.truthManifest[normalized]; split {
+			paths = append(paths, manifest)
+		}
+		for _, row := range rows {
+			paths = append(paths, row.Destination)
+		}
+		return paths
+	}
+	if destination, ok := context.mapping[normalized]; ok {
+		return []string{destination}
+	}
+	return []string{value}
+}
+
+func appendUniquePaths(existing []string, values ...string) ([]string, bool) {
+	changed := false
+	seen := map[string]bool{}
+	result := make([]string, 0, len(existing)+len(values))
+	for _, value := range existing {
+		if !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	for _, value := range values {
+		if !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+			changed = true
+		}
+	}
+	return result, changed
+}
+
+// convertMigratedEvalCases rewrites one evaluation file's judgments onto the
+// destinations conversion produced. It never touches queries, topics, or
+// prose; it converts where a judgment says the answer lives, and extends a
+// case's allowed tiers with the archive provenance tier exactly when the
+// judged content now lives only there.
+func convertMigratedEvalCases(
+	context *migrationEvalJudgmentContext,
+	cases []EvalCase,
+) {
+	for index := range cases {
+		eval := &cases[index]
+		tokens := migrationSearchTokens(eval.Query)
+		retargeted := false
+		archiveNeeded := false
+		note := func(before, after string) string {
+			if before != after {
+				retargeted = true
+			}
+			return after
+		}
+
+		expanded := []string{}
+		for _, value := range eval.ExpectedPaths {
+			paths, archive := context.expandExpected(value, tokens)
+			archiveNeeded = archiveNeeded || archive
+			if len(paths) != 1 || paths[0] != value {
+				retargeted = true
+			}
+			expanded, _ = appendUniquePaths(expanded, paths...)
+		}
+		eval.ExpectedPaths = expanded
+
+		for position := range eval.MinimumEvidencePaths {
+			path, archive := context.selectEvidence(eval.MinimumEvidencePaths[position], tokens)
+			archiveNeeded = archiveNeeded || archive
+			eval.MinimumEvidencePaths[position] = note(eval.MinimumEvidencePaths[position], path)
+		}
+		negatives := []string{}
+		for _, value := range eval.HardNegativePaths {
+			paths := context.expandHardNegative(value)
+			if len(paths) != 1 || paths[0] != value {
+				retargeted = true
+			}
+			negatives, _ = appendUniquePaths(negatives, paths...)
+		}
+		eval.HardNegativePaths = negatives
+		for position := range eval.ExpectedCitations {
+			path, archive := context.selectEvidence(eval.ExpectedCitations[position], tokens)
+			archiveNeeded = archiveNeeded || archive
+			eval.ExpectedCitations[position] = note(eval.ExpectedCitations[position], path)
+		}
+		if len(eval.GradedRelevantPaths) > 0 {
+			graded := make(map[string]int, len(eval.GradedRelevantPaths))
+			for value, grade := range eval.GradedRelevantPaths {
+				paths, _ := context.expandExpected(value, tokens)
+				if len(paths) != 1 || paths[0] != value {
+					retargeted = true
+				}
+				for _, path := range paths {
+					if existing, present := graded[path]; !present || grade > existing {
+						graded[path] = grade
+					}
+				}
+			}
+			eval.GradedRelevantPaths = graded
+		}
+		for position := range eval.EvidencePins {
+			pin := &eval.EvidencePins[position]
+			path, archive := context.selectEvidence(pin.Path, tokens)
+			archiveNeeded = archiveNeeded || archive
+			pin.Path = note(pin.Path, path)
+			// A pin gates on what its document claims, so that ordinary
+			// drift invalidates a case. Conversion is not drift: it is the
+			// manager-reviewed transformation this migration exists to
+			// perform, and its result is the document the case must now
+			// measure. Re-pin against the staged destination, or every
+			// converted case reports a corpus mismatch forever.
+			staged := filepath.Join(context.stagingRoot, filepath.FromSlash(pin.Path))
+			body, pinErr := readSingleLinkRegularFile(staged)
+			if pinErr != nil {
+				continue
+			}
+			pin.ClaimSha256 = ClaimDigest(string(body), pin.Path)
+			if pin.ContentSha256 != "" {
+				pin.ContentSha256 = "sha256:" + SHA256Bytes(body)
+			}
+		}
+		if archiveNeeded && !contains(eval.ForbiddenTiers, "archive") {
+			tiers, changed := appendUniquePaths(eval.AllowedTiers, "archive")
+			eval.AllowedTiers = tiers
+			retargeted = retargeted || changed
+		}
+		// A target-disjoint attestation is a manager's review of one
+		// query against one target's exact wording. Conversion replaces
+		// that wording, so carrying the attestation onto the new text
+		// would assert a review nobody performed. Drop it and let the
+		// case be re-attested deliberately.
+		if retargeted {
+			eval.VocabularyPolicy = ""
+		}
+	}
+}
+
+func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
+	plan MigrationPlan,
+	projectStagingRoot string,
+) error {
+	context := newMigrationEvalJudgmentContext(plan, projectStagingRoot)
+	if context.empty() {
 		return nil
 	}
 	relativeRoot := ".re-discipline/knowledge/evals"
@@ -3593,12 +3920,6 @@ func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
 	}
 	if !info.IsDir() {
 		return nil
-	}
-	retarget := func(value string) string {
-		if destination, ok := mapping[NormalizeProjectPath(value)]; ok {
-			return destination
-		}
-		return value
 	}
 	return filepath.WalkDir(sourceRoot, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -3618,63 +3939,7 @@ func (engine *MigrationEngine) stageMigratedEvaluationCorpus(
 		if decodeErr := decodeStrictJSON(body, &cases); decodeErr != nil {
 			return fmt.Errorf("decode evaluation corpus %s: %w", current, decodeErr)
 		}
-		for index := range cases {
-			eval := &cases[index]
-			retargeted := false
-			note := func(before, after string) string {
-				if before != after {
-					retargeted = true
-				}
-				return after
-			}
-			for position := range eval.ExpectedPaths {
-				eval.ExpectedPaths[position] = note(
-					eval.ExpectedPaths[position], retarget(eval.ExpectedPaths[position]))
-			}
-			for position := range eval.MinimumEvidencePaths {
-				eval.MinimumEvidencePaths[position] = retarget(eval.MinimumEvidencePaths[position])
-			}
-			for position := range eval.HardNegativePaths {
-				eval.HardNegativePaths[position] = retarget(eval.HardNegativePaths[position])
-			}
-			for position := range eval.ExpectedCitations {
-				eval.ExpectedCitations[position] = retarget(eval.ExpectedCitations[position])
-			}
-			if len(eval.GradedRelevantPaths) > 0 {
-				graded := make(map[string]int, len(eval.GradedRelevantPaths))
-				for path, grade := range eval.GradedRelevantPaths {
-					graded[retarget(path)] = grade
-				}
-				eval.GradedRelevantPaths = graded
-			}
-			for position := range eval.EvidencePins {
-				pin := &eval.EvidencePins[position]
-				pin.Path = note(pin.Path, retarget(pin.Path))
-				// A pin gates on what its document claims, so that ordinary
-				// drift invalidates a case. Conversion is not drift: it is the
-				// manager-reviewed transformation this migration exists to
-				// perform, and its result is the document the case must now
-				// measure. Re-pin against the staged destination, or every
-				// converted case reports a corpus mismatch forever.
-				staged := filepath.Join(projectStagingRoot, filepath.FromSlash(pin.Path))
-				body, pinErr := readSingleLinkRegularFile(staged)
-				if pinErr != nil {
-					continue
-				}
-				pin.ClaimSha256 = ClaimDigest(string(body), pin.Path)
-				if pin.ContentSha256 != "" {
-					pin.ContentSha256 = "sha256:" + SHA256Bytes(body)
-				}
-			}
-			// A target-disjoint attestation is a manager's review of one
-			// query against one target's exact wording. Conversion replaces
-			// that wording, so carrying the attestation onto the new text
-			// would assert a review nobody performed. Drop it and let the
-			// case be re-attested deliberately.
-			if retargeted {
-				eval.VocabularyPolicy = ""
-			}
-		}
+		convertMigratedEvalCases(&context, cases)
 		relative, relErr := filepath.Rel(engine.ProjectRoot, current)
 		if relErr != nil {
 			return relErr
