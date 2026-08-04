@@ -1987,6 +1987,13 @@ def _blinded_case_outcome(
 
     if not agent.strip() or not model.strip():
         _fail("blindedCase.agent", "agent and model identity are required")
+    if int(response["contextTokens"]) > int(request["tokenBudget"]):
+        _fail(
+            "blindedCase.contextTokens",
+            f"{case_id}/{condition} consumed {response['contextTokens']} result "
+            f"tokens over its {request['tokenBudget']} budget; the verifier "
+            "rejects over-budget trials, so fail here with the exact overrun",
+        )
     if not isinstance(answerable, bool):
         _fail("blindedCase.answerable", "must be the canonical case's boolean")
     agent_digest = _go_digest({"agent": agent, "model": model})
