@@ -124,12 +124,12 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		{
 			Path: "active", Tier: "archive", Recursive: true,
 			RequireSegment: "/payload/legacy/truth/",
-			SourceKind:     "raw-report", Enabled: settings.Sources.ReportFallback,
+			SourceKind:     "legacy-truth", Enabled: settings.Sources.ReportFallback,
 		},
 		{
 			Path: "docs/history/campaigns", Tier: "archive", Recursive: true,
 			RequireSegment: "/payload/legacy/truth/",
-			SourceKind:     "raw-report", Enabled: settings.Sources.ReportFallback,
+			SourceKind:     "legacy-truth", Enabled: settings.Sources.ReportFallback,
 		},
 		{Path: ".re-discipline/memory/INDEX.md", Tier: "navigation", Enabled: settings.Sources.SharedMemory},
 		{Path: ".re-discipline/memory/topics", Tier: "memory", Recursive: true, Enabled: settings.Sources.SharedMemory},
@@ -254,6 +254,10 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			}
 			if class.SourceKind == "raw-report" &&
 				!validRawReportSourcePath(boundary, path, cutoverCache) {
+				return nil
+			}
+			if class.SourceKind == "legacy-truth" &&
+				!validLegacyTruthSourcePath(boundary, path, cutoverCache) {
 				return nil
 			}
 			relative, err := boundary.Relative(path)
@@ -418,6 +422,35 @@ func validRawReportSourcePath(boundary Boundary, absolute string, cutoverCache m
 		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
 		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
 		parts[6] == "report.md" {
+		return archiveCutoverPublished(
+			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
+	}
+	return false
+}
+
+// validLegacyTruthSourcePath admits the verbatim pre-migration truth documents
+// that migration preserves under an import run's payload. The raw-report
+// validator is deliberately strict about its two report.md shapes and must
+// stay that way, so preserved legacy truth carries its own source kind and its
+// own shape: runs/<runID>/payload/legacy/truth/<original relative path>. The
+// same campaign-visibility and archive-cutover rules apply as for the run's
+// report, so a closed campaign's provenance is served from exactly one place.
+func validLegacyTruthSourcePath(boundary Boundary, absolute string, cutoverCache map[string]bool) bool {
+	relative, err := boundary.Relative(absolute)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(relative, "/")
+	if len(parts) >= 8 && parts[0] == "active" &&
+		managedSlugRE.MatchString(parts[1]) && parts[2] == "runs" &&
+		runIDRE.MatchString(parts[3]) && parts[4] == "payload" &&
+		parts[5] == "legacy" && parts[6] == "truth" {
+		return activeCampaignSourcesVisible(boundary, parts[1], cutoverCache)
+	}
+	if len(parts) >= 10 && parts[0] == "docs" && parts[1] == "history" &&
+		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
+		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
+		parts[6] == "payload" && parts[7] == "legacy" && parts[8] == "truth" {
 		return archiveCutoverPublished(
 			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
 	}
@@ -631,6 +664,8 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 		header = ExtractFindingPrelude(document)
 	case document.SourceKind == "raw-report":
 		header = ExtractReportPrelude(body, document.Path)
+	case document.SourceKind == "legacy-truth":
+		header = ExtractLegacyTruthPrelude(body, document.Path)
 	default:
 		header = ExtractDocumentPrelude(body, document.Path)
 	}
@@ -665,8 +700,10 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	//
 	// That reasoning holds only for a header the document actually contains.
 	// A raw report's provenance status is synthesized, so its first chunk must
-	// carry the same label as every later chunk.
-	firstChunkNeedsPrelude := strings.HasPrefix(header.Status, "UNNORMALIZED PROVENANCE")
+	// carry the same label as every later chunk. Preserved legacy truth carries
+	// the same synthesized-status property.
+	firstChunkNeedsPrelude := strings.HasPrefix(header.Status, "UNNORMALIZED PROVENANCE") ||
+		strings.HasPrefix(header.Status, "SUPERSEDED BY NORMALIZED FINDING")
 	for index := range chunks {
 		if prelude == "" || (index == 0 && !firstChunkNeedsPrelude) {
 			continue

@@ -240,3 +240,89 @@ func TestArchivedFindingsAndReportsUseTypedHistoryAndArchiveClasses(t *testing.T
 		t.Fatalf("typed archive projection drifted: sourceClass=%q archiveRows=%d", sourceClass, archiveRows)
 	}
 }
+
+func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
+	root := t.TempDir()
+	writeFindingFixtureFile(t, root, ".re-discipline/project-profile.md", []byte("# Fixture\n"))
+	writeFindingFixtureFile(t, root, "docs/INDEX.md", []byte("# Index\n"))
+	const legacyPath = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/truth/binaries/omicron-checksum-table.md"
+	legacyBody := []byte("# Omicron checksum table\n\nClaim: The omicronChecksumTable drives resource verification.\n\nThe omicronChecksumTable is resolved by signature.\n")
+	writeFindingFixtureFile(t, root, legacyPath, legacyBody)
+	// A payload sibling outside legacy/truth must stay unindexed: the class
+	// admits preserved truth documents, not arbitrary run payload.
+	const payloadSibling = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/evidence/omicron-notes.md"
+	writeFindingFixtureFile(t, root, payloadSibling, []byte("# Notes\n"))
+
+	boundary, err := NewBoundary(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := DiscoverSources(boundary, KnowledgeSettings{Sources: SourceSettings{
+		ReportFallback: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	classes := map[string]SourceDocument{}
+	for _, source := range inventory.Documents {
+		classes[source.Path] = source
+	}
+	// The regression shape: RequireSegment admitted the file while the
+	// raw-report kind validator silently rejected it, so nothing was indexed
+	// and no error surfaced. Discovery and kind validation are asserted
+	// together against the exact preserved-legacy-truth shape.
+	source, discovered := classes[legacyPath]
+	if !discovered || source.Tier != "archive" || source.SourceKind != "legacy-truth" {
+		t.Fatalf("preserved legacy truth lost its provenance class: discovered=%v %#v", discovered, source)
+	}
+	if _, indexed := classes[payloadSibling]; indexed {
+		t.Fatalf("non-truth run payload was indexed as provenance")
+	}
+	preludeSeen := false
+	for _, chunk := range inventory.Chunks {
+		if chunk.Path != legacyPath {
+			continue
+		}
+		if !strings.Contains(chunk.Context, "SUPERSEDED BY NORMALIZED FINDING") {
+			t.Fatalf("preserved legacy truth chunk lost its synthesized status: %#v", chunk)
+		}
+		if strings.Contains(chunk.Context, "UNNORMALIZED PROVENANCE") {
+			t.Fatalf("preserved legacy truth was mislabeled as an unnormalized report: %#v", chunk)
+		}
+		preludeSeen = true
+	}
+	if !preludeSeen {
+		t.Fatal("preserved legacy truth produced no chunks")
+	}
+
+	database := filepath.Join(root, "legacy-truth-index.sqlite")
+	db, err := sql.Open("sqlite", database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := createSchema(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	generation := Generation{
+		ID: "generation-legacy-truth", Database: database, CorpusFingerprint: inventory.Fingerprint,
+		Project: "fixture", ParserVersion: ParserVersion, ChunkerVersion: ChunkerVersion,
+		DocumentCount: len(inventory.Documents), ChunkCount: len(inventory.Chunks),
+	}
+	if err := populateDatabase(context.Background(), db, generation, inventory, ModelManifest{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	cards, err := queryRawReportCards(context.Background(), db, "omicronChecksumTable verification", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := false
+	for _, row := range cards {
+		if row.card.Metadata["path"] == legacyPath {
+			served = true
+		}
+	}
+	if !served {
+		t.Fatalf("preserved legacy truth is not reachable through the provenance fallback lane: %#v", cards)
+	}
+}
