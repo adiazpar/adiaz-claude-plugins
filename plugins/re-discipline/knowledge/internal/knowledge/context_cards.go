@@ -379,6 +379,15 @@ func finalizeBoundedFindingResponse(response FindingQueryResponse) (FindingQuery
 			response.Omitted++
 			continue
 		}
+		// With every card omitted, the remaining mass is trace candidates. A
+		// tight budget bounds them the same way: drop the tail row and count
+		// it, so even a minimal budget yields a valid empty response instead
+		// of an error.
+		if len(response.Trace.Candidates) != 0 {
+			response.Trace.Candidates = response.Trace.Candidates[:len(response.Trace.Candidates)-1]
+			response.Trace.CandidateOmitted++
+			continue
+		}
 		return FindingQueryResponse{}, err
 	}
 }
