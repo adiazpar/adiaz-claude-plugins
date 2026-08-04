@@ -887,7 +887,21 @@ def _observed_context(
                 _normalized_digest(value)
                 for value in _strings_for_keys(
                     observation.result,
-                    {"contentHash", "contentSha256", "digest", "sourceHash"},
+                    # Every key either runtime uses to report a content hash.
+                    # The 0.8 exact-read result reports the source file hash
+                    # under "sha256" and a finding card attests its record
+                    # under metadata "recordDigest"; omitting them made the
+                    # judge reject claims that cited the hash exactly as the
+                    # tool reported it, which the respondent protocol
+                    # explicitly instructs.
+                    {
+                        "contentHash",
+                        "contentSha256",
+                        "digest",
+                        "sourceHash",
+                        "sha256",
+                        "recordDigest",
+                    },
                 )
             )
             if normalized is not None
