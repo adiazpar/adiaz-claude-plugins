@@ -564,7 +564,12 @@ func contextProvenanceTiers(tiers []string, scoped bool) []string {
 		if scoped && validOne(tier, "active", "campaign", "draft", "provisional", "intake", "archive", "history") {
 			continue
 		}
-		if validOne(tier, "profile", "navigation", "truth", "history", "backlog", "memory", "asset", "playbook") {
+		// Archive provenance is opt-in: it never enters a default tier set,
+		// but a manager pack that explicitly requests the archive tier must
+		// be able to receive labeled provenance candidates from it. Dropping
+		// an explicitly requested class silently suppressed the only surface
+		// carrying migration-preserved prose.
+		if validOne(tier, "profile", "navigation", "truth", "history", "backlog", "memory", "asset", "playbook", "archive") {
 			result = append(result, tier)
 		}
 	}

@@ -152,6 +152,15 @@ ENFORCEMENT_LEGACY_MATCHES = {
     ("hooks/re-discipline-hook.ps1", "review-ledger-file"),
     ("hooks/re-discipline-hook.sh", "campaign-narrative-file"),
     ("hooks/re-discipline-hook.sh", "review-ledger-file"),
+    # Retrieval discovery indexes the byte-exact legacy documents migration
+    # preserves under an import run's payload -- including each campaign's
+    # narrative file -- as read-only archive provenance, and labels their
+    # passages superseded. Reading preserved provenance is not a legacy
+    # writer; these pairs permit exactly the discovery classes and their
+    # provenance prelude, nothing else.
+    ("knowledge/internal/knowledge/sources.go", "campaign-narrative-file"),
+    ("knowledge/internal/knowledge/sources.go", "master-file"),
+    ("knowledge/internal/knowledge/prelude.go", "master-file"),
 }
 
 TEXT_SUFFIXES = {".md", ".json", ".jsonc", ".toml", ".ps1", ".sh", ".go", ".yaml", ".yml", ".awk"}
