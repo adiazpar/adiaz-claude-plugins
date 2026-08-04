@@ -237,7 +237,27 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 			return FindingQueryResponse{}, err
 		}
 		for _, raw := range rawCards {
-			if !cardsFitFindingBudget(options, cards, []ContextCard{raw.card}, trace, normalizedCandidateCount-normalizedCount) {
+			// Serving a raw card under an active demand tracker appends an
+			// archive-serve event to the mandatory trace. That event must be
+			// part of the budget fit before the card is served and the serve
+			// recorded, or the finalized response can exceed its budget and
+			// fail outright instead of omitting the card. The projection uses
+			// a maximal event so the recorded reality never exceeds the fit.
+			projected := trace
+			if retriever.ArchiveTracker != nil {
+				projected.ArchiveServes = append(
+					append([]ArchiveServeEvent(nil), trace.ArchiveServes...),
+					ArchiveServeEvent{
+						ReportDigest:           raw.digest,
+						SuggestionID:           "normalization-" + strings.Repeat("f", 20),
+						ServeCount:             999999999,
+						NormalizationSuggested: true,
+						RepeatedRequestIgnored: true,
+					})
+				projected.NormalizationSuggestions = append(
+					append([]string(nil), trace.NormalizationSuggestions...), raw.digest)
+			}
+			if !cardsFitFindingBudget(options, cards, []ContextCard{raw.card}, projected, normalizedCandidateCount-normalizedCount) {
 				continue
 			}
 			cards = append(cards, raw.card)
@@ -346,6 +366,17 @@ func finalizeBoundedFindingResponse(response FindingQueryResponse) (FindingQuery
 			if len(response.TierDisagreements) == 0 && response.TierDisagreementsOmitted == 0 {
 				response.TierAuthorityRule = ""
 			}
+			continue
+		}
+		// Card admission is budgeted against the fit-time response model, but
+		// the finalized response also carries status, disagreement accounting,
+		// and post-admission trace fields. When those few envelope tokens tip
+		// a response that fit at admission time over its budget, the bounded
+		// contract is to omit the weakest tail card and say so -- never to
+		// fail the whole query, which aborts any context pack built on it.
+		if len(response.Cards) != 0 {
+			response.Cards = response.Cards[:len(response.Cards)-1]
+			response.Omitted++
 			continue
 		}
 		return FindingQueryResponse{}, err

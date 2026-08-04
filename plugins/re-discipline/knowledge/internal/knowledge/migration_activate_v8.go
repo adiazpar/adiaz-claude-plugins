@@ -3679,7 +3679,7 @@ func (context *migrationEvalJudgmentContext) stagedContainsAny(path string, toke
 func (context *migrationEvalJudgmentContext) bestTruthRow(
 	rows []MigrationTruthPlan,
 	tokens []string,
-) (MigrationTruthPlan, bool) {
+) (MigrationTruthPlan, int) {
 	best, bestScore := MigrationTruthPlan{}, 0
 	for _, row := range rows {
 		title := strings.ToLower(row.Title)
@@ -3700,7 +3700,32 @@ func (context *migrationEvalJudgmentContext) bestTruthRow(
 			best, bestScore = row, score
 		}
 	}
-	return best, bestScore > 0
+	return best, bestScore
+}
+
+// preservedTruthScore counts how much of a query's vocabulary survives only
+// in the preserved pre-conversion prose. Unweighted single counts keep the
+// finding-first bias: a claim or title match on a finding outweighs the same
+// token appearing in preserved body prose.
+func (context *migrationEvalJudgmentContext) preservedTruthScore(
+	sourcePath string,
+	tokens []string,
+) int {
+	preserved := context.preservedTruth[sourcePath]
+	if preserved == "" {
+		return 0
+	}
+	body := context.staged(preserved)
+	if body == "" {
+		return 0
+	}
+	score := 0
+	for _, token := range tokens {
+		if strings.Contains(body, token) {
+			score++
+		}
+	}
+	return score
 }
 
 // expandExpected converts one expected-path judgment value. Any-of judgment
@@ -3718,16 +3743,14 @@ func (context *migrationEvalJudgmentContext) expandExpected(
 		if manifest, split := context.truthManifest[normalized]; split {
 			paths = append(paths, manifest)
 		}
-		vocabularyReached := false
+		_, rowScore := context.bestTruthRow(rows, tokens)
 		for _, row := range rows {
 			paths = append(paths, row.Destination)
-			if context.stagedContainsAny(row.Destination, tokens) {
-				vocabularyReached = true
-			}
 		}
-		if !vocabularyReached {
-			// The query's vocabulary survives only in the preserved prose the
-			// conversion demoted to provenance; the judgment follows it there.
+		if context.preservedTruthScore(normalized, tokens) > rowScore {
+			// More of the query's vocabulary survives in the preserved prose
+			// the conversion demoted to provenance than in any finding; the
+			// judgment follows the content there.
 			paths = append(paths, context.preservedTruth[normalized])
 			archive = true
 		}
@@ -3750,7 +3773,8 @@ func (context *migrationEvalJudgmentContext) selectEvidence(
 		return preserved, true
 	}
 	if rows, ok := context.truthRows[normalized]; ok {
-		if row, reached := context.bestTruthRow(rows, tokens); reached {
+		row, rowScore := context.bestTruthRow(rows, tokens)
+		if rowScore > 0 && context.preservedTruthScore(normalized, tokens) <= rowScore {
 			return row.Destination, false
 		}
 		return context.preservedTruth[normalized], true
