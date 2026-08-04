@@ -655,7 +655,8 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 	gatePassed := flags.Bool("gate-passed", false, "record the named gate as passed")
 	artifact := flags.String("artifact", "", "project-relative gate artifact; retrieval and host gates require strict gate-specific evidence")
 	artifactDigest := flags.String("artifact-digest", "", "exact sha256 digest rederived from the gate artifact bytes")
-	buildGateArtifact := flags.String("build-gate-artifact", "", "assemble the typed gate artifact for the named gate from exact evidence files (retrieval-context only)")
+	buildGateArtifact := flags.String("build-gate-artifact", "", "assemble the typed gate artifact for the named external gate from exact evidence files")
+	hostConformanceEvidence := flags.String("host-conformance-evidence", "", "project-relative sealed host conformance evidence")
 	benchmarkEvidence := flags.String("benchmark-evidence", "", "project-relative final full project-benchmark-v1 report")
 	calibrationEvidence := flags.String("calibration-evidence", "", "project-relative final non-activating calibration report")
 	candidateEvidence := flags.String("candidate-profile-evidence", "", "project-relative non-activated calibration candidate profile")
@@ -819,22 +820,31 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 		return printJSON(value)
 	}
 	if *buildGateArtifact != "" {
-		if *buildGateArtifact != "retrieval-context" {
-			return fmt.Errorf("--build-gate-artifact supports retrieval-context only")
-		}
-		for name, value := range map[string]string{
-			"--benchmark-evidence":          *benchmarkEvidence,
-			"--calibration-evidence":        *calibrationEvidence,
-			"--candidate-profile-evidence":  *candidateEvidence,
-			"--blinded-evaluation-evidence": *blindedEvidence,
-			"--artifact-output":             *artifactOutput,
-		} {
-			if strings.TrimSpace(value) == "" {
-				return fmt.Errorf("--build-gate-artifact requires %s", name)
+		var value knowledge.MigrationGateArtifact
+		var err error
+		switch *buildGateArtifact {
+		case "retrieval-context":
+			for name, flagValue := range map[string]string{
+				"--benchmark-evidence":          *benchmarkEvidence,
+				"--calibration-evidence":        *calibrationEvidence,
+				"--candidate-profile-evidence":  *candidateEvidence,
+				"--blinded-evaluation-evidence": *blindedEvidence,
+				"--artifact-output":             *artifactOutput,
+			} {
+				if strings.TrimSpace(flagValue) == "" {
+					return fmt.Errorf("--build-gate-artifact retrieval-context requires %s", name)
+				}
 			}
+			value, err = engine.BuildRetrievalContextGateArtifact(
+				*benchmarkEvidence, *calibrationEvidence, *candidateEvidence, *blindedEvidence)
+		case "host-parity":
+			if strings.TrimSpace(*hostConformanceEvidence) == "" || strings.TrimSpace(*artifactOutput) == "" {
+				return fmt.Errorf("--build-gate-artifact host-parity requires --host-conformance-evidence and --artifact-output")
+			}
+			value, err = engine.BuildHostParityGateArtifact(*hostConformanceEvidence)
+		default:
+			return fmt.Errorf("--build-gate-artifact supports retrieval-context and host-parity")
 		}
-		value, err := engine.BuildRetrievalContextGateArtifact(
-			*benchmarkEvidence, *calibrationEvidence, *candidateEvidence, *blindedEvidence)
 		if err != nil {
 			return err
 		}
@@ -857,7 +867,7 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 		}
 		return printJSON(map[string]any{
 			"schemaVersion":  1,
-			"gate":           "retrieval-context",
+			"gate":           *buildGateArtifact,
 			"artifact":       *artifactOutput,
 			"artifactDigest": "sha256:" + knowledge.SHA256Bytes(body),
 			"resultDigest":   value.ResultDigest,
