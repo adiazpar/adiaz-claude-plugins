@@ -3785,6 +3785,31 @@ func (context *migrationEvalJudgmentContext) selectEvidence(
 	return value, false
 }
 
+// selectPinTarget converts one evidence-pin path. The pin follows the live
+// claim carrier: the vocabulary-best split finding for a converted truth
+// document, or the preserved masterfile for a campaign narrative whose
+// canonical successor is structured JSON outside the pinnable corpus.
+func (context *migrationEvalJudgmentContext) selectPinTarget(
+	value string,
+	tokens []string,
+) string {
+	normalized := NormalizeProjectPath(value)
+	if preserved, ok := context.masterfile[normalized]; ok {
+		return preserved
+	}
+	if rows, ok := context.truthRows[normalized]; ok {
+		row, score := context.bestTruthRow(rows, tokens)
+		if score > 0 {
+			return row.Destination
+		}
+		return rows[0].Destination
+	}
+	if destination, ok := context.mapping[normalized]; ok {
+		return destination
+	}
+	return value
+}
+
 // expandHardNegative converts one hard-negative judgment value. A split
 // source's pollution signal applies to every one of its rows.
 func (context *migrationEvalJudgmentContext) expandHardNegative(value string) []string {
@@ -3962,9 +3987,11 @@ func convertMigratedEvalCases(
 		}
 		for position := range eval.EvidencePins {
 			pin := &eval.EvidencePins[position]
-			path, archive := context.selectEvidence(pin.Path, tokens)
-			archiveNeeded = archiveNeeded || archive
-			pin.Path = note(pin.Path, path)
+			// A pin tracks claim drift on a dependency, so it must follow the
+			// live claim carrier -- the finding -- never the frozen preserved
+			// bytes, which can never drift and would make the pin vacuous.
+			// Pins are not retrieval judgments and never widen allowed tiers.
+			pin.Path = note(pin.Path, context.selectPinTarget(pin.Path, tokens))
 			// A pin gates on what its document claims, so that ordinary
 			// drift invalidates a case. Conversion is not drift: it is the
 			// manager-reviewed transformation this migration exists to
