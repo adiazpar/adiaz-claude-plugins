@@ -710,6 +710,14 @@ def _parse_claude_transcript(stdout: bytes) -> AgentTranscript:
                 }
     observations = []
     for call_id, (name, arguments) in calls.items():
+        if name == "StructuredOutput":
+            # The Claude CLI delivers --json-schema output through a
+            # harness-side StructuredOutput pseudo-tool. It is the final
+            # answer channel, not an agent capability, and the result event
+            # carries the same object as structured_output.
+            if final is None and isinstance(arguments, dict):
+                final = arguments
+            continue
         if call_id not in results:
             _fail("claude.transcript", f"tool call {call_id} has no result")
         result, error = results[call_id]
