@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -203,10 +204,26 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 			additions = append(additions, findingContextCard(candidate))
 		}
 		index = end
-		if len(cards)+len(additions) > options.Limit ||
-			!cardsFitFindingBudget(options, cards, additions, trace, normalizedCandidateCount-(len(cards)+len(additions))) {
+		if len(cards)+len(additions) > options.Limit {
 			continue
 		}
+		omitted := normalizedCandidateCount - (len(cards) + len(additions))
+		fittedTrace, fits := fitCardsSheddingTrace(options, cards, additions, trace, omitted)
+		if !fits {
+			// The full card still exceeds the budget with every sheddable
+			// trace row gone. Before omitting the finding, shed the card's own
+			// re-derivable weight (duplicated split text, dependency-hop alert
+			// rows) and try once more.
+			compact, changed := compactFindingCards(additions)
+			if changed {
+				fittedTrace, fits = fitCardsSheddingTrace(options, cards, compact, trace, omitted)
+				additions = compact
+			}
+		}
+		if !fits {
+			continue
+		}
+		trace = fittedTrace
 		cards = append(cards, additions...)
 	}
 	normalizedCount := len(cards)
@@ -372,20 +389,22 @@ func finalizeBoundedFindingResponse(response FindingQueryResponse) (FindingQuery
 		// the finalized response also carries status, disagreement accounting,
 		// and post-admission trace fields. When those few envelope tokens tip
 		// a response that fit at admission time over its budget, the bounded
-		// contract is to omit the weakest tail card and say so -- never to
-		// fail the whole query, which aborts any context pack built on it.
-		if len(response.Cards) != 0 {
-			response.Cards = response.Cards[:len(response.Cards)-1]
-			response.Omitted++
-			continue
-		}
-		// With every card omitted, the remaining mass is trace candidates. A
-		// tight budget bounds them the same way: drop the tail row and count
-		// it, so even a minimal budget yields a valid empty response instead
-		// of an error.
+		// contract mirrors admission: content outranks telemetry, so trace
+		// candidate rows (re-derivable through deterministic replay) are shed
+		// before any served card -- and never fail the whole query, which
+		// aborts any context pack built on it.
 		if len(response.Trace.Candidates) != 0 {
 			response.Trace.Candidates = response.Trace.Candidates[:len(response.Trace.Candidates)-1]
 			response.Trace.CandidateOmitted++
+			continue
+		}
+		if compact, changed := compactFindingCards(response.Cards); changed {
+			response.Cards = compact
+			continue
+		}
+		if len(response.Cards) != 0 {
+			response.Cards = response.Cards[:len(response.Cards)-1]
+			response.Omitted++
 			continue
 		}
 		return FindingQueryResponse{}, err
@@ -875,6 +894,116 @@ func findingContextCard(candidate *findingCandidate) ContextCard {
 			"recordDigest": candidate.record.Digest, "projection": candidate.record.Projection,
 		},
 	}
+}
+
+// fitCardsSheddingTrace admits a ranked card group under the caller budget,
+// shedding trace candidate tail rows when the budget cannot carry both.
+// Content outranks telemetry: the trace rows are re-derivable diagnostics
+// (deterministic replay reproduces them) while the cards are the retrieval
+// product itself. Without this, a tight per-call budget returns telemetry
+// about the findings it refused to serve.
+func fitCardsSheddingTrace(
+	options FindingQueryOptions, existing, additions []ContextCard,
+	trace FindingQueryTrace, omitted int,
+) (FindingQueryTrace, bool) {
+	if cardsFitFindingBudget(options, existing, additions, trace, omitted) {
+		return trace, true
+	}
+	trimmed := trace
+	trimmed.Candidates = append([]FindingCandidateTrace(nil), trace.Candidates...)
+	for len(trimmed.Candidates) > 0 {
+		trimmed.Candidates = trimmed.Candidates[:len(trimmed.Candidates)-1]
+		trimmed.CandidateOmitted++
+		if cardsFitFindingBudget(options, existing, additions, trimmed, omitted) {
+			return trimmed, true
+		}
+	}
+	return trace, false
+}
+
+// Dependency-hop alert prefixes are bounded provenance detail: each names a
+// specific neighboring finding that the card's expansion handle re-derives
+// exactly. Conflict-class alerts (contradicts, incoming-contradicts,
+// superseded-by, supersedes) are load-bearing for the response status and are
+// never shed.
+var sheddableAlertPrefixes = []string{
+	"supports:", "incoming-supports:", "depends-on:", "incoming-depends-on:",
+	"duplicates:", "incoming-duplicates:", "answers:", "incoming-answers:",
+	"stale-dependent:", "stale-path:", "spawned:",
+}
+
+// compactFindingCards sheds re-derivable weight from finding cards that
+// cannot fit the caller's budget in full form. The claim, identity, grades,
+// handles, and conflict-class alerts always survive; everything shed is
+// recoverable through the card's expansion handle, and the shed alert count
+// is recorded so the caller knows the card is abridged.
+func compactFindingCards(additions []ContextCard) ([]ContextCard, bool) {
+	changed := false
+	compact := make([]ContextCard, 0, len(additions))
+	for _, card := range additions {
+		if card.CardType != "finding" {
+			compact = append(compact, card)
+			continue
+		}
+		if sourceText, ok := card.Scope["sourceText"].(string); ok && sourceText == card.Claim {
+			scope := make(map[string]any, len(card.Scope))
+			for key, value := range card.Scope {
+				if key != "sourceText" {
+					scope[key] = value
+				}
+			}
+			card.Scope = scope
+			changed = true
+		}
+		kept := make([]string, 0, len(card.RelationAlerts))
+		staleShed := false
+		shed := 0
+		for _, alert := range card.RelationAlerts {
+			sheddable := false
+			for _, prefix := range sheddableAlertPrefixes {
+				if strings.HasPrefix(alert, prefix) {
+					sheddable = true
+					break
+				}
+			}
+			if !sheddable {
+				kept = append(kept, alert)
+				continue
+			}
+			if strings.HasPrefix(alert, "stale-dependent:") || strings.HasPrefix(alert, "stale-path:") {
+				staleShed = true
+			}
+			shed++
+		}
+		if shed > 0 {
+			if staleShed && !containsAlert(kept, "stale") {
+				kept = append(kept, "stale")
+				sort.Strings(kept)
+			}
+			card.RelationAlerts = kept
+			metadata := make(map[string]string, len(card.Metadata)+1)
+			for key, value := range card.Metadata {
+				metadata[key] = value
+			}
+			metadata["relationAlertsOmitted"] = strconv.Itoa(shed)
+			card.Metadata = metadata
+			changed = true
+		}
+		compact = append(compact, card)
+	}
+	if !changed {
+		return additions, false
+	}
+	return compact, true
+}
+
+func containsAlert(alerts []string, value string) bool {
+	for _, alert := range alerts {
+		if alert == value {
+			return true
+		}
+	}
+	return false
 }
 
 func cardsFitFindingBudget(options FindingQueryOptions, existing, additions []ContextCard, trace FindingQueryTrace, omitted int) bool {
