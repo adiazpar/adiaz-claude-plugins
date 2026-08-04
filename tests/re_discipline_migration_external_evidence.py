@@ -69,7 +69,7 @@ CURRENT_ASSETS = f"{CURRENT_PLUGIN}/knowledge"
 EVAL_ROOT = ".re-discipline/knowledge/evals"
 PRIMARY_PROFILE = "hybrid-no-rerank-v1"
 MAX_CAPTURE_BYTES = 16 * 1024 * 1024
-MAX_QUOTE_BYTES = 2048
+MAX_QUOTE_BYTES = 4096
 FORMAL_MIN_TIMEOUT = 60
 
 MCP_SERVER_NAME = "re-discipline-knowledge"
@@ -206,6 +206,24 @@ def _utc_now() -> str:
 
 def _sha256(body: bytes) -> str:
     return "sha256:" + hashlib.sha256(body).hexdigest()
+
+
+def _normalized_digest(value: Any) -> str | None:
+    """Normalize a tool-reported hash to the canonical sha256:hex form.
+
+    The last released 0.7 runtime reports bare lowercase hex digests while
+    0.8 reports the prefixed form; both arms' captured hashes are compared in
+    one canonical vocabulary.
+    """
+
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip().lower()
+    if candidate.startswith("sha256:"):
+        candidate = candidate[len("sha256:"):]
+    if re.fullmatch(r"[0-9a-f]{64}", candidate):
+        return "sha256:" + candidate
+    return None
 
 
 def _strict_json(body: bytes, field: str) -> Any:
@@ -823,15 +841,20 @@ def _observed_context(
         if name not in {retrieval_tool, "read"}:
             _fail("agent.tools", f"forbidden tool {observation.name!r}")
         if observation.error:
-            _fail("agent.tools", f"tool {observation.name!r} failed")
+            # A failed call contributes nothing to observed context. Agents
+            # legitimately recover from argument-schema rejections by reading
+            # the advertised schema and retrying; only successful calls carry
+            # evidence.
+            continue
         if name == retrieval_tool:
             query_count += 1
             cards.extend(_dicts_under_key(observation.result, "cards"))
         else:
             read_count += 1
-            value = observation.arguments.get("value")
-            if isinstance(value, str) and value:
-                expansions.add(value)
+            for key in ("value", "path", "chunkId", "uri"):
+                value = observation.arguments.get(key)
+                if isinstance(value, str) and value:
+                    expansions.add(value)
         paths.update(
             filter(
                 None,
@@ -847,15 +870,19 @@ def _observed_context(
         handles.update(
             _strings_for_keys(
                 observation.result,
-                {"handle", "sourceHandle", "findingHandle", "evidenceHandle"},
+                {"handle", "sourceHandle", "findingHandle", "evidenceHandle", "uri"},
             )
         )
         content_hashes.update(
-            value
-            for value in _strings_for_keys(
-                observation.result, {"contentHash", "contentSha256", "digest"}
+            normalized
+            for normalized in (
+                _normalized_digest(value)
+                for value in _strings_for_keys(
+                    observation.result,
+                    {"contentHash", "contentSha256", "digest", "sourceHash"},
+                )
             )
-            if DIGEST_RE.fullmatch(value)
+            if normalized is not None
         )
         for row in _walk(observation.result):
             if isinstance(row, dict):
@@ -870,7 +897,7 @@ def _observed_context(
                         break
         texts.extend(_result_texts(observation.result))
     if query_count < 1:
-        _fail("agent.tools", "a blinded trial must execute query")
+        _fail("agent.tools", "a blinded trial must execute a successful retrieval call")
     card_handles = {
         value
         for card in cards
@@ -932,8 +959,7 @@ def _validate_agent_final(value: Mapping[str, Any]) -> tuple[str, list[dict[str,
             or not isinstance(end, int)
             or start < 0
             or end <= start
-            or not isinstance(content_hash, str)
-            or not DIGEST_RE.fullmatch(content_hash)
+            or _normalized_digest(content_hash) is None
             or not isinstance(source_handle, str)
             or not source_handle
             or not isinstance(evidence_handles, list)
@@ -941,7 +967,9 @@ def _validate_agent_final(value: Mapping[str, Any]) -> tuple[str, list[dict[str,
             or any(not isinstance(item, str) or not item for item in evidence_handles)
         ):
             _fail(f"agent.final.claims[{index}]", "is malformed or unbounded")
-        result.append(dict(claim))
+        normalized = dict(claim)
+        normalized["contentHash"] = _normalized_digest(content_hash)
+        result.append(normalized)
     if decision == "abstain" and result:
         _fail("agent.final", "an abstention may not contain claims")
     if decision == "answer" and not result:
@@ -980,16 +1008,15 @@ def _claim_supported(
     if path not in observed["paths"]:
         return False
     body = _source_bytes(workspace, path)
-    if body is not None:
-        return (
-            _sha256(body) == content_hash
-            and end <= len(body)
-            and body[start:end] == quote
-        )
-    # Migrated finding cards may retain an exact source span even when the
-    # original physical destination changed.  In that case require the hash to
-    # have appeared in the real tool result and the exact byte span to appear
-    # in retained result content.
+    if body is not None and _sha256(body) == content_hash and end <= len(body) and body[start:end] == quote:
+        return True
+    # Tool-attested span: the hash must have appeared in a real captured tool
+    # result and the exact byte span must appear in retained result content.
+    # This grounds a claim in what the runtime actually served when the agent
+    # cannot address the physical file - the 0.7 runtime reports line-granular
+    # chunks without full-source byte offsets, and migrated finding cards may
+    # retain an exact source span even when the physical destination changed.
+    # Both arms are scored by the same rule.
     if content_hash not in observed["contentHashes"]:
         return False
     return any(end <= len(body) and body[start:end] == quote for body in observed["texts"])
@@ -1534,10 +1561,16 @@ def _agent_prompt(request: Mapping[str, Any], condition: str) -> str:
         "filesystem, web, memory, subagents, or write tools. Do not look for evaluation "
         "files or infer hidden expected paths. Query with the exact question and role "
         "constraints, then expand only exact returned handles needed to answer. "
-        "For every non-abstention claim, copy one exact contiguous UTF-8 source span "
-        "from an actual read result and return its canonical project path, half-open "
-        "byte offsets, full-source SHA-256, returned source/finding handle, and every "
-        "evidence handle supporting it. Do not paraphrase inside claims. If the allowed "
+        "For every non-abstention claim, copy one exact contiguous UTF-8 span verbatim "
+        "from an actual tool result and return: the canonical project path of its "
+        "source; the content hash exactly as the tool reported it for that source or "
+        "span; half-open byte offsets locating the quote - copy the tool-reported "
+        "startByte/endByte when you quote that entire returned span, otherwise give "
+        "offsets of the quote within the exact returned content (0 and the quote's "
+        "byte length when you quote a full returned text); the returned source or "
+        "finding handle; and every evidence handle supporting it. Prefer quoting an "
+        "entire small returned span over computing offsets yourself, and keep each "
+        "quote under 4000 bytes. Do not paraphrase inside claims. If the allowed "
         "corpus does not support an answer, return decision=abstain and claims=[]. "
         "Declining is a correct, expected outcome for a question the corpus cannot "
         "support: an abstention with no claims and no citations scores as correct, and "
