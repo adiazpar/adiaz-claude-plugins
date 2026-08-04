@@ -108,15 +108,20 @@ func StaleFindingDependents(findings map[string]FindingRecord) map[string][]stri
 	return result
 }
 
+// findingStalenessRelationAlerts reports card-sized staleness: one
+// stale-dependent alert per direct dependency hop. A card is a bounded
+// retrieval surface, and the complete transitive path inventory grows with
+// the corpus's dependency graph, not with the card - on a densely linked
+// corpus it dwarfed the claim itself and priced finding cards out of every
+// realistic token budget. The full auditable paths remain available from
+// FindingStalenessPaths and the dedicated stale-dependents state view.
 func findingStalenessRelationAlerts(paths map[string][]FindingStalenessPath, dependentID string) []string {
 	alerts := []string{}
 	for _, reason := range paths[dependentID] {
 		if len(reason.Path) < 2 {
 			continue
 		}
-		alerts = append(alerts,
-			"stale-dependent:"+reason.Path[1],
-			"stale-path:"+strings.Join(reason.Path, ">"))
+		alerts = append(alerts, "stale-dependent:"+reason.Path[1])
 	}
 	return SortedUnique(alerts)
 }

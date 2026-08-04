@@ -78,13 +78,20 @@ func TestFindingRetrievalSurfacesTypedStaleDependentAlert(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(visible) != 3 || !containsString(dependent.relationAlerts, "stale-dependent:F-0002") ||
-		!containsString(dependent.relationAlerts, "stale-path:F-0001>F-0002>F-0003") ||
 		!containsString(dependency.relationAlerts, "stale-dependent:F-0003") {
 		t.Fatalf("retrieval omitted stale dependent signal: visible=%d alerts=%v", len(visible), dependent.relationAlerts)
 	}
+	// Cards carry the bounded direct-hop signal only. The full transitive
+	// path inventory scales with the corpus dependency graph and priced
+	// finding cards out of every realistic budget; it stays available from
+	// FindingStalenessPaths and the stale-dependents state view.
+	for _, alert := range dependent.relationAlerts {
+		if strings.HasPrefix(alert, "stale-path:") {
+			t.Fatalf("card alerts must stay bounded to direct hops: %v", dependent.relationAlerts)
+		}
+	}
 	card := findingContextCard(dependent)
-	if err := ValidateContextCard(card); err != nil || !containsString(card.RelationAlerts, "stale-dependent:F-0002") ||
-		!containsString(card.RelationAlerts, "stale-path:F-0001>F-0002>F-0003") {
+	if err := ValidateContextCard(card); err != nil || !containsString(card.RelationAlerts, "stale-dependent:F-0002") {
 		t.Fatalf("typed stale alert was not card-safe: card=%+v err=%v", card, err)
 	}
 }
