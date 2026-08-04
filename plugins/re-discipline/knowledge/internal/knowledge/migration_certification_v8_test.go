@@ -1041,6 +1041,46 @@ func TestMigrationHostParityCoversConfiguredHostsAndCodexIsOptional(t *testing.T
 	}
 }
 
+// TestBlindedContextToleranceBounds pins the context-token non-inferiority
+// band on both sides of each component: the absolute floor of one sixteenth
+// of the case budget, and the relative component of one tenth of the legacy
+// measurement. One token past the tolerance must fail the pair.
+func TestBlindedContextToleranceBounds(t *testing.T) {
+	outcome := func(condition string, tokens, budget int) MigrationBlindedAgentCaseOutcome {
+		return MigrationBlindedAgentCaseOutcome{
+			CaseID: "case-1", Condition: condition,
+			Request:  MigrationBlindedAgentRequest{CaseID: "case-1", TokenBudget: budget},
+			Response: MigrationBlindedAgentResponse{Decision: "abstain", ContextTokens: tokens},
+			FactualAccuracy: 1, DecisionAccuracy: 1, EvidenceTracePassed: true,
+		}
+	}
+	cases := []struct {
+		name             string
+		legacy, compiled int
+		budget           int
+		want             bool
+	}{
+		// budget 2048: floor 128 dominates the relative 100.
+		{"at the absolute floor", 1000, 1128, 2048, true},
+		{"one past the absolute floor", 1000, 1129, 2048, false},
+		// budget 4096: relative 300 dominates the floor 256.
+		{"at the relative component", 3000, 3300, 4096, true},
+		{"one past the relative component", 3000, 3301, 4096, false},
+		// budget 512: floor 32 dominates the relative 10.
+		{"at the small-budget floor", 100, 132, 512, true},
+		{"one past the small-budget floor", 100, 133, 512, false},
+	}
+	for _, testCase := range cases {
+		legacy := outcome("legacy", testCase.legacy, testCase.budget)
+		compiled := outcome("compiled", testCase.compiled, testCase.budget)
+		if got := migrationBlindedCaseNonInferior(legacy, compiled); got != testCase.want {
+			t.Errorf("%s: legacy %d compiled %d budget %d: non-inferior = %v, want %v",
+				testCase.name, testCase.legacy, testCase.compiled, testCase.budget,
+				got, testCase.want)
+		}
+	}
+}
+
 func TestBlindedEvaluationPassRestsOnPairedNonInferiority(t *testing.T) {
 	trial := func(condition string, factual float64) MigrationBlindedAgentCaseOutcome {
 		outcome := MigrationBlindedAgentCaseOutcome{

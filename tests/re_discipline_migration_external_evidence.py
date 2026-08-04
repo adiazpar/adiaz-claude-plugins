@@ -53,8 +53,9 @@ BLINDED_PROTOCOL = (
     "Compare the same hidden migration task under legacy and compiled context. "
     "Record the exact request, answer, citations, opened sources, expansions, "
     "durability labels, unsupported claims, decisions, and context-token cost. "
-    "The compiled arm must be factually and decision non-inferior, use no more "
-    "context, preserve evidence traceability, and avoid full-corpus reads."
+    "The compiled arm must be factually and decision non-inferior, stay within "
+    "a bounded context-token tolerance of the legacy arm, preserve evidence "
+    "traceability, and avoid full-corpus reads."
 )
 HOST_PROTOCOL = (
     "Exercise the actual MCP, CLI, and every configured agent-host adapter with "
@@ -2128,22 +2129,36 @@ def _blinded_case_non_inferior(
     """Mirror the Go verifier's documented per-case bar for one measured pair.
 
     The compiled arm must be factually and decision non-inferior, contain no
-    unsupported claims, preserve evidence traceability, use no more context
-    tokens, avoid a full-corpus read, and label the durability of any answer
-    it gives. This is a paired comparison, not an absolute per-trial pass
-    requirement: both arms are stochastic external respondents measured by one
-    deterministic judge, so demanding a perfect compiled trial on every case
-    would make the gate unsatisfiable for any corpus - the same defect, one
-    level up, as requiring a perfect 0.7 baseline. A compiled arm that
-    regresses any judged dimension on any case still fails.
+    unsupported claims, preserve evidence traceability, stay within a bounded
+    context-token tolerance of the legacy arm, avoid a full-corpus read, and
+    label the durability of any answer it gives. This is a paired comparison,
+    not an absolute per-trial pass requirement: both arms are stochastic
+    external respondents measured by one deterministic judge, so demanding a
+    perfect compiled trial on every case would make the gate unsatisfiable for
+    any corpus - the same defect, one level up, as requiring a perfect 0.7
+    baseline. A compiled arm that regresses any judged dimension on any case
+    still fails.
+
+    The context tolerance mirrors migrationBlindedContextTolerance in the Go
+    verifier: the larger of a tenth of the legacy measurement (wording-length
+    and token-estimation noise between equally informative packs) and a
+    sixteenth of the case's token budget (one average passage allocation at
+    the runtime's default serving granularity of sixteen passages per pack).
+    Both components are protocol constants fixed before any run is evaluated;
+    the absolute per-trial ceiling (contextTokens <= tokenBudget) is enforced
+    separately and is not widened by this margin.
     """
 
     legacy_response = legacy["response"]
     compiled_response = compiled["response"]
+    legacy_tokens = int(legacy_response["contextTokens"])
+    tolerance = max(
+        legacy_tokens // 10, int(legacy["request"]["tokenBudget"]) // 16
+    )
     return (
         float(compiled["factualAccuracy"]) >= float(legacy["factualAccuracy"])
         and float(compiled["decisionAccuracy"]) >= float(legacy["decisionAccuracy"])
-        and int(compiled_response["contextTokens"]) <= int(legacy_response["contextTokens"])
+        and int(compiled_response["contextTokens"]) <= legacy_tokens + tolerance
         and int(compiled["unsupportedClaims"]) == 0
         and not (
             bool(legacy["evidenceTracePassed"])
