@@ -492,8 +492,11 @@ func migrationStrictRetrievalEvidence(
 	return evidence
 }
 
-func migrationStrictHostEvidence(t *testing.T, state MigrationState) MigrationHostConformanceEvidence {
+func migrationStrictHostEvidence(t *testing.T, state MigrationState, hosts ...string) MigrationHostConformanceEvidence {
 	t.Helper()
+	if len(hosts) == 0 {
+		hosts = []string{"mcp", "cli", "claude", "codex"}
+	}
 	discovery := mustJSONRaw(toolDefinitions())
 	semantic := map[string]json.RawMessage{
 		"discovery":        discovery,
@@ -510,7 +513,7 @@ func migrationStrictHostEvidence(t *testing.T, state MigrationState) MigrationHo
 		"codex":  {"discovery", "status", "retrieval", "expansion", "role-boundary", "bounded-recovery", "local-fallback"},
 	}
 	trials := []MigrationHostTrial{}
-	for _, host := range []string{"mcp", "cli", "claude", "codex"} {
+	for _, host := range hosts {
 		for _, scenario := range required[host] {
 			semanticResult := semantic[scenario]
 			if scenario == "local-fallback" {
@@ -959,5 +962,81 @@ func TestMigrationHostConformanceAcceptsCompleteRealSchemaMatrix(t *testing.T) {
 	sort.Strings(seen)
 	if len(seen) != 25 {
 		t.Fatalf("host matrix has %d trials, want 25", len(seen))
+	}
+}
+
+func TestMigrationHostParityCoversConfiguredHostsAndCodexIsOptional(t *testing.T) {
+	state := MigrationState{TransactionID: "M-1234567890ABCDEF1234", PlanDigest: stateTestDigest("a"), State: "physically-reorganized"}
+	engine := &MigrationEngine{ProjectRoot: t.TempDir()}
+
+	// A project without the Codex host proves the complete matrix over the
+	// mandatory surfaces: MCP, CLI, and Claude Code.
+	evidence := migrationStrictHostEvidence(t, state, "mcp", "cli", "claude")
+	if len(evidence.Trials) != 18 {
+		t.Fatalf("mandatory host matrix has %d trials, want 18", len(evidence.Trials))
+	}
+	artifact, err := BuildMigrationGateArtifact(state.TransactionID, state.PlanDigest,
+		"host-parity", nil, &evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.validateGateSpecificMigrationEvidence(state, artifact); err != nil {
+		t.Fatalf("complete mandatory-host matrix was rejected: %v", err)
+	}
+	if _, ok := artifact.Fingerprints["codex-host"]; ok {
+		t.Fatalf("an absent optional host must not carry a fingerprint: %+v", artifact.Fingerprints)
+	}
+	for _, name := range []string{"mcp", "cli", "claude-host"} {
+		if !digestRE.MatchString(artifact.Fingerprints[name]) {
+			t.Fatalf("mandatory host fingerprint %s missing: %+v", name, artifact.Fingerprints)
+		}
+	}
+
+	// A mandatory host can never be dropped.
+	for _, missing := range []string{"mcp", "cli", "claude"} {
+		kept := []string{}
+		for _, host := range []string{"mcp", "cli", "claude"} {
+			if host != missing {
+				kept = append(kept, host)
+			}
+		}
+		partial := migrationStrictHostEvidence(t, state, kept...)
+		if _, _, err := validateMigrationHostConformanceEvidence(state, state.PlanDigest, partial); err == nil {
+			t.Fatalf("host evidence without mandatory host %s was accepted", missing)
+		}
+	}
+
+	// When Codex trials are present, the complete Codex scenario matrix is
+	// required: partial optional-host coverage is rejected.
+	full := migrationStrictHostEvidence(t, state, "mcp", "cli", "claude", "codex")
+	trimmed := []MigrationHostTrial{}
+	for _, trial := range full.Trials {
+		if trial.Host == "codex" && trial.Scenario == "local-fallback" {
+			continue
+		}
+		trimmed = append(trimmed, trial)
+	}
+	partialCodex := MigrationHostConformanceEvidence{
+		TransactionID: state.TransactionID, PlanDigest: state.PlanDigest, Trials: trimmed,
+	}
+	if err := SealMigrationHostConformanceEvidence(&partialCodex); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := validateMigrationHostConformanceEvidence(state, state.PlanDigest, partialCodex); err == nil ||
+		!strings.Contains(err.Error(), "codex/local-fallback") {
+		t.Fatalf("partial optional-host coverage was accepted: %v", err)
+	}
+
+	// A fully captured Codex host still validates and carries its fingerprint.
+	fullArtifact, err := BuildMigrationGateArtifact(state.TransactionID, state.PlanDigest,
+		"host-parity", nil, &full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.validateGateSpecificMigrationEvidence(state, fullArtifact); err != nil {
+		t.Fatalf("complete four-host matrix was rejected: %v", err)
+	}
+	if !digestRE.MatchString(fullArtifact.Fingerprints["codex-host"]) {
+		t.Fatalf("captured codex host lost its fingerprint: %+v", fullArtifact.Fingerprints)
 	}
 }

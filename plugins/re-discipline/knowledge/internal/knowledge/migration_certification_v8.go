@@ -27,8 +27,37 @@ const (
 	migrationBlindedEvaluationSuite      = "migration-blinded-agent-evaluation-v1"
 	migrationHostConformanceSuite        = "migration-host-conformance-v1"
 	migrationBlindedProtocol             = "Compare the same hidden migration task under legacy and compiled context. Record the exact request, answer, citations, opened sources, expansions, durability labels, unsupported claims, decisions, and context-token cost. The compiled arm must be factually and decision non-inferior, use no more context, preserve evidence traceability, and avoid full-corpus reads."
-	migrationHostProtocol                = "Exercise the actual MCP, CLI, Claude Code, and Codex adapters with captured request, transport result, normalized semantic result, and expected failure. Require discovery, status, retrieval, expansion, role-boundary refusal, bounded recovery, and local fallback coverage with equivalent semantic digests."
+	migrationHostProtocol                = "Exercise the actual MCP, CLI, and every configured agent-host adapter with captured request, transport result, normalized semantic result, and expected failure. Require discovery, status, retrieval, expansion, role-boundary refusal, bounded recovery, and local fallback coverage with equivalent semantic digests."
 )
+
+// migrationMandatoryHosts are the surfaces every migrated project must prove:
+// the MCP server, the CLI, and the Claude Code host. Codex is an optional
+// host: a project that does not use it owes no Codex captures, but when Codex
+// trials are present the complete Codex scenario matrix must pass and match
+// cross-host semantic parity. Optional hosts that are absent are genuinely
+// absent — they contribute no fingerprint and no empty placeholder.
+var migrationMandatoryHosts = []string{"mcp", "cli", "claude"}
+
+func migrationHostScenarios(host string) []string {
+	switch host {
+	case "mcp":
+		return []string{"discovery", "status", "retrieval", "expansion", "role-boundary", "bounded-recovery"}
+	case "cli":
+		return []string{"status", "retrieval", "expansion", "role-boundary", "bounded-recovery"}
+	case "claude", "codex":
+		return []string{"discovery", "status", "retrieval", "expansion", "role-boundary", "bounded-recovery", "local-fallback"}
+	default:
+		return nil
+	}
+}
+
+func migrationHostsPresent(trials []MigrationHostTrial) map[string]bool {
+	present := map[string]bool{}
+	for _, trial := range trials {
+		present[trial.Host] = true
+	}
+	return present
+}
 
 // MigrationEvidenceArtifactReference binds a certification input to exact
 // bytes in a regular, project-contained file. The gate verifier always
@@ -372,38 +401,42 @@ func BuildMigrationGateArtifact(
 	return artifact, err
 }
 
-func readMigrationEvidenceReference(
-	projectRoot string,
-	reference MigrationEvidenceArtifactReference,
-) ([]byte, string, error) {
-	clean := NormalizeProjectPath(reference.Path)
-	if filepath.IsAbs(reference.Path) || clean == "" || clean == "." || clean == ".." ||
-		strings.HasPrefix(clean, "../") || clean != filepath.ToSlash(reference.Path) {
-		return nil, "", errors.New("certification evidence path must be canonical and project-relative")
+func readBoundedMigrationEvidence(projectRoot, relative string) ([]byte, error) {
+	clean := NormalizeProjectPath(relative)
+	if filepath.IsAbs(relative) || clean == "" || clean == "." || clean == ".." ||
+		strings.HasPrefix(clean, "../") || clean != filepath.ToSlash(relative) {
+		return nil, errors.New("certification evidence path must be canonical and project-relative")
 	}
 	path := filepath.Join(projectRoot, filepath.FromSlash(clean))
 	resolved, err := canonicalExistingPath(path)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	// The evidence path is fully resolved, so the root must be compared in
 	// the same canonical form: an unresolved project root differs through
 	// macOS /var symlinks and Windows 8.3 short names.
 	root, err := canonicalExistingPath(projectRoot)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if !withinRoot(root, resolved) {
-		return nil, "", errors.New("certification evidence escapes the project")
+		return nil, errors.New("certification evidence escapes the project")
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > maxMigrationEvidenceBytes {
-		return nil, "", errors.New("certification evidence must be a bounded regular non-link file")
+		return nil, errors.New("certification evidence must be a bounded regular non-link file")
 	}
-	body, err := os.ReadFile(path)
+	return os.ReadFile(path)
+}
+
+func readMigrationEvidenceReference(
+	projectRoot string,
+	reference MigrationEvidenceArtifactReference,
+) ([]byte, string, error) {
+	body, err := readBoundedMigrationEvidence(projectRoot, reference.Path)
 	if err != nil {
 		return nil, "", err
 	}
@@ -412,6 +445,47 @@ func readMigrationEvidenceReference(
 		return nil, "", errors.New("certification evidence digest is stale or fabricated")
 	}
 	return body, digest, nil
+}
+
+// BuildRetrievalContextGateArtifact reads the four exact evidence files of the
+// retrieval/context gate from the project, seals the typed evidence block, and
+// derives the canonical gate artifact for the active transaction. It only
+// assembles digests over real bytes; RecordGate still independently re-reads,
+// replays, and verifies every nested evidence binding before a receipt exists.
+func (engine *MigrationEngine) BuildRetrievalContextGateArtifact(
+	benchmarkPath, calibrationPath, candidatePath, blindedPath string,
+) (MigrationGateArtifact, error) {
+	state, err := engine.Status()
+	if err != nil {
+		return MigrationGateArtifact{}, err
+	}
+	reference := func(relative string) (MigrationEvidenceArtifactReference, error) {
+		body, readErr := readBoundedMigrationEvidence(engine.ProjectRoot, relative)
+		if readErr != nil {
+			return MigrationEvidenceArtifactReference{}, fmt.Errorf("%s: %w", relative, readErr)
+		}
+		return MigrationEvidenceArtifactReference{
+			Path: relative, Digest: "sha256:" + SHA256Bytes(body),
+		}, nil
+	}
+	evidence := MigrationRetrievalGateEvidence{}
+	if evidence.Benchmark, err = reference(benchmarkPath); err != nil {
+		return MigrationGateArtifact{}, err
+	}
+	if evidence.Calibration, err = reference(calibrationPath); err != nil {
+		return MigrationGateArtifact{}, err
+	}
+	if evidence.CandidateProfile, err = reference(candidatePath); err != nil {
+		return MigrationGateArtifact{}, err
+	}
+	if evidence.BlindedEvaluation, err = reference(blindedPath); err != nil {
+		return MigrationGateArtifact{}, err
+	}
+	if err := SealMigrationRetrievalGateEvidence(&evidence); err != nil {
+		return MigrationGateArtifact{}, err
+	}
+	return BuildMigrationGateArtifact(
+		state.TransactionID, state.PlanDigest, "retrieval-context", &evidence, nil)
 }
 
 func (engine *MigrationEngine) validateGateSpecificMigrationEvidence(
@@ -916,11 +990,18 @@ func validateMigrationHostConformanceEvidence(
 		evidence.ProtocolDigest != migrationHostProtocolDigest() || !evidence.Passed {
 		return nil, "", errors.New("host evidence identity, protocol, binding, or result is invalid")
 	}
-	required := map[string][]string{
-		"mcp":    {"discovery", "status", "retrieval", "expansion", "role-boundary", "bounded-recovery"},
-		"cli":    {"status", "retrieval", "expansion", "role-boundary", "bounded-recovery"},
-		"claude": {"discovery", "status", "retrieval", "expansion", "role-boundary", "bounded-recovery", "local-fallback"},
-		"codex":  {"discovery", "status", "retrieval", "expansion", "role-boundary", "bounded-recovery", "local-fallback"},
+	// Every mandatory host must prove its complete scenario matrix. Codex is
+	// covered only when the project captured it, and then in full: partial
+	// optional-host evidence is rejected, so the gate stays meaningful for
+	// exactly the hosts the project actually uses.
+	present := migrationHostsPresent(evidence.Trials)
+	hosts := append([]string(nil), migrationMandatoryHosts...)
+	if present["codex"] {
+		hosts = append(hosts, "codex")
+	}
+	required := map[string][]string{}
+	for _, host := range hosts {
+		required[host] = migrationHostScenarios(host)
 	}
 	byKey := map[string]MigrationHostTrial{}
 	for _, trial := range evidence.Trials {
@@ -943,9 +1024,13 @@ func validateMigrationHostConformanceEvidence(
 			}
 		}
 	}
+	agentHosts := []string{"claude"}
+	if present["codex"] {
+		agentHosts = append(agentHosts, "codex")
+	}
 	for _, scenario := range []string{"status", "retrieval", "expansion", "bounded-recovery"} {
 		want := byKey["mcp:"+scenario].SemanticDigest
-		for _, host := range []string{"cli", "claude", "codex"} {
+		for _, host := range append([]string{"cli"}, agentHosts...) {
 			if byKey[host+":"+scenario].SemanticDigest != want {
 				return nil, "", fmt.Errorf("host semantic parity failed for %s", scenario)
 			}
@@ -955,13 +1040,13 @@ func validateMigrationHostConformanceEvidence(
 	if err != nil {
 		return nil, "", err
 	}
-	for _, host := range []string{"mcp", "claude", "codex"} {
+	for _, host := range append([]string{"mcp"}, agentHosts...) {
 		if byKey[host+":discovery"].SemanticDigest != discoveryDigest {
 			return nil, "", fmt.Errorf("%s discovery did not expose the current real tool schema", host)
 		}
 	}
 	cliStatus := byKey["cli:status"].SemanticDigest
-	for _, host := range []string{"claude", "codex"} {
+	for _, host := range agentHosts {
 		if byKey[host+":local-fallback"].SemanticDigest != cliStatus {
 			return nil, "", fmt.Errorf("%s local fallback did not preserve CLI status semantics", host)
 		}
@@ -987,6 +1072,11 @@ func migrationHostFingerprints(trials []MigrationHostTrial) (map[string]string, 
 	fingerprints := map[string]string{}
 	for _, host := range []string{"mcp", "cli", "claude", "codex"} {
 		hostTrials := append([]MigrationHostTrial(nil), byHost[host]...)
+		if len(hostTrials) == 0 {
+			// An optional host without captures has no fingerprint at all;
+			// a present-but-empty digest would falsely attest coverage.
+			continue
+		}
 		sort.Slice(hostTrials, func(i, j int) bool {
 			return hostTrials[i].Scenario < hostTrials[j].Scenario
 		})
