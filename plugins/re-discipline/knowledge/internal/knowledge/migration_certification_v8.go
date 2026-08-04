@@ -14,6 +14,15 @@ import (
 )
 
 const (
+	// maxMigrationEvidenceBytes bounds certification evidence reads. The
+	// corpus-scan bound (maxSourceBytes, 4 MiB) is too small here: the
+	// runtime's own full 64-case project-benchmark-v1 report with per-case
+	// observation rows measures ~7 MB on this project, so reusing the scan
+	// bound made the retrieval gate reject the exact report the packaged
+	// benchmark command produces. 16 MiB matches the external evidence
+	// harness's capture bound; digests are still verified over exact bytes.
+	maxMigrationEvidenceBytes int64 = 16 * 1024 * 1024
+
 	migrationRetrievalCertificationSuite = "migration-retrieval-certification-v1"
 	migrationBlindedEvaluationSuite      = "migration-blinded-agent-evaluation-v1"
 	migrationHostConformanceSuite        = "migration-host-conformance-v1"
@@ -391,7 +400,7 @@ func readMigrationEvidenceReference(
 	if err != nil {
 		return nil, "", err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > maxSourceBytes {
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > maxMigrationEvidenceBytes {
 		return nil, "", errors.New("certification evidence must be a bounded regular non-link file")
 	}
 	body, err := os.ReadFile(path)
