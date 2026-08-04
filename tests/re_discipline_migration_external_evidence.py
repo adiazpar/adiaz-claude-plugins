@@ -2091,6 +2091,41 @@ def _blinded_case_outcome(
     return outcome
 
 
+def _blinded_case_non_inferior(
+    legacy: Mapping[str, Any], compiled: Mapping[str, Any]
+) -> bool:
+    """Mirror the Go verifier's documented per-case bar for one measured pair.
+
+    The compiled arm must be factually and decision non-inferior, contain no
+    unsupported claims, preserve evidence traceability, use no more context
+    tokens, avoid a full-corpus read, and label the durability of any answer
+    it gives. This is a paired comparison, not an absolute per-trial pass
+    requirement: both arms are stochastic external respondents measured by one
+    deterministic judge, so demanding a perfect compiled trial on every case
+    would make the gate unsatisfiable for any corpus - the same defect, one
+    level up, as requiring a perfect 0.7 baseline. A compiled arm that
+    regresses any judged dimension on any case still fails.
+    """
+
+    legacy_response = legacy["response"]
+    compiled_response = compiled["response"]
+    return (
+        float(compiled["factualAccuracy"]) >= float(legacy["factualAccuracy"])
+        and float(compiled["decisionAccuracy"]) >= float(legacy["decisionAccuracy"])
+        and int(compiled_response["contextTokens"]) <= int(legacy_response["contextTokens"])
+        and int(compiled["unsupportedClaims"]) == 0
+        and not (
+            bool(legacy["evidenceTracePassed"])
+            and not bool(compiled["evidenceTracePassed"])
+        )
+        and not bool(compiled_response["fullCorpusRead"])
+        and (
+            compiled_response["decision"] != "answer"
+            or len(compiled_response["durabilityLabels"]) > 0
+        )
+    )
+
+
 def _seal_blinded_evaluation(
     *,
     transaction_id: str,
@@ -2111,14 +2146,29 @@ def _seal_blinded_evaluation(
                 "the evaluator identity may not equal a tested agent identity",
             )
     protocol_digest = _sha256(BLINDED_PROTOCOL.encode("utf-8"))
-    # Mirror the verifier: the compiled arm carries the absolute bar, and the
-    # legacy arm is the captured baseline measured by per-case
-    # non-inferiority. A legacy miss is a true measurement of the predecessor
-    # runtime and is preserved in its trial, not converted into a failure of
-    # the evaluation itself.
+    # Mirror the verifier: the legacy arm is the captured baseline and the
+    # compiled arm must be non-inferior against it case by case, per the
+    # documented gate contract. A legacy miss is a true measurement of the
+    # predecessor runtime and is preserved in its trial; a compiled miss on a
+    # case the legacy arm also missed is a shared measurement of the
+    # respondent. Only a case where the compiled arm scores worse than the
+    # captured baseline fails the evaluation.
     compiled_cases = [case for case in cases if case["condition"] == "compiled"]
     if not compiled_cases:
         _fail("blindedEvaluation.cases", "requires at least one compiled trial")
+    by_case: dict[str, dict[str, Mapping[str, Any]]] = {}
+    for case in cases:
+        by_case.setdefault(str(case["caseId"]), {})[str(case["condition"])] = case
+    passed = bool(cases) and bool(compiled_cases)
+    for arms in by_case.values():
+        legacy = arms.get("legacy")
+        compiled = arms.get("compiled")
+        if (
+            legacy is None
+            or compiled is None
+            or not _blinded_case_non_inferior(legacy, compiled)
+        ):
+            passed = False
     evaluation: dict[str, Any] = {
         "schemaVersion": 1,
         "suite": BLINDED_SUITE,
@@ -2132,7 +2182,7 @@ def _seal_blinded_evaluation(
             {"evaluator": evaluator, "protocolDigest": protocol_digest}
         ),
         "cases": [dict(case) for case in cases],
-        "passed": all(bool(case["passed"]) for case in compiled_cases),
+        "passed": passed,
         "resultDigest": "",
     }
     evaluation["resultDigest"] = _go_digest(evaluation)
