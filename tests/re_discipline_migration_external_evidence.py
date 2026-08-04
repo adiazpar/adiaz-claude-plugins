@@ -3377,20 +3377,6 @@ def _blinded_trial(
     # 0.8 runtime names it `query`. Each arm is driven and judged through
     # its own runtime's actual tool surface.
     retrieval_tool = "query" if condition == "compiled" else "search"
-    capture, transcript, invocation = runner(
-        executable=executable,
-        model=model,
-        request=request,
-        condition=condition,
-        workspace=arm.workspace,
-        runtime=arm.runtime,
-        assets=arm.assets,
-        cache=arm.cache,
-        scratch=scratch,
-        executor=harness.executor,
-        timeout_seconds=harness.timeout_seconds,
-        retrieval_tool=retrieval_tool,
-    )
     # Each arm is judged against the evaluation corpus that describes that
     # arm's own tree. The compiled arm answers from converted destinations;
     # the legacy arm's correct evidence lives at the paths the pre-migration
@@ -3399,25 +3385,56 @@ def _blinded_trial(
     # every legacy trial zero and make the paired comparison meaningless.
     # The frozen request, blinding, and identities always come from the
     # canonical case; only the expectation fields may differ per arm.
-    judgment, scores = _derive_judgment(
-        trial_id=trial_id,
-        eval_case=judging_case,
-        benchmark_outcome=benchmark_outcome,
-        transcript=transcript,
-        workspace=arm.workspace,
-        retrieval_tool=retrieval_tool,
-    )
-    outcome = _blinded_case_outcome(
-        case_id=case_id,
-        condition=condition,
-        answerable=_case_answerable(case),
-        agent=agent,
-        model=model,
-        request=request,
-        response=scores["response"],
-        scores=scores,
-        benchmark_outcome_digest=_benchmark_outcome_digest(benchmark_outcome),
-    )
+    #
+    # A protocol violation by the respondent - an over-budget trial, a
+    # malformed structured answer, a forbidden call - is a failure of the
+    # interface, not a scored retrieval result, so the trial is re-run with a
+    # fresh context a bounded number of times. A scored miss never raises and
+    # is never retried: it is the measurement.
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        attempt_scratch = scratch / f"attempt-{attempt}"
+        attempt_scratch.mkdir(parents=True, exist_ok=False)
+        try:
+            capture, transcript, invocation = runner(
+                executable=executable,
+                model=model,
+                request=request,
+                condition=condition,
+                workspace=arm.workspace,
+                runtime=arm.runtime,
+                assets=arm.assets,
+                cache=arm.cache,
+                scratch=attempt_scratch,
+                executor=harness.executor,
+                timeout_seconds=harness.timeout_seconds,
+                retrieval_tool=retrieval_tool,
+            )
+            judgment, scores = _derive_judgment(
+                trial_id=trial_id,
+                eval_case=judging_case,
+                benchmark_outcome=benchmark_outcome,
+                transcript=transcript,
+                workspace=arm.workspace,
+                retrieval_tool=retrieval_tool,
+            )
+            outcome = _blinded_case_outcome(
+                case_id=case_id,
+                condition=condition,
+                answerable=_case_answerable(case),
+                agent=agent,
+                model=model,
+                request=request,
+                response=scores["response"],
+                scores=scores,
+                benchmark_outcome_digest=_benchmark_outcome_digest(benchmark_outcome),
+            )
+            break
+        except EvidenceError:
+            if attempt == attempts:
+                raise
+    invocation = dict(invocation)
+    invocation["attempts"] = attempt
     if outcome["id"] != trial_id:
         _fail("blindedCase.id", "trial identity is not reproducible")
     refs = _stage_capture(harness, prefix, capture)
