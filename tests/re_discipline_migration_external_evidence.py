@@ -1795,8 +1795,11 @@ def _run_codex_trial(
         "--ignore-rules",
         "--sandbox",
         "read-only",
-        "--ask-for-approval",
-        "never",
+        # codex-cli 0.145 `exec` rejects `--ask-for-approval` (exec never
+        # prompts), and refuses an untrusted non-repository workspace unless
+        # the check is explicitly skipped. The disposable arm workspaces are
+        # plain directory copies, never Git repositories.
+        "--skip-git-repo-check",
         "--cd",
         str(workspace),
         "--model",
@@ -2593,8 +2596,10 @@ def _codex_conformance_argv(
         "--ignore-rules",
         "--sandbox",
         sandbox,
-        "--ask-for-approval",
-        "never",
+        # See _run_codex_trial: codex-cli 0.145 `exec` rejects
+        # `--ask-for-approval` and requires the explicit repository-check
+        # skip for a non-repository workspace copy.
+        "--skip-git-repo-check",
         "--cd",
         str(workspace),
         "--model",
