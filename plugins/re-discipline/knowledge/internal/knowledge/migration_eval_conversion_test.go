@@ -189,6 +189,33 @@ func TestEvalConversionLeavesUnconvertedJudgmentsAlone(t *testing.T) {
 	}
 }
 
+func TestEvalConversionFollowsAnsweringVocabularyNotTokenOverlap(t *testing.T) {
+	staging := t.TempDir()
+	plan := testEvalConversionPlan(t, staging)
+	// The oracle finding's claim shares the common token "map" with the query,
+	// but the vocabulary that answers the question -- dtor_ok and its verdict
+	// framing -- survives only in the preserved prose. A single shared common
+	// token must not anchor the judgment to a finding that cannot answer.
+	context := newMigrationEvalJudgmentContext(plan, staging)
+	answerable := true
+	cases := []EvalCase{{
+		ID: "answer-vocabulary", Query: "why does a map verdict carry dtor_ok flags",
+		AllowedTiers: []string{"truth"}, Answerable: &answerable,
+		ExpectedPaths:        []string{"docs/truth/daemon/oracle.md"},
+		MinimumEvidencePaths: []string{"docs/truth/daemon/oracle.md"},
+	}}
+	convertMigratedEvalCases(&context, cases)
+	preserved := "active/alpha-campaign/runs/" +
+		legacyRunID("alpha-campaign", "campaign-import") + "/payload/legacy/truth/daemon/oracle.md"
+	if !reflect.DeepEqual(cases[0].MinimumEvidencePaths, []string{preserved}) {
+		t.Fatalf("minimum evidence anchored to a finding that cannot answer: %#v",
+			cases[0].MinimumEvidencePaths)
+	}
+	if !contains(cases[0].ExpectedPaths, preserved) || !contains(cases[0].AllowedTiers, "archive") {
+		t.Fatalf("judgment did not follow the answering vocabulary: %#v", cases[0])
+	}
+}
+
 func TestEvalConversionRestampsCorpusSnapshotsOntoActivatedCorpus(t *testing.T) {
 	staging := t.TempDir()
 	plan := testEvalConversionPlan(t, staging)
