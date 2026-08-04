@@ -1588,9 +1588,12 @@ def _agent_prompt(request: Mapping[str, Any], condition: str) -> str:
         "entire small returned span over computing offsets yourself, and keep each "
         "quote under 4000 bytes. Do not paraphrase inside claims. If the allowed "
         "corpus does not support an answer, return decision=abstain and claims=[]. "
-        "Declining is a correct, expected outcome for a question the corpus cannot "
-        "support: an abstention with no claims and no citations scores as correct, and "
-        "inventing a claim to avoid abstaining scores as wrong."
+        "Declining is the correct outcome for a question the corpus cannot support, "
+        "and inventing a claim to avoid abstaining is wrong - but so is giving up "
+        "early: before abstaining, spend your whole retrieval allowance on genuinely "
+        "different reformulations of the question (synonyms, the underlying "
+        "artifact names, the outcome it describes), because abstaining on a "
+        "question the corpus does support is scored as a miss."
     )
 
 
