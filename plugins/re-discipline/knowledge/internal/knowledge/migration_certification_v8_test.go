@@ -1040,3 +1040,73 @@ func TestMigrationHostParityCoversConfiguredHostsAndCodexIsOptional(t *testing.T
 		t.Fatalf("captured codex host lost its fingerprint: %+v", fullArtifact.Fingerprints)
 	}
 }
+
+func TestBlindedEvaluationPassRestsOnTheCompiledArm(t *testing.T) {
+	trial := func(condition string, factual float64) MigrationBlindedAgentCaseOutcome {
+		outcome := MigrationBlindedAgentCaseOutcome{
+			CaseID: "case-1", Condition: condition, Agent: "claude-code", Model: "m",
+			Answerable: true,
+			Request: MigrationBlindedAgentRequest{
+				CaseID: "case-1", Query: "q", QueryClass: "exact", Role: "manager",
+				AllowedTiers: []string{"truth"}, TokenBudget: 1024,
+			},
+			Response: MigrationBlindedAgentResponse{
+				AnswerClaims: []string{"claim"}, Decision: "answer",
+				Citations: []string{"docs/truth/a.md"}, DurabilityLabels: []string{"truth"},
+				ContextTokens: 100,
+			},
+			FactualAccuracy: factual, DecisionAccuracy: factual, EvidenceTracePassed: factual >= 0.5,
+		}
+		if factual < 0.5 {
+			// A missed baseline: the agent answered but its evidence did not
+			// support the case.
+			outcome.EvidenceTracePassed = false
+		}
+		return outcome
+	}
+	evaluation := MigrationBlindedAgentEvaluation{
+		TransactionID: "M-1234567890ABCDEF1234", PlanDigest: stateTestDigest("a"),
+		BenchmarkDigest: stateTestDigest("b"), CalibrationDigest: stateTestDigest("c"),
+		Evaluator: "deterministic-judgment:test",
+		Cases: []MigrationBlindedAgentCaseOutcome{
+			trial("legacy", 0), trial("compiled", 1),
+		},
+	}
+	if err := SealMigrationBlindedAgentEvaluation(&evaluation); err != nil {
+		t.Fatal(err)
+	}
+	if evaluation.Cases[0].Passed || !evaluation.Cases[1].Passed {
+		t.Fatalf("per-trial results must record the measured outcome: %+v", evaluation.Cases)
+	}
+	if !evaluation.Passed {
+		t.Fatal("a measured legacy baseline miss must not fail the evaluation the compiled arm passed")
+	}
+	failing := MigrationBlindedAgentEvaluation{
+		TransactionID: evaluation.TransactionID, PlanDigest: evaluation.PlanDigest,
+		BenchmarkDigest: evaluation.BenchmarkDigest, CalibrationDigest: evaluation.CalibrationDigest,
+		Evaluator: evaluation.Evaluator,
+		Cases: []MigrationBlindedAgentCaseOutcome{
+			trial("legacy", 1), trial("compiled", 0),
+		},
+	}
+	if err := SealMigrationBlindedAgentEvaluation(&failing); err != nil {
+		t.Fatal(err)
+	}
+	if failing.Passed {
+		t.Fatal("a failing compiled trial must fail the evaluation")
+	}
+	legacyOnly := MigrationBlindedAgentEvaluation{
+		TransactionID: evaluation.TransactionID, PlanDigest: evaluation.PlanDigest,
+		BenchmarkDigest: evaluation.BenchmarkDigest, CalibrationDigest: evaluation.CalibrationDigest,
+		Evaluator: evaluation.Evaluator,
+		Cases: []MigrationBlindedAgentCaseOutcome{
+			trial("legacy", 1),
+		},
+	}
+	if err := SealMigrationBlindedAgentEvaluation(&legacyOnly); err != nil {
+		t.Fatal(err)
+	}
+	if legacyOnly.Passed {
+		t.Fatal("an evaluation without a compiled trial cannot pass")
+	}
+}

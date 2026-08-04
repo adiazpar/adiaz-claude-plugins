@@ -2062,6 +2062,14 @@ def _seal_blinded_evaluation(
                 "the evaluator identity may not equal a tested agent identity",
             )
     protocol_digest = _sha256(BLINDED_PROTOCOL.encode("utf-8"))
+    # Mirror the verifier: the compiled arm carries the absolute bar, and the
+    # legacy arm is the captured baseline measured by per-case
+    # non-inferiority. A legacy miss is a true measurement of the predecessor
+    # runtime and is preserved in its trial, not converted into a failure of
+    # the evaluation itself.
+    compiled_cases = [case for case in cases if case["condition"] == "compiled"]
+    if not compiled_cases:
+        _fail("blindedEvaluation.cases", "requires at least one compiled trial")
     evaluation: dict[str, Any] = {
         "schemaVersion": 1,
         "suite": BLINDED_SUITE,
@@ -2075,7 +2083,7 @@ def _seal_blinded_evaluation(
             {"evaluator": evaluator, "protocolDigest": protocol_digest}
         ),
         "cases": [dict(case) for case in cases],
-        "passed": all(bool(case["passed"]) for case in cases),
+        "passed": all(bool(case["passed"]) for case in compiled_cases),
         "resultDigest": "",
     }
     evaluation["resultDigest"] = _go_digest(evaluation)
