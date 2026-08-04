@@ -266,13 +266,25 @@ func SealMigrationBlindedAgentEvaluation(
 	if err != nil {
 		return err
 	}
+	// The compiled arm carries the absolute bar: every compiled trial must
+	// pass its own case. The legacy arm is the captured baseline that the
+	// verifier's per-case non-inferiority comparison measures against; a
+	// legacy miss is a true measurement of the predecessor runtime, not a
+	// reason the migration cannot certify. Requiring the legacy arm to be
+	// perfect would make this gate unsatisfiable for exactly the projects
+	// whose retrieval the migration exists to improve.
+	compiledTrials := 0
 	evaluation.Passed = len(evaluation.Cases) > 0
 	for index := range evaluation.Cases {
 		if err := SealMigrationBlindedAgentCaseOutcome(&evaluation.Cases[index]); err != nil {
 			return err
 		}
-		evaluation.Passed = evaluation.Passed && evaluation.Cases[index].Passed
+		if evaluation.Cases[index].Condition == "compiled" {
+			compiledTrials++
+			evaluation.Passed = evaluation.Passed && evaluation.Cases[index].Passed
+		}
 	}
+	evaluation.Passed = evaluation.Passed && compiledTrials > 0
 	evaluation.ResultDigest = ""
 	evaluation.ResultDigest, err = CanonicalDigest(*evaluation)
 	return err
@@ -932,6 +944,21 @@ func validateMigrationBlindedAgentEvaluation(
 	}
 	if len(byCase) != len(holdout) {
 		return errors.New("blinded evaluation does not cover every benchmark holdout case")
+	}
+	// The sealed aggregate must equal the compiled-arm conjunction: the
+	// compiled arm carries the absolute bar while legacy trials are the
+	// measured baseline, and a sealed Passed that disagrees with the trials
+	// it summarizes is fabricated.
+	compiledTrials := 0
+	expectedPassed := len(evaluation.Cases) > 0
+	for _, outcome := range evaluation.Cases {
+		if outcome.Condition == "compiled" {
+			compiledTrials++
+			expectedPassed = expectedPassed && outcome.Passed
+		}
+	}
+	if compiledTrials == 0 || evaluation.Passed != expectedPassed {
+		return errors.New("blinded evaluation aggregate result disagrees with its compiled-arm trials")
 	}
 	for caseID := range holdout {
 		legacy, legacyOK := byCase[caseID]["legacy"]
