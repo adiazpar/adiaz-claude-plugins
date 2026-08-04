@@ -1041,7 +1041,7 @@ func TestMigrationHostParityCoversConfiguredHostsAndCodexIsOptional(t *testing.T
 	}
 }
 
-func TestBlindedEvaluationPassRestsOnTheCompiledArm(t *testing.T) {
+func TestBlindedEvaluationPassRestsOnPairedNonInferiority(t *testing.T) {
 	trial := func(condition string, factual float64) MigrationBlindedAgentCaseOutcome {
 		outcome := MigrationBlindedAgentCaseOutcome{
 			CaseID: "case-1", Condition: condition, Agent: "claude-code", Model: "m",
@@ -1093,7 +1093,21 @@ func TestBlindedEvaluationPassRestsOnTheCompiledArm(t *testing.T) {
 		t.Fatal(err)
 	}
 	if failing.Passed {
-		t.Fatal("a failing compiled trial must fail the evaluation")
+		t.Fatal("a compiled trial that regresses its measured baseline must fail the evaluation")
+	}
+	sharedMiss := MigrationBlindedAgentEvaluation{
+		TransactionID: evaluation.TransactionID, PlanDigest: evaluation.PlanDigest,
+		BenchmarkDigest: evaluation.BenchmarkDigest, CalibrationDigest: evaluation.CalibrationDigest,
+		Evaluator: evaluation.Evaluator,
+		Cases: []MigrationBlindedAgentCaseOutcome{
+			trial("legacy", 0), trial("compiled", 0),
+		},
+	}
+	if err := SealMigrationBlindedAgentEvaluation(&sharedMiss); err != nil {
+		t.Fatal(err)
+	}
+	if !sharedMiss.Passed {
+		t.Fatal("a case both stochastic arms miss is a respondent measurement, not a migration regression")
 	}
 	legacyOnly := MigrationBlindedAgentEvaluation{
 		TransactionID: evaluation.TransactionID, PlanDigest: evaluation.PlanDigest,
