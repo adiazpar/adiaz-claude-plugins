@@ -655,6 +655,12 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 	gatePassed := flags.Bool("gate-passed", false, "record the named gate as passed")
 	artifact := flags.String("artifact", "", "project-relative gate artifact; retrieval and host gates require strict gate-specific evidence")
 	artifactDigest := flags.String("artifact-digest", "", "exact sha256 digest rederived from the gate artifact bytes")
+	buildGateArtifact := flags.String("build-gate-artifact", "", "assemble the typed gate artifact for the named gate from exact evidence files (retrieval-context only)")
+	benchmarkEvidence := flags.String("benchmark-evidence", "", "project-relative final full project-benchmark-v1 report")
+	calibrationEvidence := flags.String("calibration-evidence", "", "project-relative final non-activating calibration report")
+	candidateEvidence := flags.String("candidate-profile-evidence", "", "project-relative non-activated calibration candidate profile")
+	blindedEvidence := flags.String("blinded-evaluation-evidence", "", "project-relative blinded paired agent evaluation")
+	artifactOutput := flags.String("artifact-output", "", "project-relative output path for the assembled gate artifact")
 	output := flags.String("output", "", "external preview output directory")
 	live := flags.String("live-campaigns", "", "comma-separated manager-designated live campaign slugs")
 	actor := flags.String("actor", "manager", "manager identity recorded in receipts")
@@ -686,6 +692,7 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 	for _, selected := range []bool{
 		*previewMode, *applyDigest != "", *resumeID != "", *statusMode,
 		*verifyMode, *ratifyDigest != "", *coveragePath != "", *gate != "",
+		*buildGateArtifact != "",
 		*shadowQuery != "", *profileConflict, *profileDecision != "", *truthConflicts, *truthReview != "",
 	} {
 		if selected {
@@ -693,7 +700,7 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 		}
 	}
 	if actions != 1 {
-		return fmt.Errorf("migrate-project requires exactly one of --preview, --apply, --resume, --status, --verify, --ratify, --coverage, --gate, --shadow-query, --profile-conflict, --profile-decision, --truth-conflicts, or --truth-review")
+		return fmt.Errorf("migrate-project requires exactly one of --preview, --apply, --resume, --status, --verify, --ratify, --coverage, --gate, --build-gate-artifact, --shadow-query, --profile-conflict, --profile-decision, --truth-conflicts, or --truth-review")
 	}
 	liveCampaigns := splitCSV(*live)
 	if *profileConflict {
@@ -810,6 +817,51 @@ func runMigrationCommand(ctx context.Context, args []string) error {
 			return err
 		}
 		return printJSON(value)
+	}
+	if *buildGateArtifact != "" {
+		if *buildGateArtifact != "retrieval-context" {
+			return fmt.Errorf("--build-gate-artifact supports retrieval-context only")
+		}
+		for name, value := range map[string]string{
+			"--benchmark-evidence":          *benchmarkEvidence,
+			"--calibration-evidence":        *calibrationEvidence,
+			"--candidate-profile-evidence":  *candidateEvidence,
+			"--blinded-evaluation-evidence": *blindedEvidence,
+			"--artifact-output":             *artifactOutput,
+		} {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("--build-gate-artifact requires %s", name)
+			}
+		}
+		value, err := engine.BuildRetrievalContextGateArtifact(
+			*benchmarkEvidence, *calibrationEvidence, *candidateEvidence, *blindedEvidence)
+		if err != nil {
+			return err
+		}
+		body, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return err
+		}
+		body = append(body, '\n')
+		outputPath := filepath.Join(root, filepath.FromSlash(*artifactOutput))
+		if _, statErr := os.Lstat(outputPath); statErr == nil {
+			return fmt.Errorf("--artifact-output %s already exists", *artifactOutput)
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(outputPath, body, 0o600); err != nil {
+			return err
+		}
+		return printJSON(map[string]any{
+			"schemaVersion":  1,
+			"gate":           "retrieval-context",
+			"artifact":       *artifactOutput,
+			"artifactDigest": "sha256:" + knowledge.SHA256Bytes(body),
+			"resultDigest":   value.ResultDigest,
+		})
 	}
 	if *shadowQuery != "" {
 		value, err := engine.QueryShadow(*shadowQuery, *shadowCampaign, *shadowLimit)
