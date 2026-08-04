@@ -131,6 +131,21 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			RequireSegment: "/payload/legacy/truth/",
 			SourceKind:     "legacy-truth", Enabled: settings.Sources.ReportFallback,
 		},
+		// Migration also preserves each campaign's legacy masterfile verbatim
+		// under its import run. The masterfile's prose is the only retrievable
+		// text a converted campaign has -- its canonical successor records are
+		// structured JSON outside the Markdown corpus -- so the preserved
+		// bytes stay searchable at archive tier like other run provenance.
+		{
+			Path: "active", Tier: "archive", Recursive: true, BaseOnly: "CAMPAIGN.md",
+			RequireSegment: "/payload/legacy/",
+			SourceKind:     "legacy-campaign", Enabled: settings.Sources.ReportFallback,
+		},
+		{
+			Path: "docs/history/campaigns", Tier: "archive", Recursive: true, BaseOnly: "CAMPAIGN.md",
+			RequireSegment: "/payload/legacy/",
+			SourceKind:     "legacy-campaign", Enabled: settings.Sources.ReportFallback,
+		},
 		{Path: ".re-discipline/memory/INDEX.md", Tier: "navigation", Enabled: settings.Sources.SharedMemory},
 		{Path: ".re-discipline/memory/topics", Tier: "memory", Recursive: true, Enabled: settings.Sources.SharedMemory},
 	}
@@ -258,6 +273,10 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			}
 			if class.SourceKind == "legacy-truth" &&
 				!validLegacyTruthSourcePath(boundary, path, cutoverCache) {
+				return nil
+			}
+			if class.SourceKind == "legacy-campaign" &&
+				!validLegacyCampaignSourcePath(boundary, path, cutoverCache) {
 				return nil
 			}
 			relative, err := boundary.Relative(path)
@@ -451,6 +470,32 @@ func validLegacyTruthSourcePath(boundary Boundary, absolute string, cutoverCache
 		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
 		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
 		parts[6] == "payload" && parts[7] == "legacy" && parts[8] == "truth" {
+		return archiveCutoverPublished(
+			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
+	}
+	return false
+}
+
+// validLegacyCampaignSourcePath admits the verbatim pre-migration campaign
+// masterfile that migration preserves directly under an import run's legacy
+// payload: runs/<runID>/payload/legacy/CAMPAIGN.md. Deeper legacy payload is
+// not admitted here; preserved truth documents have their own kind above.
+func validLegacyCampaignSourcePath(boundary Boundary, absolute string, cutoverCache map[string]bool) bool {
+	relative, err := boundary.Relative(absolute)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(relative, "/")
+	if len(parts) == 7 && parts[0] == "active" &&
+		managedSlugRE.MatchString(parts[1]) && parts[2] == "runs" &&
+		runIDRE.MatchString(parts[3]) && parts[4] == "payload" &&
+		parts[5] == "legacy" && parts[6] == "CAMPAIGN.md" {
+		return activeCampaignSourcesVisible(boundary, parts[1], cutoverCache)
+	}
+	if len(parts) == 9 && parts[0] == "docs" && parts[1] == "history" &&
+		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
+		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
+		parts[6] == "payload" && parts[7] == "legacy" && parts[8] == "CAMPAIGN.md" {
 		return archiveCutoverPublished(
 			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
 	}
@@ -666,6 +711,8 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 		header = ExtractReportPrelude(body, document.Path)
 	case document.SourceKind == "legacy-truth":
 		header = ExtractLegacyTruthPrelude(body, document.Path)
+	case document.SourceKind == "legacy-campaign":
+		header = ExtractLegacyCampaignPrelude(body, document.Path)
 	default:
 		header = ExtractDocumentPrelude(body, document.Path)
 	}
@@ -703,7 +750,7 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 	// carry the same label as every later chunk. Preserved legacy truth carries
 	// the same synthesized-status property.
 	firstChunkNeedsPrelude := strings.HasPrefix(header.Status, "UNNORMALIZED PROVENANCE") ||
-		strings.HasPrefix(header.Status, "SUPERSEDED BY NORMALIZED FINDING")
+		strings.HasPrefix(header.Status, "SUPERSEDED BY")
 	for index := range chunks {
 		if prelude == "" || (index == 0 && !firstChunkNeedsPrelude) {
 			continue

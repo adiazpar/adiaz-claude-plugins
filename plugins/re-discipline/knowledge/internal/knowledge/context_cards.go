@@ -1312,7 +1312,7 @@ func queryRawReportCards(ctx context.Context, db *sql.DB, query string, limit in
 	rows, err := db.QueryContext(ctx, `SELECT d.path,d.title,d.content_hash,d.tier,d.size,
 		c.heading,c.start_line,c.end_line,c.byte_range,c.start_byte,c.end_byte,c.content
 		FROM documents d JOIN chunks c ON c.document_id=d.id
-		WHERE d.source_kind IN ('raw-report','legacy-truth') ORDER BY d.path,c.start_line,c.id`)
+		WHERE d.source_kind IN ('raw-report','legacy-truth','legacy-campaign') ORDER BY d.path,c.start_line,c.id`)
 	if err != nil {
 		return nil, err
 	}
