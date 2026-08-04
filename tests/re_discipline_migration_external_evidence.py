@@ -1791,6 +1791,27 @@ def _write_private_json(path: Path, value: Any) -> None:
     path.write_bytes(_stable_bytes(value))
 
 
+# Every knowledge tool either runtime serves other than the trial's
+# retrieval and read surface. Explicitly disallowed so a respondent cannot
+# execute them even where the host's permission mode would allow it.
+_NON_TRIAL_KNOWLEDGE_TOOLS = (
+    "status",
+    "orient",
+    "search",
+    "query",
+    "context_pack",
+    "context_pack_materialize",
+    "recall_propose",
+    "state",
+    "trace",
+    "manager_apply",
+    "curation_submit",
+    "closure_apply",
+    "normalization_queue",
+    "migrate_project",
+)
+
+
 def _run_claude_trial(
     *,
     executable: Path,
@@ -1832,7 +1853,24 @@ def _run_claude_trial(
         "--allowedTools",
         f"mcp__re-discipline-knowledge__{retrieval_tool},mcp__re-discipline-knowledge__read",
         "--disallowedTools",
-        "Bash,Write,Edit,Read,Glob,Grep,WebFetch,WebSearch,Task",
+        ",".join(
+            [
+                "Bash",
+                "Write",
+                "Edit",
+                "Read",
+                "Glob",
+                "Grep",
+                "WebFetch",
+                "WebSearch",
+                "Task",
+            ]
+            + [
+                f"mcp__re-discipline-knowledge__{name}"
+                for name in _NON_TRIAL_KNOWLEDGE_TOOLS
+                if name != retrieval_tool
+            ]
+        ),
     ]
     environment = dict(os.environ)
     environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
