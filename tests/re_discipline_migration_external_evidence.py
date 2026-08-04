@@ -35,7 +35,6 @@ if __package__ in (None, ""):
 from tests.re_discipline_migration_pilot import (  # noqa: E402
     DIGEST_RE,
     REVISION_RE,
-    _clone_exact,
     _git,
     _pair_digest,
     _repo_binding,
@@ -1332,6 +1331,67 @@ def _workspace_required_paths(cases: Sequence[Mapping[str, Any]]) -> list[str]:
                 if isinstance(row, dict) and isinstance(row.get("path"), str)
             )
     return sorted(result)
+
+
+def _clone_legacy_revision(
+    source: Path,
+    revision: str,
+    destination: Path,
+    *,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    """Clone ``source`` detached at ``revision`` and bind its committed tree.
+
+    ``_clone_exact`` proves that a clone reproduces the source working tree,
+    which is only meaningful when the requested revision is the source HEAD.
+    The legacy runtime is an older commit whose tracked set legitimately
+    differs from the current one, so this clone is verified against that
+    revision's own committed tree, and the legacy runtime binary is
+    separately digest-verified against its packaged manifest before use.
+    """
+
+    if destination.exists() or destination.is_symlink():
+        _fail("legacyClone", f"refuses existing path {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            "git",
+            "--no-optional-locks",
+            "clone",
+            "--no-hardlinks",
+            "--no-checkout",
+            "--",
+            str(source),
+            str(destination),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=destination.parent,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if result.returncode != 0:
+        _fail(
+            "legacyClone",
+            result.stderr.decode("utf-8", errors="replace").strip()
+            or f"git clone exited {result.returncode}",
+        )
+    _git(destination, "checkout", "--detach", revision)
+    head = _git(destination, "rev-parse", "HEAD").decode("ascii").strip()
+    if head != revision:
+        _fail("legacyClone.revision", f"detached HEAD is {head}, expected {revision}")
+    status = _git(destination, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if status:
+        _fail("legacyClone", "checkout does not reproduce the committed legacy tree")
+    rows = _tracked_rows(destination)
+    tree = _git(destination, "rev-parse", "HEAD^{tree}").decode("ascii").strip()
+    return {
+        "revision": revision,
+        "tree": tree,
+        "trackedFileCount": len(rows),
+        "trackedManifestSha256": _pair_digest(rows),
+        "clean": True,
+    }
 
 
 def _find_legacy_plugin_revision(plugin: Path, current_revision: str) -> str:
@@ -3584,7 +3644,7 @@ def _execute(arguments: argparse.Namespace) -> int:
 
     legacy_revision = _find_legacy_plugin_revision(plugin, arguments.plugin_revision)
     legacy_plugin = workspace_root / "legacy-plugin"
-    legacy_binding = _clone_exact(
+    legacy_binding = _clone_legacy_revision(
         plugin, legacy_revision, legacy_plugin, timeout_seconds=arguments.timeout_seconds
     )
     current_runtime = _runtime_path(plugin)
