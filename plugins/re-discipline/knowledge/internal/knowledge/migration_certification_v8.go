@@ -488,6 +488,30 @@ func (engine *MigrationEngine) BuildRetrievalContextGateArtifact(
 		state.TransactionID, state.PlanDigest, "retrieval-context", &evidence, nil)
 }
 
+// BuildHostParityGateArtifact wraps an already sealed host-conformance
+// evidence file in the canonical gate artifact for the active transaction.
+// The evidence bytes are read from the project and decoded strictly; every
+// trial, parity relation, and digest is still independently re-verified by
+// RecordGate before a receipt exists.
+func (engine *MigrationEngine) BuildHostParityGateArtifact(
+	hostConformancePath string,
+) (MigrationGateArtifact, error) {
+	state, err := engine.Status()
+	if err != nil {
+		return MigrationGateArtifact{}, err
+	}
+	body, err := readBoundedMigrationEvidence(engine.ProjectRoot, hostConformancePath)
+	if err != nil {
+		return MigrationGateArtifact{}, fmt.Errorf("%s: %w", hostConformancePath, err)
+	}
+	var evidence MigrationHostConformanceEvidence
+	if err := decodeStrict(body, &evidence); err != nil {
+		return MigrationGateArtifact{}, fmt.Errorf("%s: %w", hostConformancePath, err)
+	}
+	return BuildMigrationGateArtifact(
+		state.TransactionID, state.PlanDigest, "host-parity", nil, &evidence)
+}
+
 func (engine *MigrationEngine) validateGateSpecificMigrationEvidence(
 	state MigrationState,
 	artifact MigrationGateArtifact,
