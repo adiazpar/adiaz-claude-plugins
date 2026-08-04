@@ -58,10 +58,11 @@ BLINDED_PROTOCOL = (
     "context, preserve evidence traceability, and avoid full-corpus reads."
 )
 HOST_PROTOCOL = (
-    "Exercise the actual MCP, CLI, Claude Code, and Codex adapters with captured "
-    "request, transport result, normalized semantic result, and expected failure. "
-    "Require discovery, status, retrieval, expansion, role-boundary refusal, "
-    "bounded recovery, and local fallback coverage with equivalent semantic digests."
+    "Exercise the actual MCP, CLI, and every configured agent-host adapter with "
+    "captured request, transport result, normalized semantic result, and expected "
+    "failure. Require discovery, status, retrieval, expansion, role-boundary "
+    "refusal, bounded recovery, and local fallback coverage with equivalent "
+    "semantic digests."
 )
 MIGRATION_STATE = ".re-discipline/migration/0.8/state.json"
 CURRENT_PLUGIN = "plugins/re-discipline"
@@ -1581,7 +1582,7 @@ def _executable_identity(
 def _check_authentication(
     *,
     claude: Path,
-    codex: Path,
+    codex: Path | None,
     executor: Executor,
     cwd: Path,
     store: ArtifactStore,
@@ -1593,12 +1594,13 @@ def _check_authentication(
             cwd=cwd,
             timeout_seconds=min(timeout_seconds, 60),
         ),
-        "codex": executor.run(
+    }
+    if codex is not None:
+        captures["codex"] = executor.run(
             [str(codex), "login", "status"],
             cwd=cwd,
             timeout_seconds=min(timeout_seconds, 60),
-        ),
-    }
+        )
     refs: dict[str, Any] = {}
     for host, capture in captures.items():
         if capture.exit_code != 0:
@@ -2029,13 +2031,20 @@ def _seal_host_conformance(
     trials: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     seen: set[str] = set()
+    hosts_present: set[str] = set()
     for trial in trials:
         key = f"{trial['host']}:{trial['scenario']}"
         if key in seen:
             _fail("hostConformance", f"duplicates the {key} trial")
         seen.add(key)
-    for host, scenarios in HOST_MATRIX.items():
-        for scenario in scenarios:
+        hosts_present.add(str(trial["host"]))
+    # Mirror the verifier: mcp, cli, and claude are mandatory; codex is
+    # covered only when the run captured it, and then completely.
+    required_hosts = {"mcp", "cli", "claude"} | (
+        {"codex"} if "codex" in hosts_present else set()
+    )
+    for host in sorted(required_hosts):
+        for scenario in HOST_MATRIX[host]:
             if f"{host}:{scenario}" not in seen:
                 _fail("hostConformance", f"omits {host}/{scenario}")
     evidence: dict[str, Any] = {
@@ -2061,14 +2070,17 @@ def _seal_host_conformance(
     return evidence
 
 
-def _assert_semantic_parity(trials: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+def _assert_semantic_parity(
+    trials: Sequence[Mapping[str, Any]],
+    agent_hosts: Sequence[str],
+) -> dict[str, str]:
     """Reproduce the verifier's cross-host parity requirements locally."""
 
     by_key = {f"{row['host']}:{row['scenario']}": row for row in trials}
     parity: dict[str, str] = {}
     for scenario in ("status", "retrieval", "expansion", "bounded-recovery"):
         want = by_key[f"mcp:{scenario}"]["semanticDigest"]
-        for host in ("cli", "claude", "codex"):
+        for host in ("cli", *agent_hosts):
             observed = by_key[f"{host}:{scenario}"]["semanticDigest"]
             if observed != want:
                 _fail(
@@ -2077,7 +2089,7 @@ def _assert_semantic_parity(trials: Sequence[Mapping[str, Any]]) -> dict[str, st
                 )
         parity[scenario] = want
     discovery = by_key["mcp:discovery"]["semanticDigest"]
-    for host in ("claude", "codex"):
+    for host in agent_hosts:
         if by_key[f"{host}:discovery"]["semanticDigest"] != discovery:
             _fail(
                 "hostConformance.discovery",
@@ -2085,7 +2097,7 @@ def _assert_semantic_parity(trials: Sequence[Mapping[str, Any]]) -> dict[str, st
             )
     parity["discovery"] = discovery
     status = by_key["cli:status"]["semanticDigest"]
-    for host in ("claude", "codex"):
+    for host in agent_hosts:
         if by_key[f"{host}:local-fallback"]["semanticDigest"] != status:
             _fail(
                 "hostConformance.localFallback",
@@ -3122,7 +3134,7 @@ def _run_host_conformance(
     arm: Arm,
     harness: Harness,
     claude: Path,
-    codex: Path,
+    codex: Path | None,
     claude_model: str,
     codex_model: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -3144,10 +3156,10 @@ def _run_host_conformance(
         for row in cli_trials
         if row["scenario"] == "status"
     )
-    for host, executable, model in (
-        ("claude", claude, claude_model),
-        ("codex", codex, codex_model),
-    ):
+    agent_rows = [("claude", claude, claude_model)]
+    if codex is not None:
+        agent_rows.append(("codex", codex, codex_model))
+    for host, executable, model in agent_rows:
         host_trials, host_captures = _run_agent_host(
             host, executable=executable, model=model, arm=arm, harness=harness, proxy=proxy
         )
@@ -3217,6 +3229,7 @@ def _blinded_trial(
     executable: Path,
     model: str,
     case: Mapping[str, Any],
+    judging_case: Mapping[str, Any],
     condition: str,
     arm: Arm,
     benchmark_outcome: Mapping[str, Any],
@@ -3245,9 +3258,17 @@ def _blinded_trial(
         executor=harness.executor,
         timeout_seconds=harness.timeout_seconds,
     )
+    # Each arm is judged against the evaluation corpus that describes that
+    # arm's own tree. The compiled arm answers from converted destinations;
+    # the legacy arm's correct evidence lives at the paths the pre-migration
+    # corpus names for the same case. Judging the legacy baseline against
+    # converted destinations that do not exist in a 0.7 checkout would score
+    # every legacy trial zero and make the paired comparison meaningless.
+    # The frozen request, blinding, and identities always come from the
+    # canonical case; only the expectation fields may differ per arm.
     judgment, scores = _derive_judgment(
         trial_id=trial_id,
-        eval_case=case,
+        eval_case=judging_case,
         benchmark_outcome=benchmark_outcome,
         transcript=transcript,
         workspace=arm.workspace,
@@ -3275,25 +3296,53 @@ def _blinded_trial(
     return outcome, judgment, refs
 
 
+def _legacy_judging_cases(
+    legacy_project: Path,
+    cases: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Map each canonical holdout case to its legacy-corpus counterpart.
+
+    The legacy arm's ground truth is what the pre-migration corpus expected
+    for the same case ID. Answerability must agree with the canonical case
+    because the verifier binds every trial, in both conditions, to the
+    canonical case's answerability.
+    """
+
+    legacy_holdout, legacy_inventory = _load_eval_cases(legacy_project)
+    by_id = {str(row["id"]): row for row in legacy_holdout}
+    result: dict[str, dict[str, Any]] = {}
+    for case in cases:
+        case_id = str(case["id"])
+        legacy_case = by_id.get(case_id)
+        if legacy_case is None:
+            _fail(
+                "legacyEvalCorpus",
+                f"legacy corpus omits holdout case {case_id}; the legacy arm has no ground truth for it",
+            )
+        if _case_answerable(legacy_case) != _case_answerable(case):
+            _fail(
+                "legacyEvalCorpus",
+                f"holdout case {case_id} changed answerability across the migration",
+            )
+        result[case_id] = dict(legacy_case)
+    return result, legacy_inventory
+
+
 def _run_blinded_suite(
     *,
     cases: Sequence[Mapping[str, Any]],
+    legacy_cases: Mapping[str, Mapping[str, Any]],
     outcomes: Mapping[str, Mapping[str, Any]],
     arms: Mapping[str, Arm],
     harness: Harness,
-    claude: Path,
-    codex: Path,
-    claude_model: str,
-    codex_model: str,
+    hosts: Mapping[str, tuple[Path, str]],
     tested_host: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     tested: list[dict[str, Any]] = []
     cross: list[dict[str, Any]] = []
     refs: list[dict[str, Any]] = []
-    hosts = {
-        "claude": (claude, claude_model),
-        "codex": (codex, codex_model),
-    }
+    if tested_host not in hosts:
+        _fail("blindedEvaluation", f"tested host {tested_host} has no executable")
     for case in cases:
         case_id = str(case["id"])
         if case_id not in outcomes:
@@ -3302,12 +3351,14 @@ def _run_blinded_suite(
                 f"holdout case {case_id} has no primary-profile benchmark outcome",
             )
         for condition in ("legacy", "compiled"):
+            judging_case = case if condition == "compiled" else legacy_cases[case_id]
             for host, (executable, model) in hosts.items():
                 outcome, _judgment, row = _blinded_trial(
                     host=host,
                     executable=executable,
                     model=model,
                     case=case,
+                    judging_case=judging_case,
                     condition=condition,
                     arm=arms[condition],
                     benchmark_outcome=outcomes[case_id],
@@ -3389,9 +3440,20 @@ def _parser() -> argparse.ArgumentParser:
         help="project-relative prefix the staged artifacts will occupy",
     )
     parser.add_argument("--claude-executable", required=True)
-    parser.add_argument("--codex-executable", required=True)
+    parser.add_argument(
+        "--codex-executable",
+        default="",
+        help=(
+            "optional: supply only when the project uses the Codex host; the "
+            "mandatory conformance surfaces are MCP, CLI, and Claude Code"
+        ),
+    )
     parser.add_argument("--claude-model", required=True)
-    parser.add_argument("--codex-model", required=True)
+    parser.add_argument(
+        "--codex-model",
+        default="",
+        help="required with --codex-executable",
+    )
     parser.add_argument(
         "--tested-host",
         choices=("claude", "codex"),
@@ -3415,19 +3477,24 @@ def _execution_manifest(
     executables: Mapping[str, Any],
     authentication: Mapping[str, Any],
     eval_inventory: Sequence[Mapping[str, Any]],
+    legacy_eval_inventory: Sequence[Mapping[str, Any]],
     isolation: Sequence[Mapping[str, Any]],
     blinded_refs: Sequence[Mapping[str, Any]],
     cross_cases: Sequence[Mapping[str, Any]],
     host_captures: Mapping[str, Any],
     parity: Mapping[str, str],
     blinded_ref: ArtifactRef,
-    host_ref: ArtifactRef,
+    host_ref: ArtifactRef | None,
     started_at: str,
     elapsed_seconds: int,
 ) -> dict[str, Any]:
+    artifacts: dict[str, Any] = {"blindedEvaluation": blinded_ref.json()}
+    if host_ref is not None:
+        artifacts["hostConformance"] = host_ref.json()
     return {
         "schemaVersion": 1,
         "suite": EXECUTION_SUITE,
+        "agentHosts": ["claude"] + (["codex"] if arguments.codex_executable else []),
         "startedAt": started_at,
         "finishedAt": _utc_now(),
         "elapsedSeconds": elapsed_seconds,
@@ -3439,15 +3506,14 @@ def _execution_manifest(
         "authentication": dict(authentication),
         "withheldEvaluationFiles": [dict(row) for row in eval_inventory],
         "withheldEvaluationDigest": _inventory_digest(eval_inventory),
+        "withheldLegacyEvaluationFiles": [dict(row) for row in legacy_eval_inventory],
+        "withheldLegacyEvaluationDigest": _inventory_digest(legacy_eval_inventory),
         "workspaceIsolation": [dict(row) for row in isolation],
         "blindedTrials": [dict(row) for row in blinded_refs],
         "crossHostCases": [dict(row) for row in cross_cases],
         "hostCaptures": dict(host_captures),
         "semanticParity": dict(parity),
-        "artifacts": {
-            "blindedEvaluation": blinded_ref.json(),
-            "hostConformance": host_ref.json(),
-        },
+        "artifacts": artifacts,
     }
 
 
@@ -3463,7 +3529,15 @@ def _execute(arguments: argparse.Namespace) -> int:
     store = ArtifactStore(Path(arguments.output).expanduser(), arguments.destination_prefix)
 
     claude = _resolve_executable(arguments.claude_executable, expected="claude")
-    codex = _resolve_executable(arguments.codex_executable, expected="codex")
+    codex: Path | None = None
+    if arguments.codex_executable:
+        if not arguments.codex_model:
+            _fail("codexModel", "--codex-executable requires --codex-model")
+        codex = _resolve_executable(arguments.codex_executable, expected="codex")
+    elif arguments.codex_model:
+        _fail("codexExecutable", "--codex-model requires --codex-executable")
+    elif arguments.tested_host != "claude":
+        _fail("testedHost", "testing the codex host requires --codex-executable")
     authentication = _check_authentication(
         claude=claude,
         codex=codex,
@@ -3478,8 +3552,13 @@ def _execute(arguments: argparse.Namespace) -> int:
     transaction_id, plan_digest, _state = _migration_identity(arguments.project)
 
     # The evaluation corpus is read, fingerprinted, and then withheld: no
-    # workspace an agent can reach receives any of these bytes.
+    # workspace an agent can reach receives any of these bytes. The legacy
+    # corpus supplies the legacy arm's ground truth and is withheld the same
+    # way.
     holdout, eval_inventory = _load_eval_cases(arguments.project)
+    legacy_cases, legacy_eval_inventory = _legacy_judging_cases(
+        arguments.legacy_project, holdout
+    )
     benchmark_path = _contained(arguments.project, arguments.benchmark, field="benchmark")
     _report, outcomes, benchmark_body = _load_benchmark(benchmark_path)
     benchmark_digest = _sha256(benchmark_body)
@@ -3529,9 +3608,10 @@ def _execute(arguments: argparse.Namespace) -> int:
         workspace_root=workspace_root,
         required_paths=(),
     )
+    withheld_inventory = list(eval_inventory) + list(legacy_eval_inventory)
     isolation = [
-        _assert_evals_withheld(compiled, eval_inventory),
-        _assert_evals_withheld(legacy, eval_inventory),
+        _assert_evals_withheld(compiled, withheld_inventory),
+        _assert_evals_withheld(legacy, withheld_inventory),
     ]
 
     harness = Harness(store, executor, scratch, arguments.timeout_seconds)
@@ -3540,15 +3620,6 @@ def _execute(arguments: argparse.Namespace) -> int:
             key="claude",
             path=claude,
             version_argv=[str(claude), "--version"],
-            executor=executor,
-            cwd=compiled.workspace,
-            store=store,
-            timeout_seconds=arguments.timeout_seconds,
-        ),
-        "codex": _executable_identity(
-            key="codex",
-            path=codex,
-            version_argv=[str(codex), "--version"],
             executor=executor,
             cwd=compiled.workspace,
             store=store,
@@ -3587,23 +3658,41 @@ def _execute(arguments: argparse.Namespace) -> int:
             timeout_seconds=arguments.timeout_seconds,
         ),
     }
+    hosts: dict[str, tuple[Path, str]] = {"claude": (claude, arguments.claude_model)}
+    if codex is not None:
+        executables["codex"] = _executable_identity(
+            key="codex",
+            path=codex,
+            version_argv=[str(codex), "--version"],
+            executor=executor,
+            cwd=compiled.workspace,
+            store=store,
+            timeout_seconds=arguments.timeout_seconds,
+        )
+        hosts["codex"] = (codex, arguments.codex_model)
 
     tested_cases, cross_cases, blinded_refs = _run_blinded_suite(
         cases=holdout,
+        legacy_cases=legacy_cases,
         outcomes=outcomes,
         arms={"compiled": compiled, "legacy": legacy},
         harness=harness,
-        claude=claude,
-        codex=codex,
-        claude_model=arguments.claude_model,
-        codex_model=arguments.codex_model,
+        hosts=hosts,
         tested_host=arguments.tested_host,
     )
-    cross_host = "codex" if arguments.tested_host == "claude" else "claude"
-    cross_model = (
-        arguments.codex_model if cross_host == "codex" else arguments.claude_model
-    )
-    evaluator = f"{AGENT_IDENTITIES[cross_host]}:{cross_model}"
+    if codex is not None:
+        cross_host = "codex" if arguments.tested_host == "claude" else "claude"
+        cross_model = (
+            arguments.codex_model if cross_host == "codex" else arguments.claude_model
+        )
+        evaluator = f"{AGENT_IDENTITIES[cross_host]}:{cross_model}"
+    else:
+        # Scoring is derived deterministically by this harness from captured
+        # transcripts and the arm's own evaluation corpus; no second agent
+        # participates. Name that procedure, bound to these exact harness
+        # bytes, instead of a provider that did not run.
+        harness_digest, _harness_bytes = _hash_file(Path(__file__).resolve())
+        evaluator = f"deterministic-judgment:{harness_digest}"
     evaluation = _seal_blinded_evaluation(
         transaction_id=transaction_id,
         plan_digest=plan_digest,
@@ -3614,6 +3703,7 @@ def _execute(arguments: argparse.Namespace) -> int:
     )
     store.write_json("blinded/cross-host-trials.json", cross_cases)
 
+    agent_hosts = ["claude"] + (["codex"] if codex is not None else [])
     trials, host_captures = _run_host_conformance(
         arm=compiled,
         harness=harness,
@@ -3622,7 +3712,7 @@ def _execute(arguments: argparse.Namespace) -> int:
         claude_model=arguments.claude_model,
         codex_model=arguments.codex_model,
     )
-    parity = _assert_semantic_parity(trials)
+    parity = _assert_semantic_parity(trials, agent_hosts)
     conformance = _seal_host_conformance(
         transaction_id=transaction_id, plan_digest=plan_digest, trials=trials
     )
@@ -3638,6 +3728,7 @@ def _execute(arguments: argparse.Namespace) -> int:
         executables=executables,
         authentication=authentication,
         eval_inventory=eval_inventory,
+        legacy_eval_inventory=legacy_eval_inventory,
         isolation=isolation,
         blinded_refs=blinded_refs,
         cross_cases=cross_cases,
@@ -3651,15 +3742,17 @@ def _execute(arguments: argparse.Namespace) -> int:
     manifest_ref = store.write_json("execution-manifest.json", manifest)
     store.write_json("copy-map.json", store.copy_map())
 
-    for label, reference in (
+    references = [
         ("blindedEvaluation", blinded_ref),
-        ("hostConformance", host_ref),
         ("executionManifest", manifest_ref),
-    ):
+    ]
+    if host_ref is not None:
+        references.insert(1, ("hostConformance", host_ref))
+    for label, reference in references:
         print(f"{label} destination {reference.path}")
         print(f"{label} staged {store.physical_path(reference)}")
         print(f"{label} sha256 {reference.digest}")
-    if not evaluation["passed"] or not conformance["passed"]:
+    if not evaluation["passed"] or (conformance is not None and not conformance["passed"]):
         _fail(
             "certification",
             "measured evidence does not support a passing gate; the artifacts "
