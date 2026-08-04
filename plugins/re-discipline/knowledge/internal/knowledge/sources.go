@@ -360,6 +360,24 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		chunks = append(chunks, ChunkMarkdown(doc)...)
 	}
 	edges := BuildGraphEdges(documents, chunks)
+	fingerprint, err := CorpusFingerprintForDocuments(documents)
+	if err != nil {
+		return SourceInventory{}, err
+	}
+	return SourceInventory{
+		Documents: documents, Findings: findings, Chunks: chunks, Edges: edges,
+		SourceStates:    sortedSourceStates(sourceStates),
+		DirectoryStates: sortedSourceStates(directoryStates),
+		Fingerprint:     fingerprint, Diagnostics: diagnostics,
+	}, nil
+}
+
+// CorpusFingerprintForDocuments derives the corpus identity every generation,
+// benchmark, and unpinned evaluation case binds. Documents must already be in
+// discovery order (sorted by path). Extracted so the migrator can compute the
+// exact post-activation fingerprint from a merged staged-plus-surviving-live
+// document view without duplicating this digest's shape.
+func CorpusFingerprintForDocuments(documents []SourceDocument) (string, error) {
 	type fingerprintDocument struct {
 		ID          string `json:"id"`
 		Path        string `json:"path"`
@@ -384,16 +402,7 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 		Analyzer  string                `json:"analyzer"`
 		Documents []fingerprintDocument `json:"documents"`
 	}{ParserVersion, ChunkerVersion, IdentifierAnalyzerVersion, fingerprintDocuments}
-	fingerprint, err := CanonicalDigest(fingerprintInput)
-	if err != nil {
-		return SourceInventory{}, err
-	}
-	return SourceInventory{
-		Documents: documents, Findings: findings, Chunks: chunks, Edges: edges,
-		SourceStates:    sortedSourceStates(sourceStates),
-		DirectoryStates: sortedSourceStates(directoryStates),
-		Fingerprint:     fingerprint, Diagnostics: diagnostics,
-	}, nil
+	return CanonicalDigest(fingerprintInput)
 }
 
 // Typed campaign sources are deliberately constrained to the 0.8 layout.
