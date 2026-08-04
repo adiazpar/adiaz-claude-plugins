@@ -1110,7 +1110,21 @@ def _derive_judgment(
         )
     else:
         factual_accuracy = 1.0 if decision_correct and not claims else 0.0
-    decision_accuracy = 1.0 if decision_correct else 0.0
+    # decisionAccuracy scores correct-answer-or-correct-abstention. The point
+    # is earned by a factually correct answer on an answerable case, or by an
+    # abstention on a case the corpus does not ground. A confident answer that
+    # is factually wrong earns nothing: the previous rule scored only
+    # decision-matches-expectation, so on an answerable case a wrong answer
+    # outscored an honest abstention, rewarding confident falsehood. Both arms
+    # are scored by this same rule.
+    decision_accuracy = (
+        1.0
+        if (
+            (answerable and decision == "answer" and factual_accuracy >= 0.5)
+            or (not answerable and decision == "abstain")
+        )
+        else 0.0
+    )
     evidence_trace = (
         unsupported == 0
         and negative_safe
