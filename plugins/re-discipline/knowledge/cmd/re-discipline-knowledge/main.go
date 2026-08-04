@@ -305,12 +305,23 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if args[0] != "status" {
+	// Calibration is read-only retrieval measurement: it writes only cache
+	// artifacts and emits a non-activating candidate. Migration certification
+	// requires the final calibration of the converted project before the
+	// retrieval gate receipt is recorded, exactly like the benchmark, so it
+	// runs under the measurement guard and must not trigger recovery writes
+	// while the migration transaction is nonterminal.
+	measurement := args[0] == "calibrate"
+	if args[0] != "status" && !measurement {
 		if _, err := knowledge.RecoverProject(root, filepath.Dir(asset)); err != nil {
 			return err
 		}
 	}
-	service, err := knowledge.NewService(knowledge.ServiceOptions{
+	construct := knowledge.NewService
+	if measurement {
+		construct = knowledge.NewMeasurementService
+	}
+	service, err := construct(knowledge.ServiceOptions{
 		ProjectRoot: root, AssetRoot: asset, CacheRoot: *cacheRoot,
 	})
 	if err != nil {
