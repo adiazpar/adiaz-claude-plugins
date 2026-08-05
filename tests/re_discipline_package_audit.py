@@ -52,7 +52,6 @@ EXPECTED_MCP_TOOLS = [
     "migrate_project",
 ]
 
-EXPECTED_PLUGIN_VERSION = "0.8.0"
 RUNTIME_BUILD_ID_PATH = (
     "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
 )
@@ -579,14 +578,28 @@ def validate_runtime_release(
     plugin_version: str,
     violations: list[dict[str, str]],
 ) -> None:
-    if plugin_version != EXPECTED_PLUGIN_VERSION:
+    # The published version has exactly one definition: RuntimeVersion in
+    # knowledge/internal/knowledge/types.go. Holding a second copy here meant
+    # every release had to edit this file too, and a missed edit failed the
+    # audit for a version that was in fact correct everywhere it shipped.
+    knowledge_root = stage / "knowledge"
+    expected_version = read_version_constant(
+        knowledge_root / "internal" / "knowledge" / "types.go", "RuntimeVersion"
+    )
+    if not expected_version:
+        add_violation(
+            violations,
+            "plugin-version-undeclared",
+            "knowledge/internal/knowledge/types.go",
+            "RuntimeVersion is not declared",
+        )
+    elif plugin_version != expected_version:
         add_violation(
             violations,
             "plugin-version-mismatch",
             ".claude-plugin/plugin.json",
-            f"{plugin_version!r} != {EXPECTED_PLUGIN_VERSION!r}",
+            f"{plugin_version!r} != {expected_version!r}",
         )
-    knowledge_root = stage / "knowledge"
     version_sources: list[tuple[str, str]] = []
     try:
         codex_manifest = json.loads(
@@ -604,19 +617,9 @@ def validate_runtime_release(
                 ),
             )
         )
-        version_sources.append(
-            (
-                "knowledge/cmd/re-discipline-knowledge-packager/main.go",
-                read_version_constant(
-                    stage
-                    / "knowledge"
-                    / "cmd"
-                    / "re-discipline-knowledge-packager"
-                    / "main.go",
-                    "runtimeVersion",
-                ),
-            )
-        )
+        # The packager no longer redeclares the version; it consumes
+        # knowledge.RuntimeVersion directly, so there is nothing left here
+        # that could disagree.
         model_manifest = json.loads(
             (stage / "knowledge" / "models" / "manifest.json").read_text(
                 encoding="utf-8"

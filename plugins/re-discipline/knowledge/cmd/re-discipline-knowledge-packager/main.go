@@ -22,12 +22,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/adiaz/re-discipline-knowledge/internal/knowledge"
 )
 
 const (
-	packageSchemaVersion       = 1
-	runtimeName                = "re-discipline-knowledge"
-	runtimeVersion             = "0.8.0"
+	packageSchemaVersion = 1
+	runtimeName          = "re-discipline-knowledge"
+	// The published package version has exactly one definition:
+	// knowledge.RuntimeVersion. Redeclaring the literal here let the packager
+	// and the runtime drift apart silently, which is the same class of defect
+	// that lets changed content ship under an already-published version.
+	runtimeVersion             = knowledge.RuntimeVersion
 	runtimeBuildIDPath         = "github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID"
 	windowsLauncherBuildIDPath = "main.CompiledBuildID"
 	projectLaneMeasurementPath = "evals/conformance/project-lane-ablation.json"

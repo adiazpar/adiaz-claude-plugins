@@ -12,6 +12,9 @@ import (
 )
 
 const (
+	// The one definition of the published version. The packager, the package
+	// audit, and .github/scripts/re-discipline-sync-version.py all derive
+	// from this; a release is this line plus a manifest sync.
 	RuntimeVersion = "0.8.0"
 	ParserVersion  = "markdown-finding-v2-identifier-v1"
 	// Bumped for the per-chunk document prelude, then again for the opening

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -53,7 +54,11 @@ func TestKnowledgeSettingsV2MatchesPackagedPolicyShape(t *testing.T) {
 	if err := ValidateSettings(settings); err == nil {
 		t.Fatal("escaping archive receipt path was accepted")
 	}
-	if RuntimeVersion != "0.8.0" || CitationDurability("archive") != "durable" {
+	// RuntimeVersion is the single definition of the published version, so
+	// pinning its literal here only forced an unrelated test edit on every
+	// release. Assert the shape it must always have instead.
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(RuntimeVersion) ||
+		CitationDurability("archive") != "durable" {
 		t.Fatalf("runtime or archive durability is stale: version=%s archive=%s", RuntimeVersion, CitationDurability("archive"))
 	}
 }
