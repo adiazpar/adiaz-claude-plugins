@@ -79,8 +79,12 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
     def test_manifests_publish_one_080_contract(self):
         claude = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
         codex = json.loads((PLUGIN / ".codex-plugin" / "plugin.json").read_text())
-        self.assertEqual(claude["version"], "0.8.0")
-        self.assertEqual(codex["version"], "0.8.0")
+        # Both manifests must publish the same version, and it must stay on
+        # the 0.8 contract line. The patch version advances with every release
+        # -- pinning it here would make each release a test failure, which is
+        # how the published version fell 75 commits behind the source.
+        self.assertEqual(claude["version"], codex["version"])
+        self.assertRegex(claude["version"], r"^0\.8\.\d+$")
         for manifest in (claude, codex):
             description = manifest["description"].lower()
             self.assertIn("transactional", description)

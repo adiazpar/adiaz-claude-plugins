@@ -20,7 +20,10 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
         second = audit_plugin(PLUGIN)
         self.assertEqual(first["artifactDigest"], second["artifactDigest"])
         self.assertEqual(first["inventoryDigest"], second["inventoryDigest"])
-        self.assertEqual(first["pluginVersion"], "0.8.0")
+        declared = json.loads(
+            (PLUGIN / ".claude-plugin" / "plugin.json").read_text()
+        )["version"]
+        self.assertEqual(first["pluginVersion"], declared)
         self.assertEqual(first["violations"], [], json.dumps(first["violations"], indent=2))
         self.assertGreater(first["fileCount"], 0)
 
