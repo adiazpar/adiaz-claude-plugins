@@ -5,7 +5,7 @@
   "type": "object",
   "required": [
     "schemaVersion", "planId", "planDigest", "project", "projectIdentity",
-    "detectedVersion", "sourceFingerprint", "liveCampaigns", "sources",
+    "detectedVersion", "sourceRevision", "sourceFingerprint", "liveCampaigns", "sources",
     "operations", "conflicts", "unresolvedClassifications", "profileChanges",
     "profileBaseline", "baselineRequirements", "hostInventory", "truthConversions", "estimate"
   ],
@@ -21,6 +21,7 @@
       ]
     },
     "detectedVersion": {"enum": ["0.7", "0.8"]},
+    "sourceRevision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "sourceFingerprint": {"$ref": "#/$defs/digest"},
     "liveCampaigns": {"type": "array", "items": {"$ref": "#/$defs/slug"}, "uniqueItems": true},
     "sources": {

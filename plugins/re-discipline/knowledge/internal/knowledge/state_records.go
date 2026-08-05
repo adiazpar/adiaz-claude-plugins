@@ -662,8 +662,19 @@ func ValidateFinding(record FindingRecord) error {
 		!validOne(record.Validity, "provisional", "current", "challenged", "historical", "superseded", "invalid") {
 		return errors.New("finding epistemic states are invalid")
 	}
-	if len(record.SourceRuns) == 0 || len(record.Evidence) == 0 {
-		return errors.New("finding requires a source run and exact evidence")
+	if len(record.Evidence) == 0 {
+		return errors.New("finding requires exact evidence")
+	}
+	if len(record.SourceRuns) == 0 {
+		// A finding may omit source runs only when every evidence reference
+		// is pinned to the project's git archive - the migrated-truth shape,
+		// whose provenance is a revision-addressed blob rather than a run
+		// payload. Every run-derived finding still requires its run.
+		for _, evidence := range record.Evidence {
+			if !migrationGitPinnedEvidence(evidence) {
+				return errors.New("finding requires a source run for evidence that is not archive-pinned")
+			}
+		}
 	}
 	if err := validateIDList("finding source runs", record.SourceRuns, runIDRE, ""); err != nil {
 		return err

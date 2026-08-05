@@ -137,29 +137,6 @@ func ExtractReportPrelude(body, path string) DocumentPrelude {
 	return prelude
 }
 
-// ExtractLegacyTruthPrelude labels a migration-preserved pre-conversion truth
-// document. These bytes were ratified truth before conversion and their claims
-// now live in normalized findings, so the unreviewed-drafter label a raw run
-// report receives would be false here. The preserved prose keeps its own
-// extracted claim and confidence fields; only its status is synthesized, and
-// that status names the normalized finding tier as the current authority.
-func ExtractLegacyTruthPrelude(body, path string) DocumentPrelude {
-	prelude := ExtractDocumentPrelude(body, path)
-	prelude.Status = "SUPERSEDED BY NORMALIZED FINDING - preserved original prose; the finding is authoritative"
-	return prelude
-}
-
-// ExtractLegacyCampaignPrelude labels a migration-preserved pre-conversion
-// campaign masterfile. The masterfile's narrative remains valuable retrieval
-// provenance, but its state assertions were converted into structured
-// campaign, work-item, and event records, which are the only current
-// authority.
-func ExtractLegacyCampaignPrelude(body, path string) DocumentPrelude {
-	prelude := DocumentPrelude{Title: normalizePreludeField(titleFromMarkdown(body, path))}
-	prelude.Status = "SUPERSEDED BY CANONICAL CAMPAIGN RECORDS - preserved masterfile prose; current state lives in the structured campaign records"
-	return prelude
-}
-
 // ExtractDocumentPrelude reads a document body and returns its header fields.
 // Every field is optional: history, backlog, active and memory documents carry
 // no Claim block, and degrade to a title-only prelude of 8-15 tokens. path is

@@ -16,6 +16,7 @@ func migrationProfileDecisionFixture(t *testing.T) (string, MigrationProfileConf
 	t.Helper()
 	root := migrationPreviewFixture(t)
 	mustWriteFile(t, filepath.Join(root, filepath.FromSlash(migrationLegacyRetrievalProfilePath)), unsupportedLegacyProfileFixture)
+	commitMigrationFixture(t, root)
 	packet, err := ExportMigrationProfileConflict(root)
 	if err != nil {
 		t.Fatal(err)

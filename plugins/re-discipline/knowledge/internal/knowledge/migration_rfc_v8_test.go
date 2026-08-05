@@ -17,6 +17,7 @@ func migrationFixtureToNormalized(t *testing.T, root string) (*MigrationEngine, 
 	t.Helper()
 	migrationCertificationEvalCases(t, root)
 	reviewFixtureTruthConflicts(t, root)
+	commitMigrationFixture(t, root)
 	preview, err := PreviewMigration(root, []string{"live-campaign"})
 	if err != nil {
 		t.Fatal(err)
@@ -420,11 +421,15 @@ func TestMigrationPreservesMissingLaunchProvenanceReviewConflictAndOverlappingRo
 			t.Fatal(err)
 		}
 	}
-	importPath := filepath.Join(root, "active", "live-campaign", "runs",
-		legacyRunID("live-campaign", "campaign-import"), "payload", "legacy", "review-import.json")
+	importPath := filepath.Join(root, ".re-discipline", "knowledge", "migration",
+		"review-imports", "live-campaign.json")
 	importBody, err := os.ReadFile(importPath)
 	if err != nil || !strings.Contains(string(importBody), `"status": "proposed-import"`) || !strings.Contains(string(importBody), `"promote": 1`) {
 		t.Fatalf("aggregate ledger provenance was not retained as a non-decision proposal: %v %s", err, importBody)
+	}
+	if _, err := os.Stat(filepath.Join(root, "active", "live-campaign", "runs",
+		legacyRunID("live-campaign", "campaign-import"), "payload", "legacy", "review-import.json")); !os.IsNotExist(err) {
+		t.Fatalf("ledger import must not ride a synthetic run payload: %v", err)
 	}
 }
 
@@ -641,9 +646,13 @@ func TestLegacyTruthBecomesQueryableTypedTruthWithCompatibilityReceipt(t *testin
 	if err != nil || strings.Contains(string(indexBody), "(claim.md)") || !strings.Contains(string(indexBody), "findings/") {
 		t.Fatalf("truth support navigation was removed or retained a stale link: %v %s", err, indexBody)
 	}
-	provenance, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(receipt.ProvenancePath)))
+	provenanceRevision, provenancePath, err := parseMigrationGitRef(receipt.ProvenancePath)
+	if err != nil || provenancePath != "docs/truth/claim.md" || provenanceRevision != plan.SourceRevision {
+		t.Fatalf("truth receipt does not cite the approved archived provenance: %q %v", receipt.ProvenancePath, err)
+	}
+	provenance, err := migrationGitBlob(root, provenanceRevision, provenancePath)
 	if err != nil || string(provenance) != legacyBody {
-		t.Fatalf("legacy truth provenance was not byte-preserved: %v", err)
+		t.Fatalf("legacy truth provenance was not byte-preserved in the archive: %v", err)
 	}
 	service, err := NewService(ServiceOptions{ProjectRoot: root, AssetRoot: adversarialAssetRoot(t)})
 	if err != nil {
@@ -809,6 +818,7 @@ func TestManagerCanResolveImplicitLegacyTruthWithoutInferredClaim(t *testing.T) 
 	root := migrationPreviewFixture(t)
 	mustWriteFile(t, filepath.Join(root, "docs", "truth", "claim.md"),
 		"# Implicit cache rule\n\nCache keys remain stable during a bounded reload.\n")
+	commitMigrationFixture(t, root)
 	packet, err := ExportMigrationTruthConflicts(root)
 	if err != nil || len(packet.Conflicts) != 1 || packet.Conflicts[0].SourceCoverageText == "" {
 		t.Fatalf("implicit truth conflict packet: %+v %v", packet, err)
@@ -860,6 +870,7 @@ func TestReviewedLongTruthSplitRegeneratesPlanAndMigratesEndToEnd(t *testing.T) 
 		"# Compound cache contract\n\n**Claim:** "+legacyClaim+"\n\n**Confidence:** Strong\n")
 	mustWriteFile(t, filepath.Join(root, "docs", "truth", "INDEX.md"),
 		"# Truth navigation\n\n- [Compound cache contract](claim.md)\n")
+	commitMigrationFixture(t, root)
 
 	blocked, err := PreviewMigration(root, []string{"live-campaign"})
 	if err != nil {

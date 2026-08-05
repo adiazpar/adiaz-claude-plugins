@@ -114,37 +114,16 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			Path: "docs/history/campaigns", Tier: "archive", Recursive: true, BaseOnly: "report.md",
 			SourceKind: "raw-report", Enabled: settings.Sources.ReportFallback,
 		},
-		// Migration preserves each converted truth document verbatim under its
-		// import run. A finding carries the reviewed claim and a handful of
-		// reviewed questions, which is far less text than the document it
-		// replaced, so a question phrased against the original prose loses its
-		// only match. The preserved bytes stay searchable at archive tier for
-		// the same reason run reports do: provenance ranks below normalized
-		// findings but must never become unreachable.
+		// A campaign's generated state view is its retrievable narrative
+		// surface: converted campaigns carry no preserved masterfile copy
+		// (the pre-conversion prose is archived by git), and native 0.8
+		// campaigns have no masterfile at all. The view is derived from
+		// canonical records, so indexing it never makes it authoritative -
+		// it makes current campaign state reachable by the same retrieval
+		// that reaches findings.
 		{
-			Path: "active", Tier: "archive", Recursive: true,
-			RequireSegment: "/payload/legacy/truth/",
-			SourceKind:     "legacy-truth", Enabled: settings.Sources.ReportFallback,
-		},
-		{
-			Path: "docs/history/campaigns", Tier: "archive", Recursive: true,
-			RequireSegment: "/payload/legacy/truth/",
-			SourceKind:     "legacy-truth", Enabled: settings.Sources.ReportFallback,
-		},
-		// Migration also preserves each campaign's legacy masterfile verbatim
-		// under its import run. The masterfile's prose is the only retrievable
-		// text a converted campaign has -- its canonical successor records are
-		// structured JSON outside the Markdown corpus -- so the preserved
-		// bytes stay searchable at archive tier like other run provenance.
-		{
-			Path: "active", Tier: "archive", Recursive: true, BaseOnly: "CAMPAIGN.md",
-			RequireSegment: "/payload/legacy/",
-			SourceKind:     "legacy-campaign", Enabled: settings.Sources.ReportFallback,
-		},
-		{
-			Path: "docs/history/campaigns", Tier: "archive", Recursive: true, BaseOnly: "CAMPAIGN.md",
-			RequireSegment: "/payload/legacy/",
-			SourceKind:     "legacy-campaign", Enabled: settings.Sources.ReportFallback,
+			Path: "active", Tier: "campaign", Recursive: true, BaseOnly: "STATE.md",
+			SourceKind: "campaign-state", Enabled: settings.Sources.ActiveFindings,
 		},
 		{Path: ".re-discipline/memory/INDEX.md", Tier: "navigation", Enabled: settings.Sources.SharedMemory},
 		{Path: ".re-discipline/memory/topics", Tier: "memory", Recursive: true, Enabled: settings.Sources.SharedMemory},
@@ -269,14 +248,6 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 			}
 			if class.SourceKind == "raw-report" &&
 				!validRawReportSourcePath(boundary, path, cutoverCache) {
-				return nil
-			}
-			if class.SourceKind == "legacy-truth" &&
-				!validLegacyTruthSourcePath(boundary, path, cutoverCache) {
-				return nil
-			}
-			if class.SourceKind == "legacy-campaign" &&
-				!validLegacyCampaignSourcePath(boundary, path, cutoverCache) {
 				return nil
 			}
 			relative, err := boundary.Relative(path)
@@ -450,61 +421,6 @@ func validRawReportSourcePath(boundary Boundary, absolute string, cutoverCache m
 		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
 		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
 		parts[6] == "report.md" {
-		return archiveCutoverPublished(
-			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
-	}
-	return false
-}
-
-// validLegacyTruthSourcePath admits the verbatim pre-migration truth documents
-// that migration preserves under an import run's payload. The raw-report
-// validator is deliberately strict about its two report.md shapes and must
-// stay that way, so preserved legacy truth carries its own source kind and its
-// own shape: runs/<runID>/payload/legacy/truth/<original relative path>. The
-// same campaign-visibility and archive-cutover rules apply as for the run's
-// report, so a closed campaign's provenance is served from exactly one place.
-func validLegacyTruthSourcePath(boundary Boundary, absolute string, cutoverCache map[string]bool) bool {
-	relative, err := boundary.Relative(absolute)
-	if err != nil {
-		return false
-	}
-	parts := strings.Split(relative, "/")
-	if len(parts) >= 8 && parts[0] == "active" &&
-		managedSlugRE.MatchString(parts[1]) && parts[2] == "runs" &&
-		runIDRE.MatchString(parts[3]) && parts[4] == "payload" &&
-		parts[5] == "legacy" && parts[6] == "truth" {
-		return activeCampaignSourcesVisible(boundary, parts[1], cutoverCache)
-	}
-	if len(parts) >= 10 && parts[0] == "docs" && parts[1] == "history" &&
-		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
-		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
-		parts[6] == "payload" && parts[7] == "legacy" && parts[8] == "truth" {
-		return archiveCutoverPublished(
-			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
-	}
-	return false
-}
-
-// validLegacyCampaignSourcePath admits the verbatim pre-migration campaign
-// masterfile that migration preserves directly under an import run's legacy
-// payload: runs/<runID>/payload/legacy/CAMPAIGN.md. Deeper legacy payload is
-// not admitted here; preserved truth documents have their own kind above.
-func validLegacyCampaignSourcePath(boundary Boundary, absolute string, cutoverCache map[string]bool) bool {
-	relative, err := boundary.Relative(absolute)
-	if err != nil {
-		return false
-	}
-	parts := strings.Split(relative, "/")
-	if len(parts) == 7 && parts[0] == "active" &&
-		managedSlugRE.MatchString(parts[1]) && parts[2] == "runs" &&
-		runIDRE.MatchString(parts[3]) && parts[4] == "payload" &&
-		parts[5] == "legacy" && parts[6] == "CAMPAIGN.md" {
-		return activeCampaignSourcesVisible(boundary, parts[1], cutoverCache)
-	}
-	if len(parts) == 9 && parts[0] == "docs" && parts[1] == "history" &&
-		parts[2] == "campaigns" && managedSlugRE.MatchString(parts[3]) &&
-		parts[4] == "runs" && runIDRE.MatchString(parts[5]) &&
-		parts[6] == "payload" && parts[7] == "legacy" && parts[8] == "CAMPAIGN.md" {
 		return archiveCutoverPublished(
 			boundary, strings.Join(parts[:4], "/"), "", strings.Join(parts[4:], "/"), cutoverCache)
 	}
@@ -718,10 +634,6 @@ func ChunkMarkdown(document SourceDocument) []Chunk {
 		header = ExtractFindingPrelude(document)
 	case document.SourceKind == "raw-report":
 		header = ExtractReportPrelude(body, document.Path)
-	case document.SourceKind == "legacy-truth":
-		header = ExtractLegacyTruthPrelude(body, document.Path)
-	case document.SourceKind == "legacy-campaign":
-		header = ExtractLegacyCampaignPrelude(body, document.Path)
 	default:
 		header = ExtractDocumentPrelude(body, document.Path)
 	}

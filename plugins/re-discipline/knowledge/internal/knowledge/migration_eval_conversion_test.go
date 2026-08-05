@@ -10,10 +10,12 @@ import (
 
 // The conversion regression this file guards: judgments were retargeted onto
 // canonical successors that chunk retrieval and context packs can never
-// serve. A campaign masterfile's successor is structured JSON, and a split
-// truth document's successor manifest is a link stub whose prose vocabulary
-// lives only in the demoted archive provenance. Judgments must follow the
-// content.
+// serve. A campaign masterfile's judgments follow its retrievable successor,
+// the generated campaign state view, and a converted truth document's
+// judgments follow its findings and split manifest. No preserved-prose
+// branch exists: the pre-conversion bytes are archived by git at the plan's
+// source revision and reachable through evidence expansion, not through
+// chunk retrieval, so no judgment may point at a payload copy.
 func testEvalConversionPlan(t *testing.T, stagingRoot string) MigrationPlan {
 	t.Helper()
 	writeStaged := func(relative, body string) {
@@ -65,18 +67,12 @@ func testEvalConversionPlan(t *testing.T, stagingRoot string) MigrationPlan {
 		"# Wwise audio catalog\n\nDOOM 2016 audio is Audiokinetic Wwise.\n")
 	writeStaged("docs/truth/findings/F-000000000000000003.md",
 		"# Wwise exporter tools\n\nTwo tools exploit the Wwise metadata join.\n")
-	writeStaged(
-		"active/alpha-campaign/runs/"+legacyRunID("alpha-campaign", "campaign-import")+
-			"/payload/legacy/CAMPAIGN.md",
-		"# Campaign: alpha\n\nClaim: This campaign owns the offline switchboard.\n")
-	writeStaged(
-		"active/alpha-campaign/runs/"+legacyRunID("alpha-campaign", "campaign-import")+
-			"/payload/legacy/truth/daemon/oracle.md",
-		"# Validation oracle\n\nClaim: The oracle validates a submitted map.\n\nVerdicts carry dtor_ok flags.\n")
+	writeStaged("active/alpha-campaign/STATE.md",
+		"# Campaign state: alpha\n\nThis campaign owns the offline switchboard.\n")
 	return plan
 }
 
-func TestEvalConversionRetargetsMasterfileJudgmentsToPreservedProse(t *testing.T) {
+func TestEvalConversionRetargetsMasterfileJudgmentsToCampaignStateView(t *testing.T) {
 	staging := t.TempDir()
 	plan := testEvalConversionPlan(t, staging)
 	context := newMigrationEvalJudgmentContext(plan, staging)
@@ -89,24 +85,28 @@ func TestEvalConversionRetargetsMasterfileJudgmentsToPreservedProse(t *testing.T
 		MinimumEvidencePaths: []string{"active/alpha-campaign/CAMPAIGN.md"},
 	}}
 	convertMigratedEvalCases(&context, cases)
-	preserved := "active/alpha-campaign/runs/" +
-		legacyRunID("alpha-campaign", "campaign-import") + "/payload/legacy/CAMPAIGN.md"
-	if !reflect.DeepEqual(cases[0].ExpectedPaths, []string{preserved}) ||
-		!reflect.DeepEqual(cases[0].MinimumEvidencePaths, []string{preserved}) {
-		t.Fatalf("masterfile judgment did not follow the preserved prose: %#v", cases[0])
+	successor := "active/alpha-campaign/STATE.md"
+	if !reflect.DeepEqual(cases[0].ExpectedPaths, []string{successor}) ||
+		!reflect.DeepEqual(cases[0].MinimumEvidencePaths, []string{successor}) {
+		t.Fatalf("masterfile judgment did not follow the campaign state view: %#v", cases[0])
 	}
-	if !contains(cases[0].AllowedTiers, "archive") {
-		t.Fatalf("masterfile case did not gain the provenance tier: %#v", cases[0].AllowedTiers)
+	if contains(cases[0].AllowedTiers, "archive") {
+		t.Fatalf("state-view successor must not widen tiers to archive: %#v", cases[0].AllowedTiers)
 	}
-	if strings.Contains(strings.Join(cases[0].ExpectedPaths, " "), "campaign.json") {
-		t.Fatal("judgment still names the unservable structured record")
+	if strings.Contains(strings.Join(cases[0].ExpectedPaths, " "), "campaign.json") ||
+		strings.Contains(strings.Join(cases[0].ExpectedPaths, " "), "/payload/legacy/") {
+		t.Fatal("judgment names an unservable structured record or a payload copy")
 	}
 	if cases[0].VocabularyPolicy != "" {
 		t.Fatal("retargeted case kept a disjointness attestation nobody re-reviewed")
 	}
 }
 
-func TestEvalConversionFollowsVocabularyIntoPreservedTruth(t *testing.T) {
+func TestEvalConversionRetargetsTruthJudgmentsToFindingsOnly(t *testing.T) {
+	// Vocabulary that survived only in the retired prose is reachable through
+	// the finding's archive-pinned evidence expansion, never through chunk
+	// retrieval, so the judgment anchors to the finding. The blinded
+	// evaluation measures the retrieval consequence of that design honestly.
 	staging := t.TempDir()
 	plan := testEvalConversionPlan(t, staging)
 	context := newMigrationEvalJudgmentContext(plan, staging)
@@ -118,18 +118,18 @@ func TestEvalConversionFollowsVocabularyIntoPreservedTruth(t *testing.T) {
 		MinimumEvidencePaths: []string{"docs/truth/daemon/oracle.md"},
 	}}
 	convertMigratedEvalCases(&context, cases)
-	preserved := "active/alpha-campaign/runs/" +
-		legacyRunID("alpha-campaign", "campaign-import") + "/payload/legacy/truth/daemon/oracle.md"
-	if !contains(cases[0].ExpectedPaths, "docs/truth/findings/F-000000000000000001.md") ||
-		!contains(cases[0].ExpectedPaths, preserved) {
-		t.Fatalf("identifier judgment lost either the finding or the preserved prose: %#v", cases[0].ExpectedPaths)
+	finding := "docs/truth/findings/F-000000000000000001.md"
+	if !reflect.DeepEqual(cases[0].ExpectedPaths, []string{finding}) ||
+		!reflect.DeepEqual(cases[0].MinimumEvidencePaths, []string{finding}) {
+		t.Fatalf("truth judgment did not anchor to its finding: %#v", cases[0])
 	}
-	if !reflect.DeepEqual(cases[0].MinimumEvidencePaths, []string{preserved}) {
-		t.Fatalf("minimum evidence does not follow the only text carrying the identifier: %#v",
-			cases[0].MinimumEvidencePaths)
+	if contains(cases[0].AllowedTiers, "archive") {
+		t.Fatalf("converted truth case must not widen its tiers: %#v", cases[0].AllowedTiers)
 	}
-	if !contains(cases[0].AllowedTiers, "archive") {
-		t.Fatalf("vocabulary-forced case did not gain the provenance tier: %#v", cases[0].AllowedTiers)
+	for _, value := range append(append([]string{}, cases[0].ExpectedPaths...), cases[0].MinimumEvidencePaths...) {
+		if strings.Contains(value, "/payload/legacy/") {
+			t.Fatalf("judgment names a payload copy that no longer exists: %s", value)
+		}
 	}
 }
 
@@ -186,33 +186,6 @@ func TestEvalConversionLeavesUnconvertedJudgmentsAlone(t *testing.T) {
 		cases[0].VocabularyPolicy != "target-disjoint" ||
 		!reflect.DeepEqual(cases[0].AllowedTiers, []string{"history"}) {
 		t.Fatalf("unconverted case drifted: %#v", cases[0])
-	}
-}
-
-func TestEvalConversionFollowsAnsweringVocabularyNotTokenOverlap(t *testing.T) {
-	staging := t.TempDir()
-	plan := testEvalConversionPlan(t, staging)
-	// The oracle finding's claim shares the common token "map" with the query,
-	// but the vocabulary that answers the question -- dtor_ok and its verdict
-	// framing -- survives only in the preserved prose. A single shared common
-	// token must not anchor the judgment to a finding that cannot answer.
-	context := newMigrationEvalJudgmentContext(plan, staging)
-	answerable := true
-	cases := []EvalCase{{
-		ID: "answer-vocabulary", Query: "why does a map verdict carry dtor_ok flags",
-		AllowedTiers: []string{"truth"}, Answerable: &answerable,
-		ExpectedPaths:        []string{"docs/truth/daemon/oracle.md"},
-		MinimumEvidencePaths: []string{"docs/truth/daemon/oracle.md"},
-	}}
-	convertMigratedEvalCases(&context, cases)
-	preserved := "active/alpha-campaign/runs/" +
-		legacyRunID("alpha-campaign", "campaign-import") + "/payload/legacy/truth/daemon/oracle.md"
-	if !reflect.DeepEqual(cases[0].MinimumEvidencePaths, []string{preserved}) {
-		t.Fatalf("minimum evidence anchored to a finding that cannot answer: %#v",
-			cases[0].MinimumEvidencePaths)
-	}
-	if !contains(cases[0].ExpectedPaths, preserved) || !contains(cases[0].AllowedTiers, "archive") {
-		t.Fatalf("judgment did not follow the answering vocabulary: %#v", cases[0])
 	}
 }
 

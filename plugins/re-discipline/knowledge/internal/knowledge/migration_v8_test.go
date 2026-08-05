@@ -3,11 +3,44 @@ package knowledge
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+// commitMigrationFixture gives a fixture project the git archive the 0.8
+// conversion requires: preview blocks until every managed source is tracked
+// and clean, because `git show <sourceRevision>:<path>` is the recorded
+// provenance and recovery recipe. Idempotent; call it again after mutating a
+// fixture when the mutation should be part of the archived source state.
+func commitMigrationFixture(t *testing.T, root string) {
+	t.Helper()
+	git := func(args ...string) {
+		command := exec.Command("git", append([]string{"-C", root}, args...)...)
+		command.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@invalid",
+			"GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@invalid",
+		)
+		out, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("fixture git %v: %v\n%s", args, err, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git")); os.IsNotExist(err) {
+		git("init", "-q")
+		git("config", "core.autocrlf", "false")
+		// Benchmark generations bind the repository's dirty fingerprint, so
+		// paths the migration and its tests write after a generation is
+		// captured must be invisible to git status or every later
+		// environment recompute would see a different repository.
+		mustWriteFile(t, filepath.Join(root, ".gitignore"),
+			".re-discipline/migration/\n.re-discipline/state/\nmigration-tests/\n")
+	}
+	git("add", "-A")
+	git("commit", "-q", "--allow-empty", "-m", "fixture state")
+}
 
 func migrationPreviewFixture(t *testing.T) string {
 	t.Helper()
@@ -67,6 +100,7 @@ func migrationPreviewFixture(t *testing.T) string {
 	mustWriteFile(t, filepath.Join(root, "docs", "backlog", "next.md"), "# Next\n")
 	mustWriteFile(t, filepath.Join(root, "docs", "INDEX.md"), "# Project map\n\n- [Live](../active/live-campaign/CAMPAIGN.md)\n- `active/<slug>/CAMPAIGN.md` is the legacy navigation shape.\n\nProject-owned navigation note.\n")
 	mustWriteFile(t, filepath.Join(root, "docs", "product-guide.md"), "# Unrelated product documentation\n")
+	commitMigrationFixture(t, root)
 	return root
 }
 
@@ -113,20 +147,19 @@ func TestMigrationPreviewIsStableReadOnlyAndDemandDriven(t *testing.T) {
 	if first.Receipt.Validation != "passed" || first.Receipt.PlanDigest != first.Plan.PlanDigest || first.Receipt.Digest == "" {
 		t.Fatalf("preview omitted its digest-bound equivalence receipt: %+v", first.Receipt)
 	}
+	if first.Plan.SourceRevision == "" {
+		t.Fatal("preview did not record the archived source revision")
+	}
 	master := migrationSourceByPath(t, first.Plan, "active/live-campaign/CAMPAIGN.md")
-	foundProvenance := false
 	for _, operation := range first.Plan.Operations {
 		if operation.Sources[0] != master.Path {
 			continue
 		}
-		for _, destination := range operation.Destinations {
-			if strings.Contains(destination, "/runs/") && strings.HasSuffix(destination, "/payload/legacy/CAMPAIGN.md") {
-				foundProvenance = true
+		for _, destination := range append(append([]string{}, operation.Destinations...), operation.Destination) {
+			if strings.Contains(destination, "/payload/legacy/") {
+				t.Fatalf("converted masterfile must not plan a payload copy, got %s", destination)
 			}
 		}
-	}
-	if !foundProvenance {
-		t.Fatal("preview did not disclose the masterfile provenance destination")
 	}
 	if first.Plan.HostInventory.RuntimeVersion != RuntimeVersion ||
 		first.Plan.HostInventory.RuntimeAvailability != "available" ||

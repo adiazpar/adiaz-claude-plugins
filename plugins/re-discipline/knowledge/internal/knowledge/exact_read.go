@@ -367,6 +367,22 @@ func (service *Service) readEvidenceExact(
 	evidence EvidenceReference,
 	budget int,
 ) (ExactReadResponse, error) {
+	if migrationGitPinnedEvidence(evidence) {
+		// Archive-pinned evidence resolves through the project git archive:
+		// the cited document no longer exists on disk, and no preserved copy
+		// duplicates it. The recorded digest is verified against the exact
+		// blob bytes `git show <revision>:<path>` returns.
+		body, err := resolveMigrationGitEvidence(service.Boundary.Root, evidence)
+		if err != nil {
+			return ExactReadResponse{}, err
+		}
+		return sealExactReadResponse(ExactReadResponse{
+			SchemaVersion: CampaignSchemaVersion, Selector: "evidence",
+			Handle: EvidenceHandle(finding.ID, evidence),
+			Path:   evidence.Path, SHA256: evidence.SHA256,
+			Content: string(body),
+		}, budget)
+	}
 	return service.readFileHandleExact(
 		"evidence", EvidenceHandle(finding.ID, evidence),
 		FileHandle{Path: evidence.Path, SHA256: evidence.SHA256},
