@@ -463,10 +463,20 @@ func TestMigrationPreservesMeasurementArtifactsByteExactWithRecovery(t *testing.
 	if got, readErr := os.ReadFile(absolute); err != nil || readErr != nil || string(got) != string(body) || info.ModTime().UnixNano() != wantTime.UnixNano() {
 		t.Fatalf("published measurement lost bytes or timestamp: stat=%v read=%v", err, readErr)
 	}
-	backup := strings.TrimPrefix(SHA256String(".re-discipline/knowledge"), "sha256:")[:16] + "-knowledge"
-	backupPath := filepath.Join(engine.migrationRoot(), "backups", backup, "measurements", "lane-ablation.json")
-	if got, err := os.ReadFile(backupPath); err != nil || string(got) != string(body) {
-		t.Fatalf("measurement recovery copy is missing: %v %q", err, got)
+	// Recovery is the git archive at the plan's source revision, not a backup
+	// copy: activation removes its interim rename-aside backups on success and
+	// records the archive revision in the operation receipt.
+	if _, err := os.Stat(filepath.Join(engine.migrationRoot(), "backups")); !os.IsNotExist(err) {
+		t.Fatalf("successful activation left backup duplicates of the git archive: %v", err)
+	}
+	receipt := state.Completed[len(state.Completed)-1]
+	if len(receipt.RecoveryPaths) != 1 || !strings.HasPrefix(receipt.RecoveryPaths[0], "git:") {
+		t.Fatalf("activation receipt does not record the archive recovery revision: %+v", receipt.RecoveryPaths)
+	}
+	blob, err := runProjectGit(root, "cat-file", "blob",
+		strings.TrimPrefix(receipt.RecoveryPaths[0], "git:")+":"+relative)
+	if err != nil || string(blob) != string(body) {
+		t.Fatalf("recorded recovery revision does not archive the measurement bytes: %v %q", err, blob)
 	}
 }
 
@@ -610,34 +620,27 @@ func TestMigrationTransformsAdditiveKnowledgeAndKeepsReferencesIntact(t *testing
 	}
 }
 
-func TestLegacyReviewImportDoesNotClobberPreviouslyLinkedKnowledge(t *testing.T) {
+func TestLegacyReviewImportNeverTouchesRunRecords(t *testing.T) {
+	// The ledger's parsed rows land in the prunable migration audit area and
+	// the import stage never opens a run record, so the historical clobber
+	// window - review import rewriting a previously linked run - cannot
+	// exist. A campaign without unattributable payload files receives no
+	// campaign-import run at all.
 	root := migrationPreviewFixture(t)
 	engine, plan, state := migrationFixtureToNormalized(t, root)
 	campaignDir := filepath.Join(engine.migrationRoot(), "staging", "project", "active", "live-campaign")
 	runID := legacyRunID("live-campaign", "campaign-import")
-	runPath := filepath.Join(campaignDir, "runs", runID, "run.json")
-	body, err := os.ReadFile(runPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var run RunRecord
-	if err := decodeStrictJSON(body, &run); err != nil {
-		t.Fatal(err)
-	}
-	run.FindingIDs = SortedUnique(append(run.FindingIDs, "F-9999"))
-	body, err = sealMigratedRecord(&run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := AtomicWrite(runPath, body, 0o600); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(campaignDir, "runs", runID)); !os.IsNotExist(err) {
+		t.Fatalf("campaign without unattributable payload received a synthetic import run: %v", err)
 	}
 	if err := engine.stageLegacyReviewImport(plan, state, "live-campaign", campaignDir); err != nil {
 		t.Fatal(err)
 	}
-	body, err = os.ReadFile(runPath)
-	if err != nil || decodeStrictJSON(body, &run) != nil || !containsString(run.FindingIDs, "F-9999") {
-		t.Fatalf("review import clobbered linked finding IDs: %+v %v", run.FindingIDs, err)
+	importPath := filepath.Join(engine.migrationRoot(), "staging", "project",
+		".re-discipline", "knowledge", "migration", "review-imports", "live-campaign.json")
+	body, err := os.ReadFile(importPath)
+	if err != nil || !strings.Contains(string(body), `"status": "proposed-import"`) {
+		t.Fatalf("ledger rows were not staged into the migration audit area: %v %s", err, body)
 	}
 }
 
@@ -662,6 +665,7 @@ func TestMigrationNamespaceRegistryRejectsEveryGeneratedNamespaceCollision(t *te
 	}
 	root := migrationPreviewFixture(t)
 	writeAdditiveKnowledgeFixture(t, root, "F-0001")
+	commitMigrationFixture(t, root)
 	preview, err := PreviewMigration(root, []string{"live-campaign"})
 	if err != nil {
 		t.Fatal(err)
@@ -755,14 +759,15 @@ func mustMigrationStatus(t *testing.T, engine *MigrationEngine) MigrationState {
 	return state
 }
 
-func TestMigrationCreatesSyntheticProvenanceCampaignWithoutLegacyActiveTree(t *testing.T) {
+func TestTruthOnlyProjectConvertsWithoutSyntheticCampaignOrPayloadCopies(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, ".re-discipline", "project-profile.md"),
 		"# Truth-only project\n\n<!-- re-discipline:shared-laws v0.7.0 -->\nlegacy laws\n<!-- re-discipline:shared-laws:end -->\n")
 	mustWriteFile(t, filepath.Join(root, "docs", "truth", "claim.md"),
-		"# Truth-only claim\n\n**Claim:** A truth-only project still receives canonical migration provenance.\n\n**Confidence:** Strong\n")
+		"# Truth-only claim\n\n**Claim:** A truth-only project converts with archive-pinned provenance and no synthetic campaign.\n\n**Confidence:** Strong\n")
+	commitMigrationFixture(t, root)
 	preview, err := PreviewMigration(root, nil)
-	if err != nil || preview.Plan.Estimate.Campaigns != 1 || preview.Plan.Estimate.ProposedRuns != 1 {
+	if err != nil || preview.Plan.Estimate.Campaigns != 0 || preview.Plan.Estimate.ProposedRuns != 0 {
 		t.Fatalf("truth-only preview: %+v %v", preview.Plan.Estimate, err)
 	}
 	engine := fixedMigrationEngine(t, root)
@@ -776,13 +781,26 @@ func TestMigrationCreatesSyntheticProvenanceCampaignWithoutLegacyActiveTree(t *t
 			t.Fatalf("truth-only migration wanted %s: %+v %v", want, state, err)
 		}
 	}
-	for _, path := range []string{
-		"active/migration-provenance/campaign.json",
-		"active/migration-provenance/runs/" + legacyRunID("migration-provenance", "campaign-import") + "/run.json",
-	} {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err != nil {
-			t.Fatalf("synthetic provenance object %s missing: %v", path, err)
-		}
+	if _, err := os.Stat(filepath.Join(root, "active", "migration-provenance")); !os.IsNotExist(err) {
+		t.Fatalf("truth-only conversion must not fabricate a synthetic campaign: %v", err)
+	}
+	findingPath := "docs/truth/findings/" + stableLegacyTruthFindingID("docs/truth/claim.md") + ".md"
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(findingPath)))
+	if err != nil {
+		t.Fatalf("converted truth finding missing: %v", err)
+	}
+	document, err := ParseFindingDocument(body, findingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Record.SourceRuns) != 0 || len(document.Record.Evidence) != 1 ||
+		!migrationGitPinnedEvidence(document.Record.Evidence[0]) ||
+		document.Record.Evidence[0].Path != "docs/truth/claim.md" {
+		t.Fatalf("converted truth must carry archive-pinned evidence and no source run: %+v", document.Record.Evidence)
+	}
+	if resolved, err := resolveMigrationGitEvidence(root, document.Record.Evidence[0]); err != nil ||
+		!strings.Contains(string(resolved), "**Claim:**") {
+		t.Fatalf("archive-pinned evidence did not resolve through git: %v", err)
 	}
 }
 

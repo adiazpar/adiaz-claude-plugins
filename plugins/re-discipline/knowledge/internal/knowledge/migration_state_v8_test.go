@@ -106,9 +106,21 @@ func TestMigrationStateMachineRequiresApprovalCoverageGatesAndRatification(t *te
 	if _, err := os.Stat(filepath.Join(root, "active", "live-campaign", "CAMPAIGN.md")); !os.IsNotExist(err) {
 		t.Fatal("legacy masterfile remained an operational input")
 	}
-	activeBackup := strings.TrimPrefix(SHA256String("active"), "sha256:")[:16] + "-active"
-	if _, err := os.Stat(filepath.Join(engine.migrationRoot(), "backups", activeBackup, "live-campaign", "CAMPAIGN.md")); err != nil {
-		t.Fatalf("recoverable legacy backup missing: %v", err)
+	// Recovery is the git archive at the plan's source revision: successful
+	// activation removes its interim rename-aside backups, and the operation
+	// receipt records the archive recovery recipe instead of backup paths.
+	if _, err := os.Stat(filepath.Join(engine.migrationRoot(), "backups")); !os.IsNotExist(err) {
+		t.Fatalf("successful activation left backup duplicates of the git archive: %v", err)
+	}
+	activationReceipt := state.Completed[len(state.Completed)-1]
+	if len(activationReceipt.RecoveryPaths) != 1 ||
+		!strings.HasPrefix(activationReceipt.RecoveryPaths[0], "git:") {
+		t.Fatalf("activation receipt does not record the archive recovery revision: %+v", activationReceipt.RecoveryPaths)
+	}
+	if masterBlob, err := runProjectGit(root, "cat-file", "blob",
+		strings.TrimPrefix(activationReceipt.RecoveryPaths[0], "git:")+":active/live-campaign/CAMPAIGN.md"); err != nil ||
+		!strings.Contains(string(masterBlob), "# Campaign: live-campaign") {
+		t.Fatalf("recorded recovery revision does not archive the retired masterfile: %v", err)
 	}
 	var activation migrationActivationJournal
 	activationBody, err := os.ReadFile(filepath.Join(engine.migrationRoot(), "activation.json"))
@@ -118,11 +130,6 @@ func TestMigrationStateMachineRequiresApprovalCoverageGatesAndRatification(t *te
 	for _, target := range activation.Targets {
 		if target.Phase != "published" {
 			t.Fatalf("managed target %s did not publish: %+v", target.Path, target)
-		}
-		if target.Existed {
-			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(target.BackupPath))); err != nil {
-				t.Fatalf("managed target %s lacks backup: %v", target.Path, err)
-			}
 		}
 	}
 	if body, err := os.ReadFile(filepath.Join(root, ".re-discipline", "config.json")); err != nil || !strings.Contains(string(body), `"schemaVersion": 3`) {

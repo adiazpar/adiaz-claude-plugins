@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,6 +46,7 @@ func TestMigrationCLIExposesSharedEngineAndRejectsFabricatedCertification(t *tes
 	}
 	writeMigrationCLIFile(t, filepath.Join(root, ".re-discipline", "knowledge", "evals", "cases.json"),
 		string(append(evalBody, '\n')))
+	commitMigrationCLIFixture(t, root)
 
 	var preview knowledge.MigrationPreview
 	runMigrationCLIJSON(t, &preview, "--project", root, "--preview", "--live-campaigns", "live")
@@ -612,4 +614,31 @@ func writeMigrationCLIFile(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// commitMigrationCLIFixture gives a fixture project the git archive the 0.8
+// conversion requires: preview blocks until every managed source is tracked
+// and clean, because `git show <sourceRevision>:<path>` is the recorded
+// provenance and recovery recipe.
+func commitMigrationCLIFixture(t *testing.T, root string) {
+	t.Helper()
+	git := func(args ...string) {
+		command := exec.Command("git", append([]string{"-C", root}, args...)...)
+		command.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@invalid",
+			"GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@invalid",
+		)
+		out, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("fixture git %v: %v\n%s", args, err, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git")); os.IsNotExist(err) {
+		git("init", "-q")
+		git("config", "core.autocrlf", "false")
+		writeMigrationCLIFile(t, filepath.Join(root, ".gitignore"),
+			".re-discipline/migration/\n.re-discipline/state/\nmigration-tests/\n")
+	}
+	git("add", "-A")
+	git("commit", "-q", "--allow-empty", "-m", "fixture state")
 }

@@ -1683,9 +1683,8 @@ func migrationCampaigns(plan MigrationPlan) []string {
 			set[source.Campaign] = true
 		}
 	}
-	if len(set) == 0 && len(plan.Sources) > 0 {
-		set["migration-provenance"] = true
-	}
+	// A project with no legacy campaigns receives no synthetic campaign:
+	// converted truth cites the git archive directly and needs no carrier.
 	out := make([]string, 0, len(set))
 	for campaign := range set {
 		out = append(out, campaign)
@@ -1864,11 +1863,18 @@ func (engine *MigrationEngine) verifyMigratedTruthCompatibility(
 	if err := decodeStrictJSON(firstReceiptBody, &firstReceipt); err != nil {
 		return err
 	}
-	legacyBody, err := readSingleLinkRegularFile(filepath.Join(engine.ProjectRoot, filepath.FromSlash(firstReceipt.ProvenancePath)))
-	if err != nil || "sha256:"+SHA256Bytes(legacyBody) != firstReceipt.ProvenanceDigest ||
-		firstReceipt.ProvenanceDigest != "sha256:"+source.SHA256 {
+	// Provenance is the archived git blob at the plan's approved source
+	// revision. Resolving it here IS the recorded reproduction recipe: a
+	// verification that passed while the recipe failed would be meaningless.
+	provenanceRevision, provenancePath, err := parseMigrationGitRef(firstReceipt.ProvenancePath)
+	if err != nil || provenanceRevision != plan.SourceRevision || provenancePath != source.Path {
+		return fmt.Errorf("converted truth %s does not cite the approved archived provenance", source.Path)
+	}
+	legacyBody, err := migrationGitBlob(engine.ProjectRoot, provenanceRevision, provenancePath)
+	if err != nil || "sha256:"+SHA256Bytes(legacyBody) != firstReceipt.ProvenanceDigest {
 		return fmt.Errorf("converted truth %s does not preserve its exact source provenance", source.Path)
 	}
+	legacyBody = normalizeMigrationEOL(legacyBody)
 	if rows[0].ReviewDigest == "" {
 		if len(rows) != 1 || rows[0].SourceText != legacyTruthAtomicClaim(legacyBody) || rows[0].Claim != rows[0].SourceText {
 			return fmt.Errorf("converted truth %s changed an unreviewed legacy atomic claim", source.Path)
@@ -1956,7 +1962,7 @@ func (engine *MigrationEngine) verifyMigratedTruthCompatibility(
 			receipt.TruthID != "T-"+id || receipt.FindingID != id || receipt.SourcePath != source.Path ||
 			receipt.SourceDigest != "sha256:"+source.SHA256 || receipt.Destination != truthPlan.Destination ||
 			receipt.DestinationDigest != "sha256:"+SHA256Bytes(destinationBody) || receipt.ProvenancePath != firstReceipt.ProvenancePath ||
-			receipt.ProvenanceDigest != "sha256:"+source.SHA256 || receipt.SourceText != truthPlan.SourceText ||
+			receipt.ProvenanceDigest != firstReceipt.ProvenanceDigest || receipt.SourceText != truthPlan.SourceText ||
 			receipt.Claim != truthPlan.Claim || receipt.ClaimDigest != truthPlan.ClaimDigest ||
 			receipt.LegacyConfidence != truthPlan.LegacyConfidence || receipt.LegacyStatus != truthPlan.LegacyStatus ||
 			receipt.LegacyCorrection != truthPlan.LegacyCorrection ||

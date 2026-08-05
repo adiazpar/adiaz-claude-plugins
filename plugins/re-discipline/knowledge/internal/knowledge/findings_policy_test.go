@@ -241,27 +241,32 @@ func TestArchivedFindingsAndReportsUseTypedHistoryAndArchiveClasses(t *testing.T
 	}
 }
 
-func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
+func TestPayloadCopiesAreNotIndexedAndCampaignStateViewIs(t *testing.T) {
+	// The conversion preserves no prose copies: pre-conversion bytes live in
+	// the git archive and payload trees hold only real run artifacts. Nothing
+	// under payload/legacy/ may enter the index, while the generated campaign
+	// state view is the campaign's retrievable narrative surface.
 	root := t.TempDir()
 	writeFindingFixtureFile(t, root, ".re-discipline/project-profile.md", []byte("# Fixture\n"))
 	writeFindingFixtureFile(t, root, "docs/INDEX.md", []byte("# Index\n"))
 	const legacyPath = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/truth/binaries/omicron-checksum-table.md"
-	legacyBody := []byte("# Omicron checksum table\n\nClaim: The omicronChecksumTable drives resource verification.\n\nThe omicronChecksumTable is resolved by signature.\n")
-	writeFindingFixtureFile(t, root, legacyPath, legacyBody)
+	writeFindingFixtureFile(t, root, legacyPath,
+		[]byte("# Omicron checksum table\n\nClaim: The omicronChecksumTable drives resource verification.\n"))
 	const masterfilePath = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/CAMPAIGN.md"
 	writeFindingFixtureFile(t, root, masterfilePath,
 		[]byte("# Campaign: fixture\n\nThis campaign owns the omicronSwitchboard handoff.\n"))
-	// A payload sibling outside legacy/truth must stay unindexed: the class
-	// admits preserved truth documents, not arbitrary run payload.
 	const payloadSibling = "active/fixture-campaign/runs/R-20260803-0001/payload/legacy/evidence/omicron-notes.md"
 	writeFindingFixtureFile(t, root, payloadSibling, []byte("# Notes\n"))
+	const stateViewPath = "active/fixture-campaign/STATE.md"
+	writeFindingFixtureFile(t, root, stateViewPath,
+		[]byte("# Campaign state: fixture\n\nThis campaign owns the omicronSwitchboard handoff.\n"))
 
 	boundary, err := NewBoundary(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	inventory, err := DiscoverSources(boundary, KnowledgeSettings{Sources: SourceSettings{
-		ReportFallback: true,
+		ReportFallback: true, ActiveFindings: true,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -270,45 +275,17 @@ func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
 	for _, source := range inventory.Documents {
 		classes[source.Path] = source
 	}
-	// The regression shape: RequireSegment admitted the file while the
-	// raw-report kind validator silently rejected it, so nothing was indexed
-	// and no error surfaced. Discovery and kind validation are asserted
-	// together against the exact preserved-legacy-truth shape.
-	source, discovered := classes[legacyPath]
-	if !discovered || source.Tier != "archive" || source.SourceKind != "legacy-truth" {
-		t.Fatalf("preserved legacy truth lost its provenance class: discovered=%v %#v", discovered, source)
-	}
-	master, masterDiscovered := classes[masterfilePath]
-	if !masterDiscovered || master.Tier != "archive" || master.SourceKind != "legacy-campaign" {
-		t.Fatalf("preserved masterfile lost its provenance class: discovered=%v %#v", masterDiscovered, master)
-	}
-	if _, indexed := classes[payloadSibling]; indexed {
-		t.Fatalf("non-truth run payload was indexed as provenance")
-	}
-	for _, chunk := range inventory.Chunks {
-		if chunk.Path == masterfilePath &&
-			!strings.Contains(chunk.Context, "SUPERSEDED BY CANONICAL CAMPAIGN RECORDS") {
-			t.Fatalf("preserved masterfile chunk lost its synthesized status: %#v", chunk)
+	for _, retired := range []string{legacyPath, masterfilePath, payloadSibling} {
+		if _, indexed := classes[retired]; indexed {
+			t.Fatalf("payload copy entered the index: %s", retired)
 		}
 	}
-	preludeSeen := false
-	for _, chunk := range inventory.Chunks {
-		if chunk.Path != legacyPath {
-			continue
-		}
-		if !strings.Contains(chunk.Context, "SUPERSEDED BY NORMALIZED FINDING") {
-			t.Fatalf("preserved legacy truth chunk lost its synthesized status: %#v", chunk)
-		}
-		if strings.Contains(chunk.Context, "UNNORMALIZED PROVENANCE") {
-			t.Fatalf("preserved legacy truth was mislabeled as an unnormalized report: %#v", chunk)
-		}
-		preludeSeen = true
-	}
-	if !preludeSeen {
-		t.Fatal("preserved legacy truth produced no chunks")
+	view, discovered := classes[stateViewPath]
+	if !discovered || view.Tier != "campaign" || view.SourceKind != "campaign-state" {
+		t.Fatalf("campaign state view lost its retrieval class: discovered=%v %#v", discovered, view)
 	}
 
-	database := filepath.Join(root, "legacy-truth-index.sqlite")
+	database := filepath.Join(root, "campaign-state-index.sqlite")
 	db, err := sql.Open("sqlite", database)
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +295,7 @@ func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	generation := Generation{
-		ID: "generation-legacy-truth", Database: database, CorpusFingerprint: inventory.Fingerprint,
+		ID: "generation-campaign-state", Database: database, CorpusFingerprint: inventory.Fingerprint,
 		Project: "fixture", ParserVersion: ParserVersion, ChunkerVersion: ChunkerVersion,
 		DocumentCount: len(inventory.Documents), ChunkCount: len(inventory.Chunks),
 	}
@@ -329,26 +306,9 @@ func TestPreservedLegacyTruthIsDiscoveredAndServedAsProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	served := false
 	for _, row := range cards {
-		if row.card.Metadata["path"] == legacyPath {
-			served = true
+		if row.card.Metadata["path"] == legacyPath || row.card.Metadata["path"] == masterfilePath {
+			t.Fatalf("provenance fallback lane served a payload copy: %#v", row.card.Metadata)
 		}
-	}
-	if !served {
-		t.Fatalf("preserved legacy truth is not reachable through the provenance fallback lane: %#v", cards)
-	}
-	masterCards, err := queryRawReportCards(context.Background(), db, "omicronSwitchboard handoff", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	masterServed := false
-	for _, row := range masterCards {
-		if row.card.Metadata["path"] == masterfilePath {
-			masterServed = true
-		}
-	}
-	if !masterServed {
-		t.Fatalf("preserved masterfile is not reachable through the provenance fallback lane: %#v", masterCards)
 	}
 }

@@ -60,13 +60,22 @@ func buildTruthProjection(
 			durable.SourceRun != evidence.SourceRun {
 			return TruthProjection{}, errors.New("truth projection durable evidence changed its source identity")
 		}
-		absolute, err := boundary.Resolve(evidence.Path, true)
-		if err != nil {
-			return TruthProjection{}, fmt.Errorf("resolve evidence %s: %w", EvidenceHandle(finding.ID, evidence), err)
-		}
-		body, err := os.ReadFile(absolute)
-		if err != nil {
-			return TruthProjection{}, err
+		var body []byte
+		if migrationGitPinnedEvidence(evidence) {
+			resolved, err := resolveMigrationGitEvidence(boundary.Root, evidence)
+			if err != nil {
+				return TruthProjection{}, fmt.Errorf("resolve archive-pinned evidence %s: %w", EvidenceHandle(finding.ID, evidence), err)
+			}
+			body = resolved
+		} else {
+			absolute, err := boundary.Resolve(evidence.Path, true)
+			if err != nil {
+				return TruthProjection{}, fmt.Errorf("resolve evidence %s: %w", EvidenceHandle(finding.ID, evidence), err)
+			}
+			body, err = os.ReadFile(absolute)
+			if err != nil {
+				return TruthProjection{}, err
+			}
 		}
 		got := SHA256Bytes(body)
 		want := strings.TrimPrefix(evidence.SHA256, "sha256:")

@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -273,7 +274,10 @@ func (engine *MigrationEngine) validateMigrationNamespaces(plan MigrationPlan, s
 				return err
 			}
 		}
-		workspaces := map[string]bool{"campaign-import": true}
+		workspaces := map[string]bool{}
+		if len(campaignPayloadSources(plan, campaign)) > 0 {
+			workspaces["campaign-import"] = true
+		}
 		for _, source := range plan.Sources {
 			if source.Campaign != campaign || !validOne(source.Role, "legacy-run-report", "legacy-run-file") {
 				continue
@@ -1021,16 +1025,11 @@ func (engine *MigrationEngine) stageLegacyTruthConversions(
 	if len(truthSources) == 0 {
 		return nil
 	}
-	if len(campaigns) == 0 {
-		return errors.New("legacy truth conversion requires a canonical migration provenance campaign")
-	}
-	carrier := campaigns[0]
-	runID := legacyRunID(carrier, "campaign-import")
-	runPath := filepath.Join(projectRoot, "active", carrier, "runs", runID, "run.json")
-	var run RunRecord
-	runBody, err := os.ReadFile(runPath)
-	if err != nil || decodeStrictJSON(runBody, &run) != nil {
-		return fmt.Errorf("load truth migration provenance run: %w", err)
+	// Truth provenance is the project's git archive at the approved source
+	// revision - no carrier campaign, no synthetic run, no payload copy.
+	_ = campaigns
+	if !migrationGitRevisionRE.MatchString(plan.SourceRevision) {
+		return errors.New("legacy truth conversion requires the plan's archived source revision")
 	}
 	sourceIDs := map[string][]string{}
 	truthDestinations := map[string]string{}
@@ -1059,10 +1058,11 @@ func (engine *MigrationEngine) stageLegacyTruthConversions(
 		return errors.New("legacy truth conversion rows no longer match the digest-bound manager plan")
 	}
 	for _, source := range truthSources {
-		body, err := readMigrationSource(engine.ProjectRoot, source)
+		raw, err := readMigrationSource(engine.ProjectRoot, source)
 		if err != nil {
 			return err
 		}
+		body := normalizeMigrationEOL(raw)
 		rows := plans[source.Path]
 		if len(rows) == 0 {
 			return fmt.Errorf(
@@ -1097,22 +1097,25 @@ func (engine *MigrationEngine) stageLegacyTruthConversions(
 		}
 	}
 	for _, source := range truthSources {
-		body, err := readMigrationSource(engine.ProjectRoot, source)
+		raw, err := readMigrationSource(engine.ProjectRoot, source)
 		if err != nil {
 			return err
 		}
-		provenanceRelative := filepath.ToSlash(filepath.Join("active", carrier, "runs", runID,
-			"payload", "legacy", "truth", strings.TrimPrefix(source.Path, "docs/truth/")))
-		if err := AtomicWrite(filepath.Join(projectRoot, filepath.FromSlash(provenanceRelative)), body, 0o600); err != nil {
-			return err
+		body := normalizeMigrationEOL(raw)
+		// The provenance of record is the archived blob. Prove it resolves
+		// and matches the bytes this conversion is reading before a single
+		// finding cites it.
+		blob, blobErr := migrationGitBlob(engine.ProjectRoot, plan.SourceRevision, source.Path)
+		if blobErr != nil {
+			return fmt.Errorf("legacy truth %s is not archived at the approved source revision: %w", source.Path, blobErr)
 		}
-		manifest.LegacySources[source.Path] = provenanceRelative
-		runRelative := strings.TrimPrefix(provenanceRelative,
-			filepath.ToSlash(filepath.Join("active", carrier, "runs", runID))+"/")
-		run.Files = append(run.Files, RunFile{
-			Path: runRelative, MediaKind: "text", SemanticRole: "reference-copy",
-			Retention: "retain-inline", SHA256: "sha256:" + source.SHA256,
-		})
+		if !bytes.Equal(normalizeMigrationEOL(blob), body) {
+			return fmt.Errorf("legacy truth %s differs from its archived blob at the approved source revision", source.Path)
+		}
+		blobDigest := "sha256:" + SHA256Bytes(blob)
+		gitRef := plan.SourceRevision + ":" + source.Path
+		provenanceRef := migrationGitProvenanceRef(plan.SourceRevision, source.Path)
+		manifest.LegacySources[source.Path] = source.Destination
 
 		dependencyMap, relationIDs, err := legacyTruthDependencies(body, source.Path, sourceIDs, truthDestinations, projectRoot)
 		if err != nil {
@@ -1158,19 +1161,19 @@ func (engine *MigrationEngine) stageLegacyTruthConversions(
 			}
 			validity, projection := migrationLegacyTruthState(truthPlan.LegacyStatus)
 			document := FindingDocument{Record: FindingRecord{
-				SchemaVersion: CampaignSchemaVersion, ID: id, CampaignID: "C-" + strings.ToUpper(carrier),
+				SchemaVersion: CampaignSchemaVersion, ID: id, CampaignID: "C-LEGACY-TRUTH-IMPORT",
 				Revision: 1, CreatedAt: createdAt, UpdatedAt: state.UpdatedAt,
 				CreatedBy: "migration:accepted-truth", UpdatedBy: "migration:" + state.Actor,
 				CorrelationID: state.TransactionID, Kind: "conclusion", Subject: title, Claim: claim,
 				Scope: scope, AppliesWhen: appliesWhen, KnownLimits: knownLimits,
-				Aliases: []string{title}, SourceRuns: []string{runID},
-				Evidence: []EvidenceReference{{Path: provenanceRelative, SHA256: "sha256:" + source.SHA256,
-					ObjectKey: "legacy-truth:" + source.Path, SourceRun: runID}},
+				Aliases: []string{title},
+				Evidence: []EvidenceReference{{Path: source.Path, SHA256: blobDigest,
+					ObjectKey: migrationGitEvidenceObjectKey(plan.SourceRevision, source.Path)}},
 				Relations: FindingRelations{DependsOn: relationIDs}, EvidenceGrade: "direct",
 				ReviewState: "manager-ratified", Validity: validity, Projection: projection,
 				Path:     truthPlan.Destination,
 				PolicyID: "migration:legacy-truth-preservation-v1", VerifiedAt: truthPlan.LegacyVerifiedAt,
-				Body: renderMigratedTruthFindingBody(claim, source.Path, provenanceRelative, dependencyMap),
+				Body: renderMigratedTruthFindingBody(claim, source.Path, gitRef, dependencyMap),
 			}, SyntheticQuestions: append([]string(nil), truthPlan.SyntheticQuestions...), QuestionsReviewed: true}
 			destinationBody, err := RenderFindingDocument(document)
 			if err != nil {
@@ -1183,7 +1186,7 @@ func (engine *MigrationEngine) stageLegacyTruthConversions(
 				SchemaVersion: MigrationSchemaVersion, TransactionID: state.TransactionID, PlanDigest: plan.PlanDigest,
 				TruthID: "T-" + id, FindingID: id, SourcePath: source.Path, SourceDigest: "sha256:" + source.SHA256,
 				Destination: truthPlan.Destination, DestinationDigest: "sha256:" + SHA256Bytes(destinationBody),
-				ProvenancePath: provenanceRelative, ProvenanceDigest: "sha256:" + source.SHA256,
+				ProvenancePath: provenanceRef, ProvenanceDigest: blobDigest,
 				SourceText: truthPlan.SourceText, Claim: claim, ClaimDigest: truthPlan.ClaimDigest,
 				LegacyConfidence: truthPlan.LegacyConfidence, LegacyStatus: truthPlan.LegacyStatus,
 				LegacyCorrection: truthPlan.LegacyCorrection, LegacyScope: append([]string{}, truthPlan.LegacyScope...),
@@ -1207,19 +1210,11 @@ func (engine *MigrationEngine) stageLegacyTruthConversions(
 			}
 		}
 		if len(rows) > 1 {
-			manifestBody := renderMigratedTruthSplitManifest(source, provenanceRelative, rows)
+			manifestBody := renderMigratedTruthSplitManifest(source, gitRef, rows)
 			if err := AtomicWrite(filepath.Join(projectRoot, filepath.FromSlash(source.Destination)), manifestBody, 0o600); err != nil {
 				return err
 			}
 		}
-	}
-	run.Files = normalizeRunFiles(run.Files)
-	runBody, err = sealMigratedRecord(&run)
-	if err != nil {
-		return err
-	}
-	if err := AtomicWrite(runPath, runBody, 0o600); err != nil {
-		return err
 	}
 	return rewriteMigratedTruthLinks(projectRoot, plan)
 }
@@ -1419,15 +1414,11 @@ func renderMigratedTruthSplitManifest(
 ) []byte {
 	var builder strings.Builder
 	builder.WriteString("# Migrated atomic findings\n\n")
-	// Name the preserved provenance rather than the legacy path. The legacy
-	// location does not survive activation, so quoting it would leave a
-	// generated navigation document pointing at a path that no longer exists.
+	// Cite the git archive rather than any on-disk copy. The legacy location
+	// does not survive activation, and no duplicate is preserved: the exact
+	// bytes are recoverable from the recorded source revision.
 	builder.WriteString("This accepted truth required a manager-reviewed atomic split. ")
-	provenanceRelative, err := filepath.Rel(filepath.Dir(source.Destination), filepath.FromSlash(provenancePath))
-	if err != nil {
-		provenanceRelative = provenancePath
-	}
-	builder.WriteString("Its exact source is preserved at [`" + provenancePath + "`](" + filepath.ToSlash(provenanceRelative) + ").\n\n")
+	builder.WriteString("Its exact source is archived in git: `git show " + provenancePath + "`.\n\n")
 	for _, row := range rows {
 		relative, err := filepath.Rel(filepath.Dir(source.Destination), filepath.FromSlash(row.Destination))
 		if err != nil {
@@ -1448,14 +1439,14 @@ func legacyTruthSyntheticQuestions(title, claim string) []string {
 	}
 }
 
-func renderMigratedTruthFindingBody(claim, source, provenance string, dependencies map[string]string) string {
+func renderMigratedTruthFindingBody(claim, source, gitRef string, dependencies map[string]string) string {
 	var body strings.Builder
 	body.WriteString("# Claim\n")
 	body.WriteString(claim + "\n\n## Applies when\n")
-	body.WriteString("Within the original accepted scope preserved at `" + provenance + "`.\n\n")
+	body.WriteString("Within the original accepted scope of `" + source + "`, archived at `" + gitRef + "`.\n\n")
 	body.WriteString("## Does not establish\nMigration does not ratify source reports, expand scope, or increase confidence.\n\n")
-	body.WriteString("## Evidence\nThe exact pre-0.8 truth bytes are frozen at `" + provenance + "` from `" + source + "`.\n\n")
-	body.WriteString("## Reproduction\nOpen the provenance path and compare its digest with the truth compatibility receipt.\n\n")
+	body.WriteString("## Evidence\nThe exact pre-0.8 truth bytes are archived in git: `git show " + gitRef + "`.\n\n")
+	body.WriteString("## Reproduction\nRun `git show " + gitRef + "` and compare its SHA-256 with this finding's evidence digest and the truth compatibility receipt.\n\n")
 	body.WriteString("## Relations\n")
 	if len(dependencies) == 0 {
 		body.WriteString("No explicit legacy dependency link was declared.")
@@ -2326,9 +2317,14 @@ func (engine *MigrationEngine) stageLegacyRuns(
 			}
 		}
 	}
-	// Every campaign receives one import run which owns the masterfile, ledger,
-	// and category-folder provenance not attributable to a delegated workspace.
-	grouped["campaign-import"] = append(grouped["campaign-import"], campaignPayloadSources(plan, campaign)...)
+	// A campaign receives one import run only when it holds category-folder
+	// work products not attributable to a delegated workspace. Converted
+	// documents never ride along: their pre-conversion bytes are archived by
+	// git at the plan's source revision, not by payload copies on a
+	// synthetic run.
+	if payload := campaignPayloadSources(plan, campaign); len(payload) > 0 {
+		grouped["campaign-import"] = append(grouped["campaign-import"], payload...)
+	}
 	workspaces := make([]string, 0, len(grouped))
 	for workspace := range grouped {
 		workspaces = append(workspaces, workspace)
@@ -2337,7 +2333,7 @@ func (engine *MigrationEngine) stageLegacyRuns(
 	runs := []RunRecord{}
 	for _, workspace := range workspaces {
 		sources := grouped[workspace]
-		if len(sources) == 0 && workspace != "campaign-import" {
+		if len(sources) == 0 {
 			continue
 		}
 		runID := legacyRunID(campaign, workspace)
@@ -2490,15 +2486,22 @@ func legacyReportTimestamp(body []byte, startedAt, fallback string) string {
 	return fallback
 }
 
+// campaignPayloadSources returns the campaign files that genuinely have no
+// other post-conversion home: category-folder work products (evidence,
+// analysis, plans) not attributable to a delegated workspace. Converted
+// documents are deliberately absent - the masterfile's successor is the
+// structured campaign record, the ledger's successor is its parsed import in
+// the migration audit area, and pre-normalized findings, intakes, and review
+// receipts stay at their canonical paths. Copying any of them here would
+// duplicate content whose pre-conversion bytes git already archives at the
+// plan's source revision.
 func campaignPayloadSources(plan MigrationPlan, campaign string) []MigrationSource {
 	out := []MigrationSource{}
 	for _, source := range plan.Sources {
 		if source.Campaign != campaign {
 			continue
 		}
-		if source.Role == "legacy-campaign-masterfile" || source.Role == "legacy-review-ledger" ||
-			source.Role == "legacy-campaign-payload" || source.Role == "normalized-finding" ||
-			source.Role == "intake" || source.Role == "review-receipt" {
+		if source.Role == "legacy-campaign-payload" {
 			out = append(out, source)
 		}
 	}
@@ -2929,30 +2932,13 @@ func (engine *MigrationEngine) stageLegacyReviewImport(
 		return err
 	}
 	body = append(body, '\n')
-	runID := legacyRunID(campaign, "campaign-import")
-	relative := "payload/legacy/review-import.json"
-	if err := AtomicWrite(filepath.Join(campaignDir, "runs", runID, filepath.FromSlash(relative)), body, 0o600); err != nil {
-		return err
-	}
-	runPath := filepath.Join(campaignDir, "runs", runID, "run.json")
-	runBody, err := os.ReadFile(runPath)
-	if err != nil {
-		return err
-	}
-	var run RunRecord
-	if err := decodeStrictJSON(runBody, &run); err != nil {
-		return err
-	}
-	run.Files = append(run.Files, RunFile{Path: relative, MediaKind: "structured-data", SemanticRole: "reference-copy", Retention: "distill-then-review", SHA256: "sha256:" + SHA256Bytes(body)})
-	run.Files = normalizeRunFiles(run.Files)
-	runBody, err = sealMigratedRecord(&run)
-	if err != nil {
-		return err
-	}
-	if err := AtomicWrite(runPath, runBody, 0o600); err != nil {
-		return err
-	}
-	return nil
+	// The parsed import lands in the prunable migration audit area. The
+	// ledger's prose is archived by git at the plan's source revision; no
+	// payload copy and no synthetic run carry it.
+	stagingProjectRoot := filepath.Dir(filepath.Dir(campaignDir))
+	destination := filepath.Join(stagingProjectRoot, ".re-discipline", "knowledge", "migration",
+		"review-imports", campaign+".json")
+	return AtomicWrite(destination, body, 0o600)
 }
 
 func parseLegacyReviewRows(body []byte) []migrationReviewImportRow {
@@ -3257,13 +3243,31 @@ func (engine *MigrationEngine) advancePhysical(
 		return MigrationState{}, fmt.Errorf("unsupported activation phase %q", journal.Phase)
 	}
 	published := map[string]string{}
-	recovery := []string{}
 	for _, target := range journal.Targets {
 		published[target.Path] = target.StagedDigest
-		if target.Existed {
-			recovery = append(recovery, target.BackupPath)
+	}
+	// Every published target's pre-conversion bytes are archived by git at
+	// the plan's approved source revision - preview blocks on any dirty or
+	// untracked managed source, and apply re-derives the identical plan. The
+	// interim rename-aside backups therefore duplicate the archive once
+	// activation succeeds, and a duplicate that only ever diverges from its
+	// archive is not a recovery path. Remove them and record the archive
+	// revision as the recovery recipe.
+	for _, target := range journal.Targets {
+		if !target.Existed {
+			continue
+		}
+		backup := filepath.Join(engine.ProjectRoot, filepath.FromSlash(target.BackupPath))
+		if err := os.RemoveAll(backup); err != nil {
+			return MigrationState{}, fmt.Errorf("remove archived activation backup for %s: %w", target.Path, err)
 		}
 	}
+	if err := os.Remove(filepath.Join(engine.migrationRoot(), "backups")); err != nil && !os.IsNotExist(err) {
+		// The directory holds nothing the git archive does not; an unexpected
+		// leftover means an unmanaged file appeared inside it mid-activation.
+		return MigrationState{}, fmt.Errorf("activation backup directory is not empty after archival cleanup: %w", err)
+	}
+	recovery := []string{"git:" + plan.SourceRevision}
 	activeDigest, err := CanonicalDigest(published)
 	if err != nil {
 		return MigrationState{}, err
@@ -3577,13 +3581,12 @@ func migratedTruthLinkMapping(plan MigrationPlan) map[string]string {
 // archive-tier provenance while its claim lives in one or more findings.
 // Judgments must follow the content, not merely the canonical record.
 type migrationEvalJudgmentContext struct {
-	mapping        map[string]string
-	masterfile     map[string]string
-	truthManifest  map[string]string
-	truthRows      map[string][]MigrationTruthPlan
-	preservedTruth map[string]string
-	stagingRoot    string
-	stagedText     map[string]string
+	mapping       map[string]string
+	masterfile    map[string]string
+	truthManifest map[string]string
+	truthRows     map[string][]MigrationTruthPlan
+	stagingRoot   string
+	stagedText    map[string]string
 	// activatedCorpusFingerprint restamps every non-fixture corpusSnapshot
 	// onto the corpus identity activation is about to publish.
 	activatedCorpusFingerprint string
@@ -3594,42 +3597,28 @@ func newMigrationEvalJudgmentContext(
 	projectStagingRoot string,
 ) migrationEvalJudgmentContext {
 	context := migrationEvalJudgmentContext{
-		mapping:        map[string]string{},
-		masterfile:     map[string]string{},
-		truthManifest:  map[string]string{},
-		truthRows:      map[string][]MigrationTruthPlan{},
-		preservedTruth: map[string]string{},
-		stagingRoot:    projectStagingRoot,
-		stagedText:     map[string]string{},
+		mapping:       map[string]string{},
+		masterfile:    map[string]string{},
+		truthManifest: map[string]string{},
+		truthRows:     map[string][]MigrationTruthPlan{},
+		stagingRoot:   projectStagingRoot,
+		stagedText:    map[string]string{},
 	}
 	for _, row := range plan.TruthConversions {
 		context.truthRows[row.SourcePath] = append(context.truthRows[row.SourcePath], row)
 	}
-	carriers := []string{}
-	for _, campaign := range migrationCampaigns(plan) {
-		carriers = append(carriers, campaign)
-	}
-	sort.Strings(carriers)
-	carrier := "migration-provenance"
-	if len(carriers) > 0 {
-		carrier = carriers[0]
-	}
 	for _, source := range plan.Sources {
 		if source.Role == "legacy-campaign-masterfile" && source.Campaign != "" {
-			// The preserved masterfile bytes under the campaign's import run
-			// are the only chunk-retrievable representation the campaign has
-			// after conversion.
-			context.masterfile[source.Path] = "active/" + source.Campaign + "/runs/" +
-				legacyRunID(source.Campaign, "campaign-import") + "/payload/legacy/CAMPAIGN.md"
+			// The campaign's retrievable successor is its derived state view;
+			// the masterfile prose itself is archived by git at the plan's
+			// source revision rather than preserved as a payload copy.
+			context.masterfile[source.Path] = "active/" + source.Campaign + "/STATE.md"
 			continue
 		}
 		if source.Role == "truth" {
 			if len(context.truthRows[source.Path]) > 1 {
 				context.truthManifest[source.Path] = source.Destination
 			}
-			context.preservedTruth[source.Path] = "active/" + carrier + "/runs/" +
-				legacyRunID(carrier, "campaign-import") + "/payload/legacy/truth/" +
-				strings.TrimPrefix(source.Path, "docs/truth/")
 			continue
 		}
 		destination := strings.TrimSpace(source.Destination)
@@ -3703,58 +3692,28 @@ func (context *migrationEvalJudgmentContext) bestTruthRow(
 	return best, bestScore
 }
 
-// preservedTruthScore counts how much of a query's vocabulary survives only
-// in the preserved pre-conversion prose. Unweighted single counts keep the
-// finding-first bias: a claim or title match on a finding outweighs the same
-// token appearing in preserved body prose.
-func (context *migrationEvalJudgmentContext) preservedTruthScore(
-	sourcePath string,
-	tokens []string,
-) int {
-	preserved := context.preservedTruth[sourcePath]
-	if preserved == "" {
-		return 0
-	}
-	body := context.staged(preserved)
-	if body == "" {
-		return 0
-	}
-	score := 0
-	for _, token := range tokens {
-		if strings.Contains(body, token) {
-			score++
-		}
-	}
-	return score
-}
-
 // expandExpected converts one expected-path judgment value. Any-of judgment
 // lists receive every destination the source's content reached, so a case
-// stays satisfied by whichever converted representation retrieval ranks.
+// stays satisfied by whichever converted representation retrieval ranks. No
+// preserved-prose branch exists: converted content is judged where it now
+// lives - findings, split manifests, and derived campaign state views.
 func (context *migrationEvalJudgmentContext) expandExpected(
 	value string,
 	tokens []string,
 ) (paths []string, archive bool) {
 	normalized := NormalizeProjectPath(value)
-	if preserved, ok := context.masterfile[normalized]; ok {
-		return []string{preserved}, true
+	if successor, ok := context.masterfile[normalized]; ok {
+		return []string{successor}, false
 	}
 	if rows, ok := context.truthRows[normalized]; ok {
 		if manifest, split := context.truthManifest[normalized]; split {
 			paths = append(paths, manifest)
 		}
-		_, rowScore := context.bestTruthRow(rows, tokens)
 		for _, row := range rows {
 			paths = append(paths, row.Destination)
 		}
-		if context.preservedTruthScore(normalized, tokens) > rowScore {
-			// More of the query's vocabulary survives in the preserved prose
-			// the conversion demoted to provenance than in any finding; the
-			// judgment follows the content there.
-			paths = append(paths, context.preservedTruth[normalized])
-			archive = true
-		}
-		return paths, archive
+		_ = tokens
+		return paths, false
 	}
 	if destination, ok := context.mapping[normalized]; ok {
 		return []string{destination}, false
@@ -3769,15 +3728,15 @@ func (context *migrationEvalJudgmentContext) selectEvidence(
 	tokens []string,
 ) (path string, archive bool) {
 	normalized := NormalizeProjectPath(value)
-	if preserved, ok := context.masterfile[normalized]; ok {
-		return preserved, true
+	if successor, ok := context.masterfile[normalized]; ok {
+		return successor, false
 	}
 	if rows, ok := context.truthRows[normalized]; ok {
 		row, rowScore := context.bestTruthRow(rows, tokens)
-		if rowScore > 0 && context.preservedTruthScore(normalized, tokens) <= rowScore {
+		if rowScore > 0 {
 			return row.Destination, false
 		}
-		return context.preservedTruth[normalized], true
+		return rows[0].Destination, false
 	}
 	if destination, ok := context.mapping[normalized]; ok {
 		return destination, false
