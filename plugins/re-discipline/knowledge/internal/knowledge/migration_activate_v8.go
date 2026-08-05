@@ -3881,12 +3881,20 @@ func migrationActivatedCorpusFingerprint(
 // convertMigratedEvalCases rewrites one evaluation file's judgments onto the
 // destinations conversion produced. It never touches queries, topics, or
 // prose; it converts where a judgment says the answer lives, and extends a
-// case's allowed tiers with the archive provenance tier exactly when the
-// judged content now lives only there.
+// case's allowed tiers with exactly the tier its retargeted judgment now
+// requires: the archive provenance tier when the judged content lives only
+// there, and the campaign state-view tier when a masterfile judgment follows
+// its derived state view. Retargeting a judgment to a document class the
+// case's tiers cannot serve would otherwise convert a passing judgment into
+// one that is unsatisfiable by construction.
 func convertMigratedEvalCases(
 	context *migrationEvalJudgmentContext,
 	cases []EvalCase,
 ) {
+	stateViews := map[string]bool{}
+	for _, successor := range context.masterfile {
+		stateViews[successor] = true
+	}
 	for index := range cases {
 		eval := &cases[index]
 		tokens := migrationSearchTokens(eval.Query)
@@ -3969,6 +3977,31 @@ func convertMigratedEvalCases(
 		}
 		if archiveNeeded && !contains(eval.ForbiddenTiers, "archive") {
 			tiers, changed := appendUniquePaths(eval.AllowedTiers, "archive")
+			eval.AllowedTiers = tiers
+			retargeted = retargeted || changed
+		}
+		// A judgment retargeted onto a campaign state view is served from
+		// the campaign tier, which the legacy case never needed to allow:
+		// its masterfile lived in the active tier. Without the widening the
+		// context-pack stage refuses the exact required path this conversion
+		// just wrote into the case.
+		campaignStateNeeded := false
+		for _, judged := range [][]string{
+			eval.ExpectedPaths, eval.MinimumEvidencePaths, eval.ExpectedCitations,
+		} {
+			for _, value := range judged {
+				if stateViews[value] {
+					campaignStateNeeded = true
+				}
+			}
+		}
+		for value := range eval.GradedRelevantPaths {
+			if stateViews[value] {
+				campaignStateNeeded = true
+			}
+		}
+		if campaignStateNeeded && !contains(eval.ForbiddenTiers, "campaign") {
+			tiers, changed := appendUniquePaths(eval.AllowedTiers, "campaign")
 			eval.AllowedTiers = tiers
 			retargeted = retargeted || changed
 		}
