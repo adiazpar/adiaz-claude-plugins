@@ -1520,7 +1520,22 @@ func contextPackOutcomesPassed(outcomes []ContextPackOutcome) bool {
 		return false
 	}
 	for _, outcome := range outcomes {
-		if !outcome.Passed {
+		// The per-case hard gate is safety plus the pack's required-evidence
+		// contract, mirroring evaluationOutcomePassed. ExpectedEvidenceFound
+		// and AbstentionCorrect are the same retrieval-quality dimensions
+		// (ExpectedFound, AbstentionAccuracy) that hardMetricsPassed
+		// deliberately stopped treating as absolute because they trade off
+		// against ranking; gating on outcome.Passed reintroduced that
+		// per-case perfection requirement one stage over, so a safety-clean
+		// corpus whose packing merely ranked one expected document below the
+		// budget cut failed hard gates. Quality stays fully reported per
+		// case and is graded by the aggregate non-inferiority instruments.
+		// A required path the caller pinned is different: the pack contract
+		// promises its inclusion whenever the case's evidence budget
+		// applies, so its absence stays absolute.
+		requiredContractHolds := !outcome.QualityGateApplicable ||
+			outcome.RequiredEvidencePresent
+		if outcome.Error != "" || !outcome.SafetyPassed || !requiredContractHolds {
 			return false
 		}
 	}
