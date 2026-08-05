@@ -45,6 +45,20 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          # The version guard diffs packaged content against the previously
+          # published commit, which a shallow clone would not contain.
+          fetch-depth: 0
+
+      - name: Guard packaged version bump
+        shell: bash
+        env:
+          BASE_SHA: >-
+            ${{ github.event_name == 'pull_request'
+                && github.event.pull_request.base.sha
+                || github.event.before }}
+        run: |
+          set -eu
+          python3 .github/scripts/re-discipline-version-guard.py --base "${BASE_SHA:-}"
 
       - name: Isolate host-native state
         shell: bash
