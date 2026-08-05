@@ -116,6 +116,7 @@ func migrationCertificationEvalCases(t *testing.T, root string) []EvalCase {
 			ForbiddenTiers: []string{"draft"}, TokenBudget: 1024, Answerable: &answerable},
 	}
 	writeMigrationFixtureJSONIfMissing(t, root, ".re-discipline/knowledge/evals/cases.json", cases)
+	commitMigrationFixture(t, root)
 	return cases
 }
 
@@ -1182,5 +1183,56 @@ func TestBlindedEvaluationPassRestsOnPairedNonInferiority(t *testing.T) {
 	}
 	if legacyOnly.Passed {
 		t.Fatal("an evaluation without a compiled trial cannot pass")
+	}
+}
+
+func TestBlindedUnsupportedClaimsAreJudgedAsASuiteAggregate(t *testing.T) {
+	trial := func(caseID, condition string, unsupported int) MigrationBlindedAgentCaseOutcome {
+		return MigrationBlindedAgentCaseOutcome{
+			CaseID: caseID, Condition: condition, Agent: "claude-code", Model: "m",
+			Answerable: true,
+			Request: MigrationBlindedAgentRequest{
+				CaseID: caseID, Query: "q-" + caseID, QueryClass: "exact", Role: "manager",
+				AllowedTiers: []string{"truth"}, TokenBudget: 1024,
+			},
+			Response: MigrationBlindedAgentResponse{
+				AnswerClaims: []string{"claim"}, Decision: "answer",
+				Citations: []string{"docs/truth/a.md"}, DurabilityLabels: []string{"truth"},
+				ContextTokens: 100,
+			},
+			FactualAccuracy: 1, DecisionAccuracy: 1, EvidenceTracePassed: true,
+			UnsupportedClaims: unsupported,
+		}
+	}
+	seal := func(cases ...MigrationBlindedAgentCaseOutcome) MigrationBlindedAgentEvaluation {
+		evaluation := MigrationBlindedAgentEvaluation{
+			TransactionID: "M-1234567890ABCDEF1234", PlanDigest: stateTestDigest("a"),
+			BenchmarkDigest: stateTestDigest("b"), CalibrationDigest: stateTestDigest("c"),
+			Evaluator: "deterministic-judgment:test", Cases: cases,
+		}
+		if err := SealMigrationBlindedAgentEvaluation(&evaluation); err != nil {
+			t.Fatal(err)
+		}
+		return evaluation
+	}
+	// Two arms that distribute the same judged-unsupported total differently
+	// are identically safe: legacy concentrates 2 claims on one case while
+	// compiled spreads 1+1. Per-case dominance would fail the second pair;
+	// the aggregate must not.
+	sameTotal := seal(
+		trial("case-1", "legacy", 2), trial("case-1", "compiled", 1),
+		trial("case-2", "legacy", 0), trial("case-2", "compiled", 1),
+	)
+	if !sameTotal.Passed {
+		t.Fatal("equal suite totals distributed differently must not fail the unsupported-claims bar")
+	}
+	// A genuine aggregate regression - even one extra judged-unsupported
+	// claim in total - fails regardless of distribution.
+	regression := seal(
+		trial("case-1", "legacy", 2), trial("case-1", "compiled", 1),
+		trial("case-2", "legacy", 0), trial("case-2", "compiled", 2),
+	)
+	if regression.Passed {
+		t.Fatal("a compiled unsupported-claims total above the legacy total must fail the evaluation")
 	}
 }

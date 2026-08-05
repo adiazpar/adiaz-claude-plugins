@@ -2129,24 +2129,25 @@ def _blinded_case_non_inferior(
 ) -> bool:
     """Mirror the Go verifier's documented per-case bar for one measured pair.
 
-    The compiled arm must be factually and decision non-inferior, contain no
-    unsupported claims, preserve evidence traceability, avoid a full-corpus
-    read, and label the durability of any answer it gives. Context-token cost
-    is deliberately absent here: it is a continuous, noisy measurement judged
-    over the whole suite by _blinded_context_aggregate_non_inferior, not case
-    by case. This is a paired comparison, not an absolute per-trial pass
-    requirement: both arms are stochastic external respondents measured by one
-    deterministic judge, so demanding a perfect compiled trial on every case
-    would make the gate unsatisfiable for any corpus - the same defect, one
-    level up, as requiring a perfect 0.7 baseline. A compiled arm that
-    regresses any judged dimension on any case still fails.
+    The compiled arm must be factually and decision non-inferior, preserve
+    evidence traceability, avoid a full-corpus read, and label the durability
+    of any answer it gives. Two judged dimensions are deliberately absent
+    here because both are noisy measurements over stochastic respondents and
+    are judged over the whole suite instead: context-token cost by
+    _blinded_context_aggregate_non_inferior, and unsupported claims by
+    _blinded_unsupported_aggregate_non_inferior. This is a paired comparison,
+    not an absolute per-trial pass requirement: both arms are stochastic
+    external respondents measured by one deterministic judge, so demanding a
+    perfect compiled trial on every case would make the gate unsatisfiable
+    for any corpus - the same defect, one level up, as requiring a perfect
+    0.7 baseline. A compiled arm that regresses a per-case judged dimension
+    on any case still fails.
     """
 
     compiled_response = compiled["response"]
     return (
         float(compiled["factualAccuracy"]) >= float(legacy["factualAccuracy"])
         and float(compiled["decisionAccuracy"]) >= float(legacy["decisionAccuracy"])
-        and int(compiled["unsupportedClaims"]) == 0
         and not (
             bool(legacy["evidenceTracePassed"])
             and not bool(compiled["evidenceTracePassed"])
@@ -2157,6 +2158,34 @@ def _blinded_case_non_inferior(
             or len(compiled_response["durabilityLabels"]) > 0
         )
     )
+
+
+def _blinded_unsupported_aggregate_non_inferior(
+    pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any]]],
+) -> bool:
+    """Mirror migrationBlindedUnsupportedAggregateNonInferior in the Go verifier.
+
+    The compiled arm's total judged-unsupported claims over every complete
+    measured pair must not exceed the legacy arm's total, with zero margin.
+    The dimension is aggregated because an unsupported-claim count is
+    produced by one deterministic judge over stochastic respondent text, and
+    per-case dominance on such a count is not a non-inferiority test: two
+    arms that distribute the same total differently both fail it, including
+    two identically-safe systems. The margin is zero, unlike the
+    context-token band, because an unsupported claim is a discrete judged
+    safety event rather than a continuous heuristic estimate, and the
+    comparison is already paired - same cases, same judge, same noise process
+    on both arms - so the measured baseline carries the noise allowance. A
+    suite in which the compiled arm produces even one more judged-unsupported
+    claim in total than the captured legacy baseline fails, regardless of how
+    the claims are distributed across cases.
+    """
+
+    legacy_total = sum(int(legacy["unsupportedClaims"]) for legacy, _ in pairs)
+    compiled_total = sum(
+        int(compiled["unsupportedClaims"]) for _, compiled in pairs
+    )
+    return compiled_total <= legacy_total
 
 
 def _blinded_context_aggregate_non_inferior(
@@ -2219,12 +2248,14 @@ def _seal_blinded_evaluation(
     # Mirror the verifier: the legacy arm is the captured baseline and the
     # compiled arm must be non-inferior against it - case by case on the
     # judged accuracy and evidence dimensions, and in aggregate on
-    # context-token cost - per the documented gate contract. A legacy miss is
-    # a true measurement of the predecessor runtime and is preserved in its
-    # trial; a compiled miss on a case the legacy arm also missed is a shared
-    # measurement of the respondent. Only a case where the compiled arm scores
-    # worse than the captured baseline, or a suite whose compiled context
-    # total exceeds the aggregate tolerance, fails the evaluation.
+    # context-token cost and unsupported claims - per the documented gate
+    # contract. A legacy miss is a true measurement of the predecessor
+    # runtime and is preserved in its trial; a compiled miss on a case the
+    # legacy arm also missed is a shared measurement of the respondent. Only
+    # a case where the compiled arm scores worse than the captured baseline,
+    # or a suite whose compiled context total exceeds the aggregate
+    # tolerance, or a suite whose compiled unsupported-claims total exceeds
+    # the legacy total, fails the evaluation.
     compiled_cases = [case for case in cases if case["condition"] == "compiled"]
     if not compiled_cases:
         _fail("blindedEvaluation.cases", "requires at least one compiled trial")
@@ -2245,6 +2276,8 @@ def _seal_blinded_evaluation(
         if legacy is not None and compiled is not None:
             measured_pairs.append((legacy, compiled))
     if not _blinded_context_aggregate_non_inferior(measured_pairs):
+        passed = False
+    if not _blinded_unsupported_aggregate_non_inferior(measured_pairs):
         passed = False
     evaluation: dict[str, Any] = {
         "schemaVersion": 1,

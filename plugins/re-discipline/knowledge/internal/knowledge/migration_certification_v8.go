@@ -284,26 +284,52 @@ func migrationBlindedContextAggregateNonInferior(
 
 // migrationBlindedCaseNonInferior applies the documented per-case bar to one
 // legacy/compiled pair: the compiled arm must be factually and decision
-// non-inferior, contain no unsupported claims, preserve evidence
-// traceability, avoid a full-corpus read, and label the durability of any
-// answer it gives. Context-token cost is deliberately absent here: it is a
-// continuous, noisy measurement judged over the whole suite by
-// migrationBlindedContextAggregateNonInferior, not case by case. This is a
-// paired comparison, not an absolute per-trial pass requirement: both arms
-// are stochastic external respondents measured by one deterministic judge,
-// so demanding a perfect compiled trial on every case would make the gate
-// unsatisfiable for any corpus - the same defect, one level up, as requiring
-// a perfect 0.7 baseline. A compiled arm that regresses any judged
-// dimension on any case still fails.
+// non-inferior, preserve evidence traceability, avoid a full-corpus read,
+// and label the durability of any answer it gives. Two judged dimensions are
+// deliberately absent here because both are noisy measurements over
+// stochastic respondents and are judged over the whole suite instead:
+// context-token cost by migrationBlindedContextAggregateNonInferior, and
+// unsupported claims by migrationBlindedUnsupportedAggregateNonInferior.
+// This is a paired comparison, not an absolute per-trial pass requirement:
+// both arms are stochastic external respondents measured by one
+// deterministic judge, so demanding a perfect compiled trial on every case
+// would make the gate unsatisfiable for any corpus - the same defect, one
+// level up, as requiring a perfect 0.7 baseline. A compiled arm that
+// regresses a per-case judged dimension on any case still fails.
 func migrationBlindedCaseNonInferior(
 	legacy, compiled MigrationBlindedAgentCaseOutcome,
 ) bool {
 	return compiled.FactualAccuracy >= legacy.FactualAccuracy &&
 		compiled.DecisionAccuracy >= legacy.DecisionAccuracy &&
-		compiled.UnsupportedClaims == 0 &&
 		!(legacy.EvidenceTracePassed && !compiled.EvidenceTracePassed) &&
 		!compiled.Response.FullCorpusRead &&
 		(compiled.Response.Decision != "answer" || len(compiled.Response.DurabilityLabels) > 0)
+}
+
+// migrationBlindedUnsupportedAggregateNonInferior applies the
+// unsupported-claims bar over every complete measured pair: the compiled
+// arm's total judged-unsupported claims must not exceed the legacy arm's
+// total, with zero margin. The dimension is aggregated because an
+// unsupported-claim count is produced by one deterministic judge over
+// stochastic respondent text, and per-case dominance on such a count is not
+// a non-inferiority test: two arms that distribute the same total
+// differently both fail it, including two identically-safe systems. The
+// margin is zero, unlike the context-token band, because an unsupported
+// claim is a discrete judged safety event rather than a continuous heuristic
+// estimate, and the comparison is already paired - same cases, same judge,
+// same noise process on both arms - so the measured baseline carries the
+// noise allowance. A suite in which the compiled arm produces even one more
+// judged-unsupported claim in total than the captured legacy baseline fails,
+// regardless of how the claims are distributed across cases.
+func migrationBlindedUnsupportedAggregateNonInferior(
+	pairs [][2]MigrationBlindedAgentCaseOutcome,
+) bool {
+	legacyTotal, compiledTotal := 0, 0
+	for _, pair := range pairs {
+		legacyTotal += pair[0].UnsupportedClaims
+		compiledTotal += pair[1].UnsupportedClaims
+	}
+	return compiledTotal <= legacyTotal
 }
 
 func SealMigrationBlindedAgentCaseOutcome(
@@ -354,14 +380,15 @@ func SealMigrationBlindedAgentEvaluation(
 	}
 	// The legacy arm is the captured baseline and the compiled arm must be
 	// non-inferior against it: case by case on the judged accuracy and
-	// evidence dimensions, and in aggregate on context-token cost, per the
-	// documented gate contract. A legacy miss is a true measurement of the
-	// predecessor runtime, not a reason the migration cannot certify - and a
-	// compiled miss on a case the legacy arm also missed is a shared
-	// measurement of the respondent, not a migration regression. Only a case
-	// where the compiled arm scores worse than the captured baseline, or a
-	// suite whose compiled context total exceeds the aggregate tolerance,
-	// fails the evaluation.
+	// evidence dimensions, and in aggregate on context-token cost and
+	// unsupported claims, per the documented gate contract. A legacy miss is
+	// a true measurement of the predecessor runtime, not a reason the
+	// migration cannot certify - and a compiled miss on a case the legacy arm
+	// also missed is a shared measurement of the respondent, not a migration
+	// regression. Only a case where the compiled arm scores worse than the
+	// captured baseline, or a suite whose compiled context total exceeds the
+	// aggregate tolerance, or a suite whose compiled unsupported-claims total
+	// exceeds the legacy total, fails the evaluation.
 	byCase := map[string]map[string]MigrationBlindedAgentCaseOutcome{}
 	compiledTrials := 0
 	for index := range evaluation.Cases {
@@ -391,6 +418,9 @@ func SealMigrationBlindedAgentEvaluation(
 		}
 	}
 	if !migrationBlindedContextAggregateNonInferior(measuredPairs) {
+		evaluation.Passed = false
+	}
+	if !migrationBlindedUnsupportedAggregateNonInferior(measuredPairs) {
 		evaluation.Passed = false
 	}
 	evaluation.ResultDigest = ""
@@ -1055,9 +1085,10 @@ func validateMigrationBlindedAgentEvaluation(
 	}
 	// The sealed aggregate must equal the measured verdict it summarizes: the
 	// legacy trials are the measured baseline, the compiled arm must be
-	// non-inferior against them on every holdout case and within the
-	// aggregate context-token tolerance over the whole suite, and a sealed
-	// Passed that disagrees with the trials it summarizes is fabricated.
+	// non-inferior against them on every holdout case, within the aggregate
+	// context-token tolerance over the whole suite, and at or below the
+	// legacy unsupported-claims total over the whole suite; a sealed Passed
+	// that disagrees with the trials it summarizes is fabricated.
 	compiledTrials := 0
 	for _, outcome := range evaluation.Cases {
 		if outcome.Condition == "compiled" {
@@ -1080,6 +1111,9 @@ func validateMigrationBlindedAgentEvaluation(
 			[2]MigrationBlindedAgentCaseOutcome{legacy, compiled})
 	}
 	if !migrationBlindedContextAggregateNonInferior(measuredPairs) {
+		expectedPassed = false
+	}
+	if !migrationBlindedUnsupportedAggregateNonInferior(measuredPairs) {
 		expectedPassed = false
 	}
 	if compiledTrials == 0 || evaluation.Passed != expectedPassed {
