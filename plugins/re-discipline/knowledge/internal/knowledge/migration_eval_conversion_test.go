@@ -93,6 +93,14 @@ func TestEvalConversionRetargetsMasterfileJudgmentsToCampaignStateView(t *testin
 	if contains(cases[0].AllowedTiers, "archive") {
 		t.Fatalf("state-view successor must not widen tiers to archive: %#v", cases[0].AllowedTiers)
 	}
+	if !contains(cases[0].AllowedTiers, "campaign") {
+		t.Fatalf("state-view successor must be servable: the state view is indexed"+
+			" at the campaign tier, so the retargeted case must allow it: %#v",
+			cases[0].AllowedTiers)
+	}
+	if !contains(cases[0].AllowedTiers, "active") {
+		t.Fatalf("widening must preserve the case's original tiers: %#v", cases[0].AllowedTiers)
+	}
 	if strings.Contains(strings.Join(cases[0].ExpectedPaths, " "), "campaign.json") ||
 		strings.Contains(strings.Join(cases[0].ExpectedPaths, " "), "/payload/legacy/") {
 		t.Fatal("judgment names an unservable structured record or a payload copy")
