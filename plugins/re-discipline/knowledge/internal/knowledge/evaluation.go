@@ -439,7 +439,25 @@ func UpdateDeclaredBenchmarks(assetRoot string, report BenchmarkReport) error {
 		evidence.RatifiedAbstentionAccuracy = row.Benchmark.RatifiedAbstentionAccuracy
 		row.Benchmark = evidence
 	}
-	return AtomicWriteJSON(profilePath, profile, 0o644)
+	if err := AtomicWriteJSON(profilePath, profile, 0o644); err != nil {
+		return err
+	}
+	// migration_templates/balanced-v1.json is a go:embed mirror of the same
+	// profile, and it is the copy the certification environment reads when it
+	// decides whether packaged evidence is stale. Updating only the canonical
+	// file left the mirror behind, so the very next certification declared the
+	// freshly measured evidence stale. Keep them identical.
+	mirrorPath := filepath.Join(
+		assetRoot, "internal", "knowledge", "migration_templates",
+		"balanced-v1.json")
+	if _, err := os.Stat(mirrorPath); err != nil {
+		if os.IsNotExist(err) {
+			// A consuming asset root has no embedded mirror to keep in step.
+			return nil
+		}
+		return err
+	}
+	return AtomicWriteJSON(mirrorPath, profile, 0o644)
 }
 
 func RunPackagedBenchmark(ctx context.Context, assetRoot, mode string) (BenchmarkReport, error) {
