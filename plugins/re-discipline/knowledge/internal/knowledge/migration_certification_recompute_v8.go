@@ -12,6 +12,26 @@ import (
 	"time"
 )
 
+// stringSlicesEquivalent is an order-preserving element comparison that
+// treats nil and empty as the same honest emptiness. A benchmark report for a
+// project with zero finding-evaluation suites marshals findingSuiteDigests as
+// the empty array and decodes as an empty non-nil slice, while the rederived
+// certification environment appends onto a nil slice; reflect.DeepEqual calls
+// those unequal, which made the environment binding unsatisfiable for exactly
+// the projects with an empty finding corpus. The calibration validator
+// already normalizes this same representation hazard.
+func stringSlicesEquivalent(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func validateMigrationBenchmarkEnvironment(
 	report ProjectBenchmarkReport,
 	environment MigrationCertificationEnvironment,
@@ -27,7 +47,7 @@ func validateMigrationBenchmarkEnvironment(
 		report.Generation.GitRevision != gitRevision ||
 		report.Generation.DirtyFingerprint != dirtyFingerprint ||
 		report.EvalFingerprint != environment.EvalFingerprint ||
-		!reflect.DeepEqual(report.FindingSuiteDigests, environment.FindingSuiteDigests) ||
+		!stringSlicesEquivalent(report.FindingSuiteDigests, environment.FindingSuiteDigests) ||
 		report.Generation.CorpusFingerprint != environment.CorpusFingerprint ||
 		report.Generation.ModelFingerprint != environment.ModelFingerprint ||
 		report.Generation.ParserVersion != environment.ParserVersion ||
@@ -364,8 +384,13 @@ func validateMigrationCaseOutcome(
 	seenPaths := map[string]bool{}
 	seenChunks := map[string]bool{}
 	relevantSeen := map[string]bool{}
-	relevantPaths := []string{}
-	relevantRanks := []int{}
+	// Mirror runEvaluationCase exactly: it appends onto nil slices, so a case
+	// with no relevant results carries null relevance fields. Initializing
+	// these as empty non-nil slices made reflect.DeepEqual reject every
+	// honest quality-missing case as self-authored - the same nil-versus-
+	// empty representation hazard as the finding-suite digests.
+	var relevantPaths []string
+	var relevantRanks []int
 	hardNegatives := map[string]bool{}
 	citations := map[string]bool{}
 	authoritySafe := true
@@ -504,18 +529,16 @@ func validateMigrationContextOutcomes(
 			eval.ExpectedCitations...,
 		))
 		foundSet := map[string]bool{}
-		seenPaths := map[string]bool{}
 		for pathIndex, path := range outcome.Paths {
-			if seenPaths[path] {
-				return false, fmt.Errorf(
-					"context case %s repeats a source path", eval.ID)
-			}
+			// A pack honestly serves multiple chunks of one document - a
+			// ranked finding card plus its provenance passages all carry the
+			// same source path - so repetition is legitimate. Each entry must
+			// still name an exact current corpus document at its exact tier.
 			document, current := environment.documentsByPath[path]
 			if !current || document.Tier != outcome.Tiers[pathIndex] {
 				return false, fmt.Errorf(
 					"context case %s path/tier is not an exact current corpus document", eval.ID)
 			}
-			seenPaths[path] = true
 			foundSet[path] = true
 		}
 		found := []string{}

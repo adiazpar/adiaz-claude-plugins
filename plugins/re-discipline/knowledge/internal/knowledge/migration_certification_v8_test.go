@@ -169,7 +169,9 @@ func migrationCertificationBenchmark(t *testing.T, root string) (ProjectBenchmar
 	}
 	casesByBudget := map[string][]CaseOutcome{}
 	contextsByBudget := map[string][]ContextPackOutcome{}
-	requestedDigest, _ := CanonicalDigest(baseline.Profile.ProfileID)
+	// Derive the requested-profile identity exactly as the runtime does:
+	// the profile ID at the canonical digest of its semantic content.
+	requestedDigest, _ := CanonicalDigest(semanticProfile(baseline.Profile))
 	report := ProjectBenchmarkReport{
 		SchemaVersion: 1, RunID: "benchmark-migration-certification", Mode: "full",
 		Suite: "project-benchmark-v1", RequestedProfile: baseline.Profile.ProfileID + "@" + requestedDigest,
