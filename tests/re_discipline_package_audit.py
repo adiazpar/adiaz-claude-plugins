@@ -222,11 +222,33 @@ def compute_runtime_build_id(knowledge_root: Path) -> str:
     def relative(path: Path) -> str:
         return os.path.relpath(path, knowledge_root).replace(os.sep, "/")
 
+    def build_input_body(path: Path, rel: str) -> bytes:
+        """Mirror the packager's buildInputBody exactly.
+
+        A retrieval profile contributes its semantic content only: its
+        benchmark rows are a measurement OF the built runtime, so feeding them
+        into that runtime's identity is circular and has no fixed point.
+        Go marshals a generic map with sorted keys, which json.dumps with
+        sort_keys and compact separators reproduces byte for byte.
+        """
+        body = path.read_bytes()
+        if not rel.startswith("profiles/") or not rel.endswith(".json"):
+            return body
+        document = json.loads(body)
+        document.pop("$schema", None)
+        document.pop("approval", None)
+        for row in document.get("effectiveProfiles") or []:
+            if isinstance(row, dict):
+                row.pop("benchmark", None)
+        return json.dumps(
+            document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+
     digest = hashlib.sha256()
     for path in sorted(inputs, key=relative):
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"build input is not a regular file: {path}")
-        body = path.read_bytes()
+        body = build_input_body(path, relative(path))
         digest.update(relative(path).encode("utf-8"))
         digest.update(b"\0")
         digest.update(str(len(body)).encode("ascii"))

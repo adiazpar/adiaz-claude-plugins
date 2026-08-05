@@ -765,7 +765,7 @@ func computeRuntimeBuildID(moduleRoot string) (string, error) {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return "", fmt.Errorf("build input is not a regular file: %s", path)
 		}
-		body, err := os.ReadFile(path)
+		body, err := buildInputBody(path, filepath.ToSlash(relative))
 		if err != nil {
 			return "", err
 		}
@@ -775,6 +775,45 @@ func computeRuntimeBuildID(moduleRoot string) (string, error) {
 		}
 	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// buildInputBody returns the bytes a build input contributes to the runtime
+// build identity.
+//
+// A retrieval profile is hashed by its semantic content only. Its benchmark
+// rows record a measurement OF the built runtime - they carry that runtime's
+// fingerprint - so feeding them back into the identity of the same runtime is
+// circular: refreshing the receipt changes the profile, which changes the
+// build ID, which invalidates the receipt just written. That loop has no
+// fixed point, and it made the published version unbumpable. Everything that
+// decides behaviour (lanes, weights, rrfK, rerank depth, packing, model
+// requirements) is still covered, exactly as semanticProfile defines it.
+//
+// Both sides decode to a generic map so the canonical form is Go's
+// sorted-key marshalling, which tests/re_discipline_package_audit.py mirrors
+// with json.dumps(sort_keys=True).
+func buildInputBody(path string, relative string) ([]byte, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(relative, "profiles/") || !strings.HasSuffix(relative, ".json") {
+		return body, nil
+	}
+	var document map[string]any
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, fmt.Errorf("decode profile build input %s: %w", relative, err)
+	}
+	delete(document, "$schema")
+	delete(document, "approval")
+	if rows, ok := document["effectiveProfiles"].([]any); ok {
+		for _, entry := range rows {
+			if row, ok := entry.(map[string]any); ok {
+				delete(row, "benchmark")
+			}
+		}
+	}
+	return json.Marshal(document)
 }
 
 func buildAndInstall(moduleRoot, outputRoot, pinnedGo, buildID string) error {
