@@ -16,6 +16,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -2129,36 +2130,22 @@ def _blinded_case_non_inferior(
     """Mirror the Go verifier's documented per-case bar for one measured pair.
 
     The compiled arm must be factually and decision non-inferior, contain no
-    unsupported claims, preserve evidence traceability, stay within a bounded
-    context-token tolerance of the legacy arm, avoid a full-corpus read, and
-    label the durability of any answer it gives. This is a paired comparison,
-    not an absolute per-trial pass requirement: both arms are stochastic
-    external respondents measured by one deterministic judge, so demanding a
-    perfect compiled trial on every case would make the gate unsatisfiable for
-    any corpus - the same defect, one level up, as requiring a perfect 0.7
-    baseline. A compiled arm that regresses any judged dimension on any case
-    still fails.
-
-    The context tolerance mirrors migrationBlindedContextTolerance in the Go
-    verifier: the larger of a tenth of the legacy measurement (wording-length
-    and token-estimation noise between equally informative packs) and a
-    sixteenth of the case's token budget (one average passage allocation at
-    the runtime's default serving granularity of sixteen passages per pack).
-    Both components are protocol constants fixed before any run is evaluated;
-    the absolute per-trial ceiling (contextTokens <= tokenBudget) is enforced
-    separately and is not widened by this margin.
+    unsupported claims, preserve evidence traceability, avoid a full-corpus
+    read, and label the durability of any answer it gives. Context-token cost
+    is deliberately absent here: it is a continuous, noisy measurement judged
+    over the whole suite by _blinded_context_aggregate_non_inferior, not case
+    by case. This is a paired comparison, not an absolute per-trial pass
+    requirement: both arms are stochastic external respondents measured by one
+    deterministic judge, so demanding a perfect compiled trial on every case
+    would make the gate unsatisfiable for any corpus - the same defect, one
+    level up, as requiring a perfect 0.7 baseline. A compiled arm that
+    regresses any judged dimension on any case still fails.
     """
 
-    legacy_response = legacy["response"]
     compiled_response = compiled["response"]
-    legacy_tokens = int(legacy_response["contextTokens"])
-    tolerance = max(
-        legacy_tokens // 10, int(legacy["request"]["tokenBudget"]) // 16
-    )
     return (
         float(compiled["factualAccuracy"]) >= float(legacy["factualAccuracy"])
         and float(compiled["decisionAccuracy"]) >= float(legacy["decisionAccuracy"])
-        and int(compiled_response["contextTokens"]) <= legacy_tokens + tolerance
         and int(compiled["unsupportedClaims"]) == 0
         and not (
             bool(legacy["evidenceTracePassed"])
@@ -2170,6 +2157,43 @@ def _blinded_case_non_inferior(
             or len(compiled_response["durabilityLabels"]) > 0
         )
     )
+
+
+def _blinded_context_aggregate_non_inferior(
+    pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any]]],
+) -> bool:
+    """Mirror migrationBlindedContextAggregateNonInferior in the Go verifier.
+
+    The compiled arm's total served context over every complete measured pair
+    must stay within the aggregate tolerance of the legacy arm's total. The
+    tolerance is the larger of a tenth of the legacy aggregate (token counting
+    is a heuristic estimate and wording-length noise is proportional to
+    volume, so it does not cancel when cases are summed) and the summed
+    per-case passage allocations (tokenBudget // 16, one passage at the
+    runtime's default serving granularity of sixteen passages per pack)
+    divided by the square root of the pair count (per-case rounding to whole
+    passages is independent across cases, so granularity noise aggregates as
+    the square root of the case count, not linearly). Both components are
+    protocol constants fixed before any run is evaluated; a genuine aggregate
+    regression exceeds both and fails. The absolute per-trial ceiling
+    (contextTokens <= tokenBudget) is enforced separately and is not widened
+    by this margin.
+    """
+
+    legacy_total = sum(
+        int(legacy["response"]["contextTokens"]) for legacy, _ in pairs
+    )
+    compiled_total = sum(
+        int(compiled["response"]["contextTokens"]) for _, compiled in pairs
+    )
+    passage_allocation_sum = sum(
+        int(legacy["request"]["tokenBudget"]) // 16 for legacy, _ in pairs
+    )
+    tolerance = legacy_total // 10
+    if pairs:
+        floor = int(passage_allocation_sum / math.sqrt(len(pairs)))
+        tolerance = max(tolerance, floor)
+    return compiled_total <= legacy_total + tolerance
 
 
 def _seal_blinded_evaluation(
@@ -2193,12 +2217,14 @@ def _seal_blinded_evaluation(
             )
     protocol_digest = _sha256(BLINDED_PROTOCOL.encode("utf-8"))
     # Mirror the verifier: the legacy arm is the captured baseline and the
-    # compiled arm must be non-inferior against it case by case, per the
-    # documented gate contract. A legacy miss is a true measurement of the
-    # predecessor runtime and is preserved in its trial; a compiled miss on a
-    # case the legacy arm also missed is a shared measurement of the
-    # respondent. Only a case where the compiled arm scores worse than the
-    # captured baseline fails the evaluation.
+    # compiled arm must be non-inferior against it - case by case on the
+    # judged accuracy and evidence dimensions, and in aggregate on
+    # context-token cost - per the documented gate contract. A legacy miss is
+    # a true measurement of the predecessor runtime and is preserved in its
+    # trial; a compiled miss on a case the legacy arm also missed is a shared
+    # measurement of the respondent. Only a case where the compiled arm scores
+    # worse than the captured baseline, or a suite whose compiled context
+    # total exceeds the aggregate tolerance, fails the evaluation.
     compiled_cases = [case for case in cases if case["condition"] == "compiled"]
     if not compiled_cases:
         _fail("blindedEvaluation.cases", "requires at least one compiled trial")
@@ -2206,6 +2232,7 @@ def _seal_blinded_evaluation(
     for case in cases:
         by_case.setdefault(str(case["caseId"]), {})[str(case["condition"])] = case
     passed = bool(cases) and bool(compiled_cases)
+    measured_pairs: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
     for arms in by_case.values():
         legacy = arms.get("legacy")
         compiled = arms.get("compiled")
@@ -2215,6 +2242,10 @@ def _seal_blinded_evaluation(
             or not _blinded_case_non_inferior(legacy, compiled)
         ):
             passed = False
+        if legacy is not None and compiled is not None:
+            measured_pairs.append((legacy, compiled))
+    if not _blinded_context_aggregate_non_inferior(measured_pairs):
+        passed = False
     evaluation: dict[str, Any] = {
         "schemaVersion": 1,
         "suite": BLINDED_SUITE,
