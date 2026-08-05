@@ -52,13 +52,26 @@ jobs:
       - name: Guard packaged version bump
         shell: bash
         env:
-          BASE_SHA: >-
-            ${{ github.event_name == 'pull_request'
-                && github.event.pull_request.base.sha
-                || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -eu
-          python3 .github/scripts/re-discipline-version-guard.py --base "${BASE_SHA:-}"
+          # Compare against what is actually published, not merely against the
+          # previous commit. On a working branch that would measure each commit
+          # against the one before it, so an intermediate revert would read as
+          # a backwards version move even though nothing was ever published.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"
+          elif [ "$REF_NAME" = "$DEFAULT_BRANCH" ]; then
+            base="$PUSH_BEFORE_SHA"
+          else
+            git fetch --quiet origin "$DEFAULT_BRANCH" || true
+            base="$(git merge-base "origin/$DEFAULT_BRANCH" HEAD || true)"
+          fi
+          python3 .github/scripts/re-discipline-version-guard.py --base "${base:-}"
 
       - name: Isolate host-native state
         shell: bash
