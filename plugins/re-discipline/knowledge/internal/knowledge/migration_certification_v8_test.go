@@ -1041,43 +1041,63 @@ func TestMigrationHostParityCoversConfiguredHostsAndCodexIsOptional(t *testing.T
 	}
 }
 
-// TestBlindedContextToleranceBounds pins the context-token non-inferiority
-// band on both sides of each component: the absolute floor of one sixteenth
-// of the case budget, and the relative component of one tenth of the legacy
-// measurement. One token past the tolerance must fail the pair.
-func TestBlindedContextToleranceBounds(t *testing.T) {
-	outcome := func(condition string, tokens, budget int) MigrationBlindedAgentCaseOutcome {
-		return MigrationBlindedAgentCaseOutcome{
-			CaseID: "case-1", Condition: condition,
-			Request:  MigrationBlindedAgentRequest{CaseID: "case-1", TokenBudget: budget},
-			Response: MigrationBlindedAgentResponse{Decision: "abstain", ContextTokens: tokens},
-			FactualAccuracy: 1, DecisionAccuracy: 1, EvidenceTracePassed: true,
+// TestBlindedContextAggregateToleranceBounds pins the aggregate context-token
+// non-inferiority band on both sides of each component: the relative tenth of
+// the legacy aggregate, and the granularity floor of the summed per-case
+// passage allocations divided by the square root of the pair count. One token
+// past the aggregate tolerance must fail the sealed evaluation, and a
+// per-case overrun inside a compliant aggregate must not: context cost is a
+// suite-total judgment, not a per-case dominance requirement.
+func TestBlindedContextAggregateToleranceBounds(t *testing.T) {
+	seal := func(legacyTokens, compiledTokens []int, budget int) bool {
+		t.Helper()
+		evaluation := MigrationBlindedAgentEvaluation{
+			TransactionID: "M-1234567890ABCDEF1234", PlanDigest: stateTestDigest("a"),
+			BenchmarkDigest: stateTestDigest("b"), CalibrationDigest: stateTestDigest("c"),
+			Evaluator: "deterministic-judgment:test",
 		}
-	}
-	cases := []struct {
-		name             string
-		legacy, compiled int
-		budget           int
-		want             bool
-	}{
-		// budget 2048: floor 128 dominates the relative 100.
-		{"at the absolute floor", 1000, 1128, 2048, true},
-		{"one past the absolute floor", 1000, 1129, 2048, false},
-		// budget 4096: relative 300 dominates the floor 256.
-		{"at the relative component", 3000, 3300, 4096, true},
-		{"one past the relative component", 3000, 3301, 4096, false},
-		// budget 512: floor 32 dominates the relative 10.
-		{"at the small-budget floor", 100, 132, 512, true},
-		{"one past the small-budget floor", 100, 133, 512, false},
-	}
-	for _, testCase := range cases {
-		legacy := outcome("legacy", testCase.legacy, testCase.budget)
-		compiled := outcome("compiled", testCase.compiled, testCase.budget)
-		if got := migrationBlindedCaseNonInferior(legacy, compiled); got != testCase.want {
-			t.Errorf("%s: legacy %d compiled %d budget %d: non-inferior = %v, want %v",
-				testCase.name, testCase.legacy, testCase.compiled, testCase.budget,
-				got, testCase.want)
+		trial := func(caseID, condition string, tokens int) MigrationBlindedAgentCaseOutcome {
+			return MigrationBlindedAgentCaseOutcome{
+				CaseID: caseID, Condition: condition,
+				Request: MigrationBlindedAgentRequest{
+					CaseID: caseID, TokenBudget: budget,
+				},
+				Response: MigrationBlindedAgentResponse{
+					Decision: "abstain", ContextTokens: tokens,
+				},
+				FactualAccuracy: 1, DecisionAccuracy: 1, EvidenceTracePassed: true,
+			}
 		}
+		for index := range legacyTokens {
+			caseID := fmt.Sprintf("case-%d", index+1)
+			evaluation.Cases = append(evaluation.Cases,
+				trial(caseID, "legacy", legacyTokens[index]),
+				trial(caseID, "compiled", compiledTokens[index]))
+		}
+		if err := SealMigrationBlindedAgentEvaluation(&evaluation); err != nil {
+			t.Fatal(err)
+		}
+		return evaluation.Passed
+	}
+	// Four pairs at budget 2048 and legacy aggregate 4000: the relative tenth
+	// (400) dominates the granularity floor (4*128/sqrt(4) = 256). The passing
+	// allocation overruns one case by 900 tokens and repays it elsewhere,
+	// which per-case dominance would reject.
+	legacy := []int{1000, 1000, 1000, 1000}
+	if !seal(legacy, []int{1900, 1900, 300, 300}, 2048) {
+		t.Fatal("an aggregate at the relative component must pass")
+	}
+	if seal(legacy, []int{1900, 1900, 300, 301}, 2048) {
+		t.Fatal("one token past the relative component must fail")
+	}
+	// Four pairs at budget 2048 with a small legacy aggregate (400): the
+	// granularity floor (256) dominates the relative tenth (40).
+	small := []int{100, 100, 100, 100}
+	if !seal(small, []int{164, 164, 164, 164}, 2048) {
+		t.Fatal("an aggregate at the granularity floor must pass")
+	}
+	if seal(small, []int{164, 164, 164, 165}, 2048) {
+		t.Fatal("one token past the granularity floor must fail")
 	}
 }
 
