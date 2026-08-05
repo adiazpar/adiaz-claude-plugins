@@ -833,7 +833,12 @@ func validateFinalMigrationBenchmark(
 	for _, row := range baseline.Profile.EffectiveProfiles {
 		expectedProfiles[row.Name] = row
 	}
-	requestedDigest, _ := CanonicalDigest(baseline.Profile.ProfileID)
+	// The runtime's requested-profile identity is the profile ID at the
+	// canonical digest of its semantic content (receipts and prose stripped,
+	// SelectEffectiveProfile). The expectation here must be derived the same
+	// way; digesting the bare profile ID string produced an identity no
+	// honest benchmark could ever carry.
+	requestedDigest, _ := CanonicalDigest(semanticProfile(baseline.Profile))
 	if report.RequestedProfile != baseline.Profile.ProfileID+"@"+requestedDigest {
 		return ProjectProfileBenchmark{}, errors.New("benchmark requested profile is not the exact packaged baseline")
 	}
