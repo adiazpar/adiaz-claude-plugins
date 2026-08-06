@@ -6,17 +6,20 @@ and keys updates on that version. Publishing changed content under a version
 that already shipped therefore leaves every existing install pinned to the old
 bytes: `autoUpdate` sees a version it already has and does nothing, and the
 divergence is silent -- the runtime keeps serving stale packaged behavior with
-no error anywhere.
+no error anywhere. That is not hypothetical; it stranded 75 commits of changes
+under a single published version.
 
-This guard makes that failure impossible to merge. It enforces two rules:
+Nothing else here can catch it. The package audit and
+re-discipline-sync-version.py prove the tree is internally consistent - every
+manifest agrees with the declared constant - but both only ever look at one
+commit. This guard is the only check that compares against what was published
+before, so it owns exactly that one rule and leaves consistency to them.
 
-1. Every manifest that declares the plugin version agrees with the others.
-   The Claude and Codex manifests are separate files and drift independently.
-2. If any packaged file changed between the base commit and HEAD, the declared
-   version increased.
+The version is read from its single definition, RuntimeVersion in
+plugins/re-discipline/knowledge/internal/knowledge/types.go.
 
 Usage:
-    re-discipline-version-guard.py --base <ref> [--plugin <name>]
+    re-discipline-version-guard.py --base <ref>
 
 Exit status is 0 when the tree is publishable and 1 with an explanation
 otherwise. A missing or unresolvable base ref (a new branch, an initial
@@ -27,77 +30,61 @@ is no prior published state to compare against.
 from __future__ import annotations
 
 import argparse
-import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
-# Manifests that redundantly declare the plugin version, relative to the
-# plugin directory. All of them must agree.
-VERSION_MANIFESTS = (
-    ".claude-plugin/plugin.json",
-    ".codex-plugin/plugin.json",
-)
+VERSION_SOURCE = "knowledge/internal/knowledge/types.go"
+VERSION_CONSTANT = "RuntimeVersion"
 
 
 def run_git(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git"] + args, capture_output=True, text=True, check=False
-    )
+    return subprocess.run(["git"] + args, capture_output=True, text=True, check=False)
 
 
 def ref_exists(ref: str) -> bool:
-    return run_git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]).returncode == 0
+    return (
+        run_git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]).returncode
+        == 0
+    )
 
 
 def parse_semver(raw: str) -> tuple[int, ...]:
     """Parse a dotted numeric version, ignoring any pre-release suffix."""
     core = raw.split("-", 1)[0].split("+", 1)[0]
     parts = core.split(".")
-    if not parts or not all(p.isdigit() for p in parts):
+    if not parts or not all(part.isdigit() for part in parts):
         raise ValueError(f"not a numeric version: {raw!r}")
-    return tuple(int(p) for p in parts)
+    return tuple(int(part) for part in parts)
 
 
-def version_from_json(text: str, origin: str) -> str:
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{origin}: invalid JSON: {exc}") from exc
-    version = data.get("version")
-    if not isinstance(version, str) or not version.strip():
-        raise ValueError(f"{origin}: missing a string 'version'")
-    return version.strip()
+def extract_version(text: str, origin: str) -> str:
+    match = re.search(rf'\b{VERSION_CONSTANT}\s*=\s*"([^"]+)"', text)
+    if not match:
+        raise ValueError(f"{origin}: {VERSION_CONSTANT} is not declared")
+    return match.group(1)
 
 
-def declared_versions(plugin_dir: Path) -> dict[str, str]:
-    """Read the version each manifest declares in the working tree."""
-    found: dict[str, str] = {}
-    for rel in VERSION_MANIFESTS:
-        path = plugin_dir / rel
-        if not path.is_file():
-            continue
-        found[rel] = version_from_json(
-            path.read_text(encoding="utf-8"), str(path)
-        )
-    return found
+def version_in_tree(plugin_path: str) -> str:
+    path = Path(plugin_path) / VERSION_SOURCE
+    return extract_version(path.read_text(encoding="utf-8"), str(path))
 
 
-def version_at_ref(ref: str, path: str) -> str | None:
-    """Read a manifest version as of `ref`, or None if absent there."""
-    shown = run_git(["show", f"{ref}:{path}"])
+def version_at_ref(ref: str, plugin_path: str) -> str | None:
+    """Read the declared version as of `ref`, or None if absent there."""
+    relative = f"{plugin_path}/{VERSION_SOURCE}"
+    shown = run_git(["show", f"{ref}:{relative}"])
     if shown.returncode != 0:
         return None
-    return version_from_json(shown.stdout, f"{ref}:{path}")
+    return extract_version(shown.stdout, f"{ref}:{relative}")
 
 
 def packaged_content_changed(base: str, plugin_path: str) -> bool:
     diff = run_git(["diff", "--quiet", base, "HEAD", "--", plugin_path])
     # 0 -> identical, 1 -> differs. Anything else is a git failure.
     if diff.returncode not in (0, 1):
-        raise RuntimeError(
-            f"git diff failed for {plugin_path}: {diff.stderr.strip()}"
-        )
+        raise RuntimeError(f"git diff failed for {plugin_path}: {diff.stderr.strip()}")
     return diff.returncode == 1
 
 
@@ -121,48 +108,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     plugin_path = f"plugins/{args.plugin}"
-    plugin_dir = Path(plugin_path)
-    if not plugin_dir.is_dir():
+    if not Path(plugin_path).is_dir():
         print(f"version-guard: no such plugin directory: {plugin_path}")
         return 1
 
-    # Rule 1: every manifest agrees, whether or not anything changed.
     try:
-        versions = declared_versions(plugin_dir)
-    except ValueError as exc:
-        print(f"version-guard: {exc}")
-        return 1
-
-    if not versions:
-        print(
-            "version-guard: no manifest declares a version; expected one of: "
-            + ", ".join(VERSION_MANIFESTS)
-        )
-        return 1
-
-    distinct = sorted(set(versions.values()))
-    if len(distinct) > 1:
-        print("version-guard: plugin manifests declare different versions:")
-        for rel, value in sorted(versions.items()):
-            print(f"  {rel}: {value}")
-        print("  fix: set the same version in every manifest above.")
-        return 1
-
-    current = distinct[0]
-    try:
+        current = version_in_tree(plugin_path)
         current_parts = parse_semver(current)
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         print(f"version-guard: {exc}")
         return 1
 
-    # Rule 2: content changes require the version to move forward.
     base = args.base.strip()
     if not base or not ref_exists(base):
         print(
             "version-guard: no comparable base commit "
             f"({base or 'unset'}); skipping the bump check."
         )
-        print(f"version-guard: declared version {current} is self-consistent.")
         return 0
 
     try:
@@ -178,11 +140,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    previous = None
-    for rel in VERSION_MANIFESTS:
-        previous = version_at_ref(base, f"{plugin_path}/{rel}")
-        if previous is not None:
-            break
+    try:
+        previous = version_at_ref(base, plugin_path)
+    except ValueError as exc:
+        print(f"version-guard: base version unreadable: {exc}")
+        return 1
 
     if previous is None:
         print(
@@ -204,9 +166,9 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "\n  Installed clients key their cache on this version, so "
             "republishing\n  the same version leaves every existing install "
-            "on the old bytes.\n  fix: raise 'version' in "
-            + " and ".join(VERSION_MANIFESTS)
-            + "."
+            "on the old bytes.\n  fix: raise "
+            f"{VERSION_CONSTANT} in {plugin_path}/{VERSION_SOURCE}, then run"
+            "\n  .github/scripts/re-discipline-sync-version.py"
         )
         return 1
 
@@ -217,9 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if current_parts <= previous_parts:
-        print(
-            f"version-guard: version moved backwards: {previous} -> {current}."
-        )
+        print(f"version-guard: version moved backwards: {previous} -> {current}.")
         print("  fix: the new version must be greater than the published one.")
         return 1
 

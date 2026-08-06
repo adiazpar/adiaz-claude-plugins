@@ -1,7 +1,7 @@
 # Re-Discipline Knowledge Runtime
 
 This directory contains the local, manager-neutral state and knowledge engine
-shipped with re-discipline 0.8.0. Claude Code, Codex, direct managers, and
+shipped with re-discipline 0.8. Claude Code, Codex, direct managers, and
 delegated workers use the same executable, canonical record schemas, finding
 index, retrieval profiles, and context-pack format.
 
