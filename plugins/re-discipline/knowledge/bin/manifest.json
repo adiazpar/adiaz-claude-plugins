@@ -3,8 +3,8 @@
   "schemaVersion": 1,
   "runtime": {
     "name": "re-discipline-knowledge",
-    "version": "0.8.0",
-    "buildId": "sha256:d20d3698332737542373c55ffbc32fa6561be88eb59e1ecab89d887e935e9f6e"
+    "version": "0.8.1",
+    "buildId": "sha256:e11ecd418e79b5c7ea255a96ba3a9fd64a6e64957a746817324e0ec67f4fabbe"
   },
   "build": {
     "goToolchain": "go1.26.5",
@@ -12,7 +12,7 @@
     "flags": [
       "-trimpath",
       "-buildvcs=false",
-      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:d20d3698332737542373c55ffbc32fa6561be88eb59e1ecab89d887e935e9f6e"
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:e11ecd418e79b5c7ea255a96ba3a9fd64a6e64957a746817324e0ec67f4fabbe"
     ],
     "environment": [
       "CGO_ENABLED=0",
@@ -32,7 +32,7 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:9d99752048c67d0f4d404315119d26b960eb9efe2083250ce6108ac704127468",
+      "sha256": "sha256:7f99a84a3e3714e7012158dbc26054d67071cdf202e1c044abc8480fabf696b5",
       "size": 11804160,
       "mode": "0644"
     },
@@ -41,7 +41,7 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:6569122196299bf42a0d1797c9b09ffc9e1a1f431854d5da8a4bdbb9d5290f03",
+      "sha256": "sha256:6ed55c549025ee9e5b26915c9b0055937a992b7ed423566aef14bc496dfb15fd",
       "size": 10862592,
       "mode": "0644"
     },
@@ -50,7 +50,7 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:25503862a8ec48f1ac44793937aad8d57c88bfdcf24196756f480f3716ad716d",
+      "sha256": "sha256:5fc701e5bd38356473c4f7db1ce68a0449d6a1d29d88c32f29153dcdbfd509d8",
       "size": 11534462,
       "mode": "0755"
     },
@@ -59,7 +59,7 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:61fff32e82ee592880eead0ec9677c0ff2e996f4af2e343da39c784b000cad55",
+      "sha256": "sha256:d0db61bcd80bc292ceb04cf0b61c0575bfb1cdfdb2093e19fb61976118fca6ec",
       "size": 10813566,
       "mode": "0755"
     },
@@ -68,7 +68,7 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:fd78bcacf260b8f91bb8037f509741476edf36854af63545fbbeab62a6359043",
+      "sha256": "sha256:ecdd68d5b60ee10125a3fdb600340f6e6b851edb2a0bb7cca559e657b74c32ab",
       "size": 11704368,
       "mode": "0755"
     },
@@ -77,7 +77,7 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:aab965557784fcdff72a95dc7866732faecfbd1c3d182e1f0ae421cd16156596",
+      "sha256": "sha256:231e2ad6f741f5da537122fe6ff0dae32574514620f311d44e818bf05b3486e3",
       "size": 10990434,
       "mode": "0755"
     }
@@ -95,7 +95,7 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "re-discipline-knowledge.exe",
-      "sha256": "sha256:fc94db155e10fb6ecd12b0c45a1d0dbd443d5e302bb457a012fcc3b521f559f6",
+      "sha256": "sha256:fc4702955ac4ab27b860a2a3c3ebe801f1aab3af5368afd258291fb12ce89e6b",
       "size": 2072064,
       "mode": "0644"
     }
@@ -398,22 +398,22 @@
     {
       "kind": "lane-ablation-decision",
       "path": "evals/conformance/lane-ablation-decision.json",
-      "sha256": "sha256:f26315f48a64293f72d26ba2b40f37293ec0cc07c35bd86d6538a3c53e29e7ab",
+      "sha256": "sha256:9ed0ee1c22f2ac94c300f64f63fc49de7202a3952a51874e54e59cb3b00564b1",
       "size": 2204,
       "mode": "0644"
     },
     {
       "kind": "lane-ablation-report",
       "path": "evals/conformance/lane-ablation-report.json",
-      "sha256": "sha256:6a18519937ff1f7ef1182d95bc85bd712288c7f7c8b0c4ad39add24e088c9987",
-      "size": 19172,
+      "sha256": "sha256:300ad404a4e7c38e11601ccd65a0206bcf91989f152558a360f841269a2828ff",
+      "size": 19173,
       "mode": "0644"
     },
     {
       "kind": "project-lane-ablation-measurement",
       "path": "evals/conformance/project-lane-ablation.json",
-      "sha256": "sha256:9fdc442407b3684454bb3b6bf262d75a04d80cac1b66afe4891a0fef8772383e",
-      "size": 699843,
+      "sha256": "sha256:d8e05319b01d275ae333ccd9196c4e15046f794fb11164afea35a8a6c5c297ed",
+      "size": 699954,
       "mode": "0644"
     },
     {
@@ -433,7 +433,7 @@
     {
       "kind": "model-manifest",
       "path": "models/manifest.json",
-      "sha256": "sha256:265ea8990c99911718aa7180fa6a01b4c1b909c20eb5ef336c0aa230252df7c8",
+      "sha256": "sha256:6f1b76f69c722626c13e8b9487e81c4b66aa4157a06ff7968bc837f557864d0d",
       "size": 1286,
       "mode": "0644"
     },
