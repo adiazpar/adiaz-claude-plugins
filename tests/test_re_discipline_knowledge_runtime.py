@@ -10,9 +10,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.re_discipline_package_audit import declared_plugin_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "re-discipline"
+DECLARED_VERSION = declared_plugin_version(ROOT)
 BIN_ROOT = PLUGIN / "knowledge" / "bin"
 EXPECTED_PLATFORMS = {
     ("windows", "amd64"): "re-discipline-knowledge.exe",
@@ -249,7 +252,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             "plugin://re-discipline/schemas/runtime-package-manifest.schema.json",
         )
         self.assertEqual(manifest["runtime"]["name"], "re-discipline-knowledge")
-        self.assertEqual(manifest["runtime"]["version"], "0.8.0")
+        self.assertEqual(manifest["runtime"]["version"], DECLARED_VERSION)
         self.assertRegex(manifest["runtime"]["buildId"], r"^sha256:[0-9a-f]{64}$")
         self.assertFalse(manifest["build"]["cgoEnabled"])
         self.assertRegex(
@@ -665,7 +668,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
     def assert_mcp_result(self, responses: dict[int, dict]) -> tuple[str, str]:
         self.assertEqual(
             responses[1]["result"]["serverInfo"]["version"],
-            "0.8.0",
+            DECLARED_VERSION,
         )
         self.assertEqual(
             [tool["name"] for tool in responses[2]["result"]["tools"]],
@@ -688,8 +691,8 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
     def test_relocated_codex_and_claude_launch_same_shared_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            claude_copy = temporary / "claude-cache" / "re-discipline" / "0.8.0"
-            codex_copy = temporary / "codex-cache" / "re-discipline" / "0.8.0"
+            claude_copy = temporary / "claude-cache" / "re-discipline" / DECLARED_VERSION
+            codex_copy = temporary / "codex-cache" / "re-discipline" / DECLARED_VERSION
             shutil.copytree(PLUGIN, claude_copy, copy_function=copy_or_link)
             shutil.copytree(PLUGIN, codex_copy, copy_function=copy_or_link)
             project = temporary / "project"

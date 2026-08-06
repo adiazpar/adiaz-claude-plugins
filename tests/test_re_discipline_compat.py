@@ -3,6 +3,8 @@ import re
 import unittest
 from pathlib import Path
 
+from tests.re_discipline_package_audit import declared_plugin_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "re-discipline"
@@ -79,8 +81,12 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
     def test_manifests_publish_one_080_contract(self):
         claude = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
         codex = json.loads((PLUGIN / ".codex-plugin" / "plugin.json").read_text())
-        self.assertEqual(claude["version"], "0.8.0")
-        self.assertEqual(codex["version"], "0.8.0")
+        # Both manifests publish one version, and it is the declared one.
+        # Pinning a literal here made every release fail an unrelated test.
+        declared = declared_plugin_version(ROOT)
+        self.assertRegex(declared, r"^0\.8\.\d+$")
+        self.assertEqual(claude["version"], declared)
+        self.assertEqual(codex["version"], declared)
         for manifest in (claude, codex):
             description = manifest["description"].lower()
             self.assertIn("transactional", description)
