@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.re_discipline_package_audit import audit_plugin
+from tests.re_discipline_package_audit import audit_plugin, declared_plugin_version
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +20,7 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
         second = audit_plugin(PLUGIN)
         self.assertEqual(first["artifactDigest"], second["artifactDigest"])
         self.assertEqual(first["inventoryDigest"], second["inventoryDigest"])
-        self.assertEqual(first["pluginVersion"], "0.8.0")
+        self.assertEqual(first["pluginVersion"], declared_plugin_version(ROOT))
         self.assertEqual(first["violations"], [], json.dumps(first["violations"], indent=2))
         self.assertGreater(first["fileCount"], 0)
 

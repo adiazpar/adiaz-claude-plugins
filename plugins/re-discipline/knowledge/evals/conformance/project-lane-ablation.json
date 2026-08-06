@@ -4,26 +4,26 @@
   "kind": "project-retrieval-lane-ablation",
   "measurementOnly": true,
   "project": "snaphak-re",
-  "evaluatedAt": "2026-08-03T18:10:36Z",
+  "evaluatedAt": "2026-08-05T23:52:42Z",
   "provenance": {
-    "frozenSourceRevision": "0d3e86b82b4bf13ed7d76e60943259e0d216f852",
+    "frozenSourceRevision": "27303228db71d067d1db37084caed0b7c0746698",
     "projectGitRevision": "1ababb9e4c08ab3243ade093d741509b3cbae5f3",
-    "projectDirtyFingerprint": "sha256:39752505f631dde7ade2e3301a814f5f87d21f355ea8bd7c1ed8b25fcc05dba1",
-    "frozenRuntimeFingerprint": "sha256:949d8e48fe7ba9b12f7f74d2c866ca1e56674a502b4ac2567f7638878d6be98e",
-    "rawBenchmarkSha256": "sha256:31351e5f777c2cd6919239dbd50bac8749d18d9ef81a47c8d36a57a7be332333",
-    "rawBenchmarkRunId": "benchmark-20260803T181036.557912900Z",
+    "projectDirtyFingerprint": "sha256:8a346bc49cbdb92044dbc159c3962a8e66130571ba9f01de2c334f498a0e6091",
+    "frozenRuntimeFingerprint": "sha256:c58b7e44cce88a823895252578d6824875ebf0dd21eb337fc018ca1be16d466a",
+    "rawBenchmarkSha256": "sha256:674f706c8756e0cdad3f6fb48bf95d44007ff523b80f9db345a7fee9213b3692",
+    "rawBenchmarkRunId": "benchmark-20260805T235242.674297300Z",
     "rawBenchmarkComplete": true,
     "rawBenchmarkArmCount": 2,
     "rawBenchmarkCasesPerArm": 64,
-    "rawBenchmarkDurationMillis": 419175,
+    "rawBenchmarkDurationMillis": 415525,
     "parserVersion": "markdown-finding-v2-identifier-v1",
     "chunkerVersion": "section-block-v6-finding-freshness",
     "profileCatalogSha256": "sha256:4d5466176b1a266d0478c471e4411f4428b6881f9f05d2c71d156b831f1bfafe",
-    "modelManifestSha256": "sha256:265ea8990c99911718aa7180fa6a01b4c1b909c20eb5ef336c0aa230252df7c8"
+    "modelManifestSha256": "sha256:6f1b76f69c722626c13e8b9487e81c4b66aa4157a06ff7968bc837f557864d0d"
   },
   "corpus": {
-    "generationId": "generation-f5da450df89a21839ee1",
-    "corpusFingerprint": "sha256:312b5803eecaed70f9034b07355c70ffc0d5c087307bda95e6cd8ad4e64ae1d0",
+    "generationId": "generation-2d6d4b947a9d4413174f",
+    "corpusFingerprint": "sha256:41c90f899805c0f9a1e961f0fd7a2c2da1fffc2236485ab2fb9586d6811c54a6",
     "documentCount": 214,
     "chunkCount": 1787,
     "indexedSourceProof": {
@@ -31,96 +31,96 @@
       "sourceCount": 214,
       "byteExactCount": 214,
       "mismatchCount": 0,
-      "pathDigestPairsSha256": "sha256:d050bd927948d386229b6ed67af195c120723e5e704faff7aa7651f5815dfa4b"
+      "pathDigestPairsSha256": "sha256:9ed23f7f1d78853e5fd354d7259d7f66baa9be3d34e3b7ca50e42b0a5d80bf02"
     },
     "finalEvalFileCount": 9,
     "finalEvalCaseCount": 64,
     "finalEvalFiles": [
       {
         "path": ".re-discipline/knowledge/evals/README.md",
-        "finalSha256": "sha256:4c9666c0b0c167cc35a3c82e6949be073c17ea7b9a2358a7046e4bb8c1db488f",
-        "projectedSha256": "sha256:4c9666c0b0c167cc35a3c82e6949be073c17ea7b9a2358a7046e4bb8c1db488f",
-        "finalByteCount": 4628,
-        "projectedByteCount": 4628,
+        "finalSha256": "sha256:ffe897aa53aed3eb1a94bb14e5b938db833d0c9f26a2b449175bcb8055c8c9d3",
+        "projectedSha256": "sha256:ffe897aa53aed3eb1a94bb14e5b938db833d0c9f26a2b449175bcb8055c8c9d3",
+        "finalByteCount": 4715,
+        "projectedByteCount": 4715,
         "caseCount": 0,
         "removedOccurrences": 0
       },
       {
         "path": ".re-discipline/knowledge/evals/binaries-tooling-holdout.json",
-        "finalSha256": "sha256:e9120534a1c019419668a8df0423de7dba18911a18d1084c1bf95b1348a9cfcc",
-        "projectedSha256": "sha256:e9120534a1c019419668a8df0423de7dba18911a18d1084c1bf95b1348a9cfcc",
-        "finalByteCount": 5989,
-        "projectedByteCount": 5989,
+        "finalSha256": "sha256:7fc4c68baa578938a0238dd1b82827d27ff6b494f5c9190398b30d9c969c73f2",
+        "projectedSha256": "sha256:7fc4c68baa578938a0238dd1b82827d27ff6b494f5c9190398b30d9c969c73f2",
+        "finalByteCount": 6191,
+        "projectedByteCount": 6191,
         "caseCount": 5,
         "removedOccurrences": 0
       },
       {
         "path": ".re-discipline/knowledge/evals/campaign-history-abstention-expansion.json",
-        "finalSha256": "sha256:e92dc2194c8318ac0307e64060275a35dc54e01143dc6f1070f16d705af6eea2",
-        "projectedSha256": "sha256:bacee3bd4f599665787577cb931e6fcdc9bfdd4e3c4c9d439c5eb6a595ef6625",
-        "finalByteCount": 45543,
-        "projectedByteCount": 44347,
+        "finalSha256": "sha256:e33d5220140c616d4fd818dc05e9b6e2d166e9ce130bdaa9b22aebf63085b90f",
+        "projectedSha256": "sha256:c877f26c1b72389009f6f9d33bd21287d3a27bc74a7ce8867eac62a0cc5fb533",
+        "finalByteCount": 46866,
+        "projectedByteCount": 45644,
         "caseCount": 32,
         "removedOccurrences": 26
       },
       {
         "path": ".re-discipline/knowledge/evals/daemon-development.json",
-        "finalSha256": "sha256:483ffd4f6a0ce77c4dfb9042ae70d528fc947fd7f8461a560bc8aae2b2e63822",
-        "projectedSha256": "sha256:483ffd4f6a0ce77c4dfb9042ae70d528fc947fd7f8461a560bc8aae2b2e63822",
-        "finalByteCount": 5483,
-        "projectedByteCount": 5483,
+        "finalSha256": "sha256:3b11be33e41e41db8fd79256a98d185561c6b2c1f14e131b53c4e9c74fc47460",
+        "projectedSha256": "sha256:3b11be33e41e41db8fd79256a98d185561c6b2c1f14e131b53c4e9c74fc47460",
+        "finalByteCount": 5651,
+        "projectedByteCount": 5651,
         "caseCount": 4,
         "removedOccurrences": 0
       },
       {
         "path": ".re-discipline/knowledge/evals/development-batch2.json",
-        "finalSha256": "sha256:d63280b78981fa6caf478adfddb028507ad3a7cc35871b244e054a688b75ecbb",
-        "projectedSha256": "sha256:d63280b78981fa6caf478adfddb028507ad3a7cc35871b244e054a688b75ecbb",
-        "finalByteCount": 5813,
-        "projectedByteCount": 5813,
+        "finalSha256": "sha256:7263d887935c034804f40b1979a39afed65e4d2bb9266bd9167155cf4666b69c",
+        "projectedSha256": "sha256:7263d887935c034804f40b1979a39afed65e4d2bb9266bd9167155cf4666b69c",
+        "finalByteCount": 6005,
+        "projectedByteCount": 6005,
         "caseCount": 5,
         "removedOccurrences": 0
       },
       {
         "path": ".re-discipline/knowledge/evals/drafter-role.json",
-        "finalSha256": "sha256:e4a157616a720014b0042ceb008cd142bdd7b51137bc84484e728976a24aa11d",
-        "projectedSha256": "sha256:e4a157616a720014b0042ceb008cd142bdd7b51137bc84484e728976a24aa11d",
-        "finalByteCount": 2293,
-        "projectedByteCount": 2293,
+        "finalSha256": "sha256:0b6f219ad0a8c3af797cadc5ce871ad925d22e72560d5eb5889b1cd3d129b91e",
+        "projectedSha256": "sha256:0b6f219ad0a8c3af797cadc5ce871ad925d22e72560d5eb5889b1cd3d129b91e",
+        "finalByteCount": 2367,
+        "projectedByteCount": 2367,
         "caseCount": 2,
         "removedOccurrences": 0
       },
       {
         "path": ".re-discipline/knowledge/evals/engine-codec-holdout.json",
-        "finalSha256": "sha256:796700901d702643b5cf4c94adab355866a9263e483a81433b60982ab358063d",
-        "projectedSha256": "sha256:796700901d702643b5cf4c94adab355866a9263e483a81433b60982ab358063d",
-        "finalByteCount": 6309,
-        "projectedByteCount": 6309,
+        "finalSha256": "sha256:c14a8baa05bbc10a1b47d148a4e066f765b38a444c71df3eadbcc71334e59b66",
+        "projectedSha256": "sha256:c14a8baa05bbc10a1b47d148a4e066f765b38a444c71df3eadbcc71334e59b66",
+        "finalByteCount": 6511,
+        "projectedByteCount": 6511,
         "caseCount": 5,
         "removedOccurrences": 0
       },
       {
         "path": ".re-discipline/knowledge/evals/holdout-batch2.json",
-        "finalSha256": "sha256:36d572e11e58b4d9a6ae38ae8e3035afb44bab6fd1a884ad4053305b70d9c3a7",
-        "projectedSha256": "sha256:36d572e11e58b4d9a6ae38ae8e3035afb44bab6fd1a884ad4053305b70d9c3a7",
-        "finalByteCount": 9344,
-        "projectedByteCount": 9344,
+        "finalSha256": "sha256:a3eef1752cbd7cd1cda2ee3083e1e0f4510edccd7899c8dc411df7b819218d02",
+        "projectedSha256": "sha256:a3eef1752cbd7cd1cda2ee3083e1e0f4510edccd7899c8dc411df7b819218d02",
+        "finalByteCount": 9657,
+        "projectedByteCount": 9657,
         "caseCount": 8,
         "removedOccurrences": 0
       },
       {
         "path": ".re-discipline/knowledge/evals/snaphak-development.json",
-        "finalSha256": "sha256:ab5d032f75ea82a946453a1f66e8f0ebcf89d90316e4ca4c44482626da96898c",
-        "projectedSha256": "sha256:ab5d032f75ea82a946453a1f66e8f0ebcf89d90316e4ca4c44482626da96898c",
-        "finalByteCount": 3491,
-        "projectedByteCount": 3491,
+        "finalSha256": "sha256:fc7aa26be6a2fe6e00149a508a6215aa8a7a2cda2a88e17b87c34f21b2c369ee",
+        "projectedSha256": "sha256:fc7aa26be6a2fe6e00149a508a6215aa8a7a2cda2a88e17b87c34f21b2c369ee",
+        "finalByteCount": 3604,
+        "projectedByteCount": 3604,
         "caseCount": 3,
         "removedOccurrences": 0
       }
     ],
     "projectedEvalFingerprint": "sha256:fb8e361dee9712c729b7b4313e8217a2fa9cbb6b8dcf8f63bc230a0f7d4f6c9f",
-    "projectionManifestSha256": "sha256:668a6b454030c37c77feb68536b5b51a4f5761746a70415f03011a2f737dc469",
-    "projectionTransformDigest": "sha256:7c625352bfcf03c51ab2fac4b8b2a907e0c10234cbc0d285d76c2e150be2b5a0",
+    "projectionManifestSha256": "sha256:baa742ac3168b1f3e5fd64c8f4dd5484834756c584ddbb79087537d031ba1381",
+    "projectionTransformDigest": "sha256:ec73f85fd76cfbdcb34e6fb673c91cdb5ae2c1593f126e66af821fa4c72be14e",
     "projectionOperation": "delete-whole-json-member-line-v1",
     "projectionRemovedOccurrences": 26,
     "projectionPreservesAllOtherBytes": true
@@ -128,31 +128,31 @@
   "harness": {
     "sourceRepositoryMutated": false,
     "indexedSourceBytesUnchanged": true,
-    "receiptSha256": "sha256:9395d606225e1fabbfa2f3609dbc9167b516ae14eb567380af8c132c66193070",
-    "pluginRevision": "0d3e86b82b4bf13ed7d76e60943259e0d216f852",
+    "receiptSha256": "sha256:f3086fdcd5e2dbd0000bb5dfedb00ecedd00e223b896e94344a7fe8918600bb6",
+    "pluginRevision": "27303228db71d067d1db37084caed0b7c0746698",
     "projectRevision": "1ababb9e4c08ab3243ade093d741509b3cbae5f3",
     "benchmarkCommandSha256": "sha256:90acd0785d3ec0e4056cfa35ed2bc64624a3f6b4fb4ccd71950992cc31cd57a8",
-    "projectionManifestArtifactSha256": "sha256:668a6b454030c37c77feb68536b5b51a4f5761746a70415f03011a2f737dc469",
-    "indexedSourcesManifestSha256": "sha256:f3a0704f503ab68dfcefe19c370ff8048b9cfb9668dcb2d2a5df961629035387",
+    "projectionManifestArtifactSha256": "sha256:baa742ac3168b1f3e5fd64c8f4dd5484834756c584ddbb79087537d031ba1381",
+    "indexedSourcesManifestSha256": "sha256:784f164986dd1dc27c8b188943595a8ee1712794914fc831865fbd2dcea1630d",
     "controlPlaneSubstitutions": [
       {
         "kind": "bootstrap-config",
         "projectPath": ".re-discipline/config.json",
-        "originalSha256": "sha256:00bddd07262c4d89a71b0c6116e39d6f515c9eef3e846dfd563714aecdb680ac",
+        "originalSha256": "sha256:c2055da6fc5067eab016a57aa900fe003ce58d0c35cb88746996da504464ed45",
         "replacementSha256": "sha256:43fa4ec0cfccbd8d29ca46cc35d0b24028998b789bf89e17700bd951ae66e93c",
         "replacementSource": "plugins/re-discipline/templates/project/config.json"
       },
       {
         "kind": "knowledge-policy",
         "projectPath": ".re-discipline/knowledge/policy.jsonc",
-        "originalSha256": "sha256:0ecf50495c49b06ea63b6ade4b248557edd110fb6a5fcea3ae801c8a97d7a235",
+        "originalSha256": "sha256:14684be0a29cc0555cb8d28b7cac9228947282aa87f6a2d6b7d3eabbb3cf3ada",
         "replacementSha256": "sha256:2ee5b6972c307ee85c344ae787ddc0b092a9b085867767d7205ef84f1ec04e7c",
         "replacementSource": "plugins/re-discipline/templates/project/policy.jsonc"
       },
       {
         "kind": "retrieval-profile",
         "projectPath": ".re-discipline/knowledge/retrieval-profile.json",
-        "originalSha256": "sha256:a4c247ace9588d3bc3a4a018b91eb1525f266751bde0c60cb0346ba20dfc6806",
+        "originalSha256": "sha256:2ccbb969d524d9b6bdbf4154df0a05c0c0de28257e178e5eb08393302dc05cf6",
         "replacementSha256": "sha256:4d5466176b1a266d0478c471e4411f4428b6881f9f05d2c71d156b831f1bfafe",
         "replacementSource": "plugins/re-discipline/templates/project/retrieval-profile.json"
       }
@@ -218,8 +218,8 @@
         "fts",
         "graph"
       ],
-      "effectiveIdentity": "lexical-graph-v1@sha256:3e8608b749385adc190c1197695d5ec4a27ce5bf07dfbbc6399568abf5572b49",
-      "observationDigest": "sha256:7342ae29ea6575ea25ce31d56e4f92b24889e2657b47e3e3206f2fe20eed915e",
+      "effectiveIdentity": "lexical-graph-v1@sha256:fd307f1d7b96a827014c92d12b73a53a25d088ec6b37bdb236935d1ada320d70",
+      "observationDigest": "sha256:d670cc9a947b339a02d98234cde2d25b44b4430e7b1598f7af79c098d328d588",
       "modelIds": [],
       "hardGatesPassed": false,
       "nonInferiorToLexical": true,
@@ -244,8 +244,8 @@
         "relevantTokenRatio": 0.07052409186942002,
         "duplicateTokenRatio": 0.0,
         "deterministicReplayRate": 1.0,
-        "p50LatencyMillis": 398,
-        "p95LatencyMillis": 460
+        "p50LatencyMillis": 388,
+        "p95LatencyMillis": 455
       },
       "metricsBySplit": {
         "development": {
@@ -269,8 +269,8 @@
           "relevantTokenRatio": 0.047897521581732105,
           "duplicateTokenRatio": 0.0,
           "deterministicReplayRate": 1.0,
-          "p50LatencyMillis": 411,
-          "p95LatencyMillis": 466
+          "p50LatencyMillis": 407,
+          "p95LatencyMillis": 457
         },
         "holdout": {
           "recallAtK": 0.41379310344827586,
@@ -293,8 +293,8 @@
           "relevantTokenRatio": 0.09691708008504607,
           "duplicateTokenRatio": 0.0,
           "deterministicReplayRate": 1.0,
-          "p50LatencyMillis": 283,
-          "p95LatencyMillis": 460
+          "p50LatencyMillis": 285,
+          "p95LatencyMillis": 455
         }
       }
     },
@@ -307,8 +307,8 @@
         "graph",
         "dense"
       ],
-      "effectiveIdentity": "hybrid-no-rerank-v1@sha256:6e324b41e85e8943f54ef403c505ba20afed78b0b8764d73504b1dd07d2347d9",
-      "observationDigest": "sha256:3c5dba887e5ecb6702011b89f46835f3c36dffcd641e7e2e721ea79cd0a1cd8e",
+      "effectiveIdentity": "hybrid-no-rerank-v1@sha256:a3a1a8527cc50fb2b11a822207f03c188466184bcefae9ab0f7e652171c71ab9",
+      "observationDigest": "sha256:f15e8c3188f39dba92a2152de251074a91d7d6bd5caa65442da71e92096f7e32",
       "modelIds": [
         "builtin:glove-6b-50d-top50k-q8-v1"
       ],
@@ -335,8 +335,8 @@
         "relevantTokenRatio": 0.07841807603108514,
         "duplicateTokenRatio": 0.0,
         "deterministicReplayRate": 1.0,
-        "p50LatencyMillis": 439,
-        "p95LatencyMillis": 499
+        "p50LatencyMillis": 429,
+        "p95LatencyMillis": 494
       },
       "metricsBySplit": {
         "development": {
@@ -360,8 +360,8 @@
           "relevantTokenRatio": 0.05239603761251069,
           "duplicateTokenRatio": 0.0,
           "deterministicReplayRate": 1.0,
-          "p50LatencyMillis": 445,
-          "p95LatencyMillis": 502
+          "p50LatencyMillis": 441,
+          "p95LatencyMillis": 494
         },
         "holdout": {
           "recallAtK": 0.4827586206896552,
@@ -384,8 +384,8 @@
           "relevantTokenRatio": 0.10889602167319415,
           "duplicateTokenRatio": 0.0,
           "deterministicReplayRate": 1.0,
-          "p50LatencyMillis": 308,
-          "p95LatencyMillis": 499
+          "p50LatencyMillis": 306,
+          "p95LatencyMillis": 496
         }
       }
     }
@@ -418,20 +418,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 191,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 133
+        "latencyMillis": 130
       },
       "dense": {
         "caseId": "active-cross-agent-fabric-implementation-boundary",
@@ -452,20 +452,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 191,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 141
+        "latencyMillis": 138
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -516,7 +516,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 139
+        "latencyMillis": 136
       },
       "dense": {
         "caseId": "active-doom-current-build-dual-port-kit",
@@ -550,7 +550,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 143
+        "latencyMillis": 142
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -588,20 +588,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 180,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 136
+        "latencyMillis": 134
       },
       "dense": {
         "caseId": "active-doomforge-fidelity-owner-generic-fx",
@@ -622,20 +622,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 181,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 141
+        "latencyMillis": 143
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -673,20 +673,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 183,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 131
+        "latencyMillis": 128
       },
       "dense": {
         "caseId": "active-doomforge-multi-demon-two-slot-proof",
@@ -707,20 +707,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 183,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 137
+        "latencyMillis": 138
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -758,20 +758,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 187,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 121
+        "latencyMillis": 120
       },
       "dense": {
         "caseId": "active-installer-reputation-signing-gate",
@@ -792,20 +792,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 188,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 135
+        "latencyMillis": 132
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -843,20 +843,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 177,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 135
+        "latencyMillis": 130
       },
       "dense": {
         "caseId": "active-prelude-benchmark-profile-receipt",
@@ -877,20 +877,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 178,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 140
+        "latencyMillis": 136
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -928,20 +928,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 176,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 123
+        "latencyMillis": 117
       },
       "dense": {
         "caseId": "active-rediscipline-state-engine-adoption",
@@ -962,20 +962,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 176,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 127
+        "latencyMillis": 124
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1013,20 +1013,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 177,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 134
+        "latencyMillis": 131
       },
       "dense": {
         "caseId": "active-resource-registration-native-audio-proof",
@@ -1047,20 +1047,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 178,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 217
+        "latencyMillis": 227
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1098,20 +1098,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 185,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 138
+        "latencyMillis": 137
       },
       "dense": {
         "caseId": "active-tyrant-idtech7-to-idtech6-mesh",
@@ -1132,20 +1132,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 186,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 148
+        "latencyMillis": 143
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1183,20 +1183,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 179,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 110
+        "latencyMillis": 108
       },
       "dense": {
         "caseId": "active-tyrant-texture-bimage-cooker",
@@ -1217,20 +1217,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": false,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 180,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 118
+        "latencyMillis": 114
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1303,7 +1303,7 @@
         "relevantTokens": 324,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 283
+        "latencyMillis": 281
       },
       "dense": {
         "caseId": "binaries-master-index-identifier",
@@ -1359,7 +1359,7 @@
         "relevantTokens": 324,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 302
+        "latencyMillis": 298
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1428,7 +1428,7 @@
         "relevantTokens": 300,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 232
+        "latencyMillis": 228
       },
       "dense": {
         "caseId": "binaries-steamstub-owner",
@@ -1480,7 +1480,7 @@
         "relevantTokens": 300,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 254
+        "latencyMillis": 246
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1543,7 +1543,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 448
+        "latencyMillis": 442
       },
       "dense": {
         "caseId": "binaries-unpack-before-ghidra",
@@ -1593,7 +1593,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 490
+        "latencyMillis": 489
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1656,7 +1656,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 419
+        "latencyMillis": 415
       },
       "dense": {
         "caseId": "codec-can-i-link-two-objects-directly",
@@ -1702,7 +1702,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 459
+        "latencyMillis": 455
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1752,20 +1752,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 973,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 446
+        "latencyMillis": 443
       },
       "dense": {
         "caseId": "codec-engine-validated-must-not-serve-history",
@@ -1798,20 +1798,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 974,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 491
+        "latencyMillis": 484
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1880,7 +1880,7 @@
         "relevantTokens": 331,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 313
+        "latencyMillis": 311
       },
       "dense": {
         "caseId": "codec-get-connections-for-source-identifier",
@@ -1932,7 +1932,7 @@
         "relevantTokens": 331,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 333
+        "latencyMillis": 330
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -1995,7 +1995,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 483
+        "latencyMillis": 476
       },
       "dense": {
         "caseId": "codec-round-trip-engine-validated",
@@ -2041,7 +2041,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 522
+        "latencyMillis": 520
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2104,7 +2104,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 460
+        "latencyMillis": 455
       },
       "dense": {
         "caseId": "codec-which-number-is-sender-vs-receiver",
@@ -2150,7 +2150,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 499
+        "latencyMillis": 496
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2271,7 +2271,7 @@
         "relevantTokens": 284,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 272
+        "latencyMillis": 270
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2338,7 +2338,7 @@
         "relevantTokens": 208,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 246
+        "latencyMillis": 245
       },
       "dense": {
         "caseId": "daemon-dtor-ok-identifier",
@@ -2388,7 +2388,7 @@
         "relevantTokens": 208,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 264
+        "latencyMillis": 260
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2451,7 +2451,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 398
+        "latencyMillis": 401
       },
       "dense": {
         "caseId": "daemon-hang-surfaces-as-error-not-block",
@@ -2497,7 +2497,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 442
+        "latencyMillis": 445
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2560,7 +2560,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 449
+        "latencyMillis": 443
       },
       "dense": {
         "caseId": "daemon-oracle-blind-to-semantic-errors",
@@ -2606,7 +2606,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 492
+        "latencyMillis": 488
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2675,7 +2675,7 @@
         "relevantTokens": 229,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 231
+        "latencyMillis": 233
       },
       "dense": {
         "caseId": "daemon-rpc-timeout-identifier",
@@ -2727,7 +2727,7 @@
         "relevantTokens": 229,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 247
+        "latencyMillis": 248
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2796,7 +2796,7 @@
         "relevantTokens": 151,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 467
+        "latencyMillis": 457
       },
       "dense": {
         "caseId": "daemon-single-outcome-from-live-signals",
@@ -2848,7 +2848,7 @@
         "relevantTokens": 350,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 502
+        "latencyMillis": 494
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -2898,20 +2898,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 896,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 454
+        "latencyMillis": 450
       },
       "dense": {
         "caseId": "daemon-validate-ok-must-not-serve-history",
@@ -2948,20 +2948,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1017,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 494
+        "latencyMillis": 491
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3070,7 +3070,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 458
+        "latencyMillis": 457
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3121,7 +3121,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 110
+        "latencyMillis": 114
       },
       "dense": {
         "caseId": "drafter-abstain-nonexistent-archive-token",
@@ -3155,7 +3155,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 127
+        "latencyMillis": 128
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3240,7 +3240,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 44
+        "latencyMillis": 41
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3298,20 +3298,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1951,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 448
+        "latencyMillis": 441
       },
       "dense": {
         "caseId": "drafter-action-ref-count-from-palette",
@@ -3352,20 +3352,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1920,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 494
+        "latencyMillis": 486
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3438,7 +3438,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 419
+        "latencyMillis": 416
       },
       "dense": {
         "caseId": "drafter-corpus-baseline-mutator-entrypoint",
@@ -3494,7 +3494,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 469
+        "latencyMillis": 465
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3552,20 +3552,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1898,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 426
+        "latencyMillis": 421
       },
       "dense": {
         "caseId": "drafter-demon-gore-decl-inheritance",
@@ -3606,20 +3606,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1984,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 476
+        "latencyMillis": 471
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3690,7 +3690,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 445
+        "latencyMillis": 441
       },
       "dense": {
         "caseId": "drafter-fault-shield-doom-wild-pointer-scope",
@@ -3744,7 +3744,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 484
+        "latencyMillis": 479
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3819,7 +3819,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 450
+        "latencyMillis": 440
       },
       "dense": {
         "caseId": "drafter-overlay-selector-aware-copy",
@@ -3873,7 +3873,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 483
+        "latencyMillis": 480
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -3944,7 +3944,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 422
+        "latencyMillis": 415
       },
       "dense": {
         "caseId": "drafter-resource-override-three-layers",
@@ -3998,7 +3998,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 465
+        "latencyMillis": 459
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -4069,7 +4069,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 398
+        "latencyMillis": 388
       },
       "dense": {
         "caseId": "drafter-screenshot-additive-not-verdict",
@@ -4123,7 +4123,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 444
+        "latencyMillis": 435
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -4181,20 +4181,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2017,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 450
+        "latencyMillis": 447
       },
       "dense": {
         "caseId": "drafter-steam-transient-launcher-attach",
@@ -4235,13 +4235,13 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2036,
@@ -4319,7 +4319,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 451
+        "latencyMillis": 446
       },
       "dense": {
         "caseId": "drafter-steamstub-unpack-before-ghidra",
@@ -4373,7 +4373,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 494
+        "latencyMillis": 488
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -4444,7 +4444,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 466
+        "latencyMillis": 461
       },
       "dense": {
         "caseId": "drafter-validate-ok-not-sufficient",
@@ -4498,7 +4498,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 515
+        "latencyMillis": 514
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -4571,7 +4571,7 @@
         "relevantTokens": 339,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 290
+        "latencyMillis": 291
       },
       "dense": {
         "caseId": "engine-outputdebugstring-console-owner",
@@ -4627,7 +4627,7 @@
         "relevantTokens": 339,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 308
+        "latencyMillis": 306
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -4700,7 +4700,7 @@
         "relevantTokens": 241,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 283
+        "latencyMillis": 285
       },
       "dense": {
         "caseId": "engine-parent-of-identifier",
@@ -4825,7 +4825,7 @@
         "relevantTokens": 349,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 42
+        "latencyMillis": 40
       },
       "dense": {
         "caseId": "engine-save-verify-kdf-owner",
@@ -4937,20 +4937,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 989,
         "relevantTokens": 88,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 70
+        "latencyMillis": 68
       },
       "dense": {
         "caseId": "engine-spirv-renderprog-owner",
@@ -4993,15 +4993,15 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 990,
         "relevantTokens": 88,
         "duplicateTokens": 0,
@@ -5070,20 +5070,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 2022,
         "relevantTokens": 307,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 418
+        "latencyMillis": 410
       },
       "dense": {
         "caseId": "engine-stop-sound-silently-does-nothing",
@@ -5130,20 +5130,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 2023,
         "relevantTokens": 307,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 451
+        "latencyMillis": 447
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -5218,7 +5218,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 426
+        "latencyMillis": 420
       },
       "dense": {
         "caseId": "history-crash-pending-record-relay",
@@ -5276,7 +5276,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 451
+        "latencyMillis": 446
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -5334,20 +5334,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1976,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 408
+        "latencyMillis": 403
       },
       "dense": {
         "caseId": "history-daemon-four-self-describing-registries",
@@ -5388,20 +5388,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1928,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 439
+        "latencyMillis": 429
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -5459,20 +5459,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1954,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 427
+        "latencyMillis": 418
       },
       "dense": {
         "caseId": "history-engine-state-authoritative-fields",
@@ -5517,20 +5517,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2027,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 448
+        "latencyMillis": 441
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -5588,20 +5588,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1978,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 411
+        "latencyMillis": 407
       },
       "dense": {
         "caseId": "history-eternal-streamed-geometry-extraction",
@@ -5642,20 +5642,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2029,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 445
+        "latencyMillis": 440
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -5721,20 +5721,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2027,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 421
+        "latencyMillis": 417
       },
       "dense": {
         "caseId": "history-evidence-model-direct-wall-migration",
@@ -5783,20 +5783,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2028,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 450
+        "latencyMillis": 455
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -5858,20 +5858,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2024,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 431
+        "latencyMillis": 430
       },
       "dense": {
         "caseId": "history-md6-authored-geometry-live-proof",
@@ -5922,20 +5922,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 2025,
         "relevantTokens": 339,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 452
+        "latencyMillis": 453
       },
       "denseComparison": {
         "hitEffect": "rescue",
@@ -5993,20 +5993,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1952,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 419
+        "latencyMillis": 411
       },
       "dense": {
         "caseId": "history-remote-phone-webrtc-session",
@@ -6047,20 +6047,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 1953,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 453
+        "latencyMillis": 445
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -6122,20 +6122,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": false,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": false,
         "gatePassed": false,
         "returnedTokens": 2019,
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 406
+        "latencyMillis": 401
       },
       "dense": {
         "caseId": "history-retrieval-budget-gate-debugging",
@@ -6186,20 +6186,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 2048,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 2040,
         "relevantTokens": 331,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 443
+        "latencyMillis": 437
       },
       "denseComparison": {
         "hitEffect": "rescue",
@@ -6284,7 +6284,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 41
+        "latencyMillis": 40
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -6335,7 +6335,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 117
+        "latencyMillis": 116
       },
       "dense": {
         "caseId": "manager-abstain-nonexistent-cvar-token",
@@ -6369,7 +6369,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 134
+        "latencyMillis": 130
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -6420,7 +6420,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 66
+        "latencyMillis": 64
       },
       "dense": {
         "caseId": "manager-abstain-nonexistent-format-token",
@@ -6454,7 +6454,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 82
+        "latencyMillis": 81
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -6505,7 +6505,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 25
+        "latencyMillis": 24
       },
       "dense": {
         "caseId": "manager-abstain-nonexistent-rva-token",
@@ -6539,7 +6539,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 42
+        "latencyMillis": 40
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -6610,7 +6610,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 428
+        "latencyMillis": 427
       },
       "dense": {
         "caseId": "snaphak-bulkset-threading-not-content",
@@ -6670,7 +6670,7 @@
         "relevantTokens": 327,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 468
+        "latencyMillis": 465
       },
       "denseComparison": {
         "hitEffect": "rescue",
@@ -6747,7 +6747,7 @@
         "relevantTokens": 343,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 443
+        "latencyMillis": 439
       },
       "dense": {
         "caseId": "snaphak-classname-vs-inherit-cost",
@@ -6807,7 +6807,7 @@
         "relevantTokens": 343,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 491
+        "latencyMillis": 487
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -6938,7 +6938,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 476
+        "latencyMillis": 475
       },
       "denseComparison": {
         "hitEffect": "loss",
@@ -7015,7 +7015,7 @@
         "relevantTokens": 343,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 282
+        "latencyMillis": 274
       },
       "dense": {
         "caseId": "snaphak-declsourcerebuild-owner",
@@ -7075,7 +7075,7 @@
         "relevantTokens": 343,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 295
+        "latencyMillis": 293
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -7131,20 +7131,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 1016,
         "relevantTokens": 303,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 217
+        "latencyMillis": 219
       },
       "dense": {
         "caseId": "tooling-midi-compiler-owner",
@@ -7187,20 +7187,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 968,
         "relevantTokens": 49,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 271
+        "latencyMillis": 265
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -7263,7 +7263,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 415
+        "latencyMillis": 416
       },
       "dense": {
         "caseId": "tooling-prove-rewrite-matches-original",
@@ -7313,7 +7313,7 @@
         "relevantTokens": 0,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 458
+        "latencyMillis": 454
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -7386,7 +7386,7 @@
         "relevantTokens": 170,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 233
+        "latencyMillis": 229
       },
       "dense": {
         "caseId": "tooling-roundtrip-skl-identifier",
@@ -7502,20 +7502,20 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 995,
         "relevantTokens": 265,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 77
+        "latencyMillis": 75
       },
       "dense": {
         "caseId": "tooling-wwise-audio-owner",
@@ -7558,15 +7558,15 @@
         "authoritySafe": true,
         "citationMetadataSafe": true,
         "citationSafe": true,
-        "corpusMatched": true,
+        "corpusMatched": false,
         "abstentionCorrect": true,
         "budgetSafe": true,
         "replayIdentical": true,
         "minimumTokenBudget": 1024,
         "qualityGateApplicable": true,
-        "safetyPassed": true,
+        "safetyPassed": false,
         "qualityPassed": true,
-        "gatePassed": true,
+        "gatePassed": false,
         "returnedTokens": 996,
         "relevantTokens": 265,
         "duplicateTokens": 0,
@@ -7644,7 +7644,7 @@
         "relevantTokens": 265,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 256
+        "latencyMillis": 257
       },
       "dense": {
         "caseId": "tooling-wwise-narrow-budget",
@@ -7700,7 +7700,7 @@
         "relevantTokens": 265,
         "duplicateTokens": 0,
         "staleResults": 0,
-        "latencyMillis": 324
+        "latencyMillis": 319
       },
       "denseComparison": {
         "hitEffect": "unchanged",
@@ -10868,7 +10868,7 @@
     "preliminaryComparison": {
       "available": true,
       "preliminaryCorpusFingerprint": "sha256:5390b6c857d9d9ec3f441634b924aadad4d101de437ac887e18429095fa35a72",
-      "finalCorpusFingerprint": "sha256:312b5803eecaed70f9034b07355c70ffc0d5c087307bda95e6cd8ad4e64ae1d0",
+      "finalCorpusFingerprint": "sha256:41c90f899805c0f9a1e961f0fd7a2c2da1fffc2236485ab2fb9586d6811c54a6",
       "preliminaryDenseRescues": 2,
       "preliminaryMetricsSha256": "sha256:6ab77bef5d7f166790f3ec328c13cdf0633d510dab1da207d80a72d6a0abb500",
       "finalMetricsSha256": "sha256:2be855f087ee7c4a336384374034f0003f3d53803f2b42b551109eac1343b6ef",
@@ -21211,7 +21211,7 @@
     "validatorSha256": "sha256:c8e88a0516a92d14f5c6a6ba8fa9db03cd073755079a0f877194169e0835bd29",
     "generatorSha256": "sha256:6f56cf6c63f5dcb8e9151933f1b9e4275eaa9f1625f337b319e8cd0c9af3a8e8",
     "command": "python tests/re_discipline_project_lane_ablation_build.py <frozen-current-inputs> <frozen-historical-archive> --output <measurement> --verify",
-    "validatedAt": "2026-08-03T18:10:36Z",
+    "validatedAt": "2026-08-05T23:52:42Z",
     "passed": true
   },
   "decision": {
@@ -21239,7 +21239,7 @@
       "graph",
       "dense"
     ],
-    "sharedSafetyFailures": 60,
+    "sharedSafetyFailures": 185,
     "denseAddedSafetyRegressions": 0,
     "productionProfileConsistent": true,
     "releaseGatePassed": true,

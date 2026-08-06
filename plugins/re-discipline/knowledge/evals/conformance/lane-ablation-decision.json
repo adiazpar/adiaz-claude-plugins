@@ -5,7 +5,7 @@
   "evalFingerprint": "sha256:ff013336e932a13c1f4a1c10324bc7fe73b65621df668e01852e003a42cef7c2",
   "corpusFingerprint": "sha256:1d3eecd4438609628e0ffe734f5579f1678a844daee23f9af0e7da9db85686ac",
   "runtimeFingerprint": "sha256:09a0a5e3723bc26e772a22720e40896d1218077210f8b62ca1299a10c6d9c8c1",
-  "reportDigest": "sha256:6a18519937ff1f7ef1182d95bc85bd712288c7f7c8b0c4ad39add24e088c9987",
+  "reportDigest": "sha256:300ad404a4e7c38e11601ccd65a0206bcf91989f152558a360f841269a2828ff",
   "evidenceLayers": {
     "packagedConformance": {
       "status": "underpowered-no-positive-contribution",
@@ -26,9 +26,9 @@
     "projectCorpus": {
       "status": "final-corpus-verified",
       "casesPerArm": 64,
-      "rawBenchmarkSha256": "sha256:31351e5f777c2cd6919239dbd50bac8749d18d9ef81a47c8d36a57a7be332333",
+      "rawBenchmarkSha256": "sha256:674f706c8756e0cdad3f6fb48bf95d44007ff523b80f9db345a7fee9213b3692",
       "projectMeasurementPath": "evals/conformance/project-lane-ablation.json",
-      "projectMeasurementSha256": "sha256:9fdc442407b3684454bb3b6bf262d75a04d80cac1b66afe4891a0fef8772383e",
+      "projectMeasurementSha256": "sha256:d8e05319b01d275ae333ccd9196c4e15046f794fb11164afea35a8a6c5c297ed",
       "lanes": {
         "dense": {
           "rescues": 3,
