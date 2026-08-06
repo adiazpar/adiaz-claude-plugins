@@ -181,6 +181,27 @@ def read_version_constant(path: Path, name: str) -> str:
     return match.group(1) if match else ""
 
 
+def declared_plugin_version(root: Path | None = None) -> str:
+    """The single declared published version.
+
+    Tests assert against this rather than a literal so a release is one edit to
+    the Go constant plus a manifest sync. Pinned copies here previously made
+    every bump fail unrelated tests, which is how the published version drifted
+    behind the source it shipped from.
+    """
+    base = root or Path(__file__).resolve().parents[1]
+    return read_version_constant(
+        base
+        / "plugins"
+        / "re-discipline"
+        / "knowledge"
+        / "internal"
+        / "knowledge"
+        / "types.go",
+        "RuntimeVersion",
+    )
+
+
 def read_go_toolchain(path: Path) -> str:
     for line in path.read_text(encoding="utf-8").splitlines():
         fields = line.split()
