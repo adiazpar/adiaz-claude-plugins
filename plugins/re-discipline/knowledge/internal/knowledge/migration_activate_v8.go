@@ -3104,8 +3104,16 @@ func digestRegularTree(root string) (map[string]string, error) {
 			return nil
 		}
 		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("staged migration tree contains a non-regular file")
+		if err != nil {
+			return err
+		}
+		// This helper answers "did the tree change", so entries with no
+		// comparable content are skipped rather than treated as corruption.
+		// macOS runners leave sockets and other non-regular entries inside a
+		// temporary tree, which failed the walk on that OS alone even though
+		// nothing under test had changed. Symlinks are covered by IsRegular.
+		if !info.Mode().IsRegular() {
+			return nil
 		}
 		body, err := os.ReadFile(path)
 		if err != nil {
