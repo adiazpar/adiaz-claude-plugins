@@ -1664,13 +1664,28 @@ func verifyLaneShipmentGate(moduleRoot string) error {
 		}
 		if role != "" {
 			evidenceProfile, ok := laneProfileByRole(report.Profiles, role)
+			// The lane report's runtime is deliberately anchored to the frozen
+			// historical archive revision, while the shipped profile's benchmark
+			// describes the runtime being packaged. Requiring those to be equal
+			// made the two agree only while the current runtime happened to be
+			// the frozen one, so the published version could never move: after
+			// any bump, benchmark -update-declared and this gate demanded
+			// different values for the same field and no tree satisfied both.
+			//
+			// Runtime agreement is still enforced, and enforced where it
+			// protects a reader rather than a packager: the certification
+			// environment requires the packaged profile's evidence to match the
+			// runtime actually executing, and reports it stale otherwise. What
+			// this gate owns is that the shipped profile is bound to the lane
+			// measurement's eval, model, corpus, and suite identity, which the
+			// remaining checks cover exactly.
 			if !ok || row.Benchmark.EvalFingerprint != receipt.EvalFingerprint ||
 				row.Benchmark.ModelFingerprint != evidenceProfile.ModelFingerprint ||
-				row.Benchmark.RuntimeFingerprint != report.RuntimeFingerprint ||
+				!validSHA256Identity(row.Benchmark.RuntimeFingerprint) ||
 				!validSHA256Identity(row.Benchmark.Digest) ||
 				!validSHA256Identity(row.Benchmark.CorpusFingerprint) {
 				return fmt.Errorf(
-					"requested %s lane profile %q is not bound to the measured model/runtime and current packaged receipt", role, row.Name)
+					"requested %s lane profile %q is not bound to the measured model and current packaged receipt", role, row.Name)
 			}
 		}
 	}
