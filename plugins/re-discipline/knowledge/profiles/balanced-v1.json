@@ -30,13 +30,13 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:f6005d4ae861300bd92bd985c5a7de6e41eed09632893a7f95cdf7fc18710ced",
+        "digest": "sha256:5a412aeb6d90483ae1af4e1890fb919ec11c0997d66b61d0f5e27b8334a751a7",
         "status": "passed",
-        "evaluatedAt": "2026-08-06T00:51:49Z",
+        "evaluatedAt": "2026-08-06T14:19:11Z",
         "evalFingerprint": "sha256:ff013336e932a13c1f4a1c10324bc7fe73b65621df668e01852e003a42cef7c2",
         "corpusFingerprint": "sha256:56073936716c3c1e522c7754895e890f1ae80a57cac8d20a41e1042678e90167",
         "modelFingerprint": "sha256:f8654dc6bc0274fcc627476617fdd445626ca9e17c7d1717669e6deccaecb7be",
-        "runtimeFingerprint": "sha256:c522b1e3479a9edcb046a2bd71c1e945f9cdaa09cd68d86e59eb7088b17acdce",
+        "runtimeFingerprint": "sha256:d6a1e5a93b5aaed4805e90d2677a598c611e0a91ba33956ceb13da672dfa1a4b",
         "chunkerVersion": "section-block-v6-finding-freshness",
         "parserVersion": "markdown-finding-v2-identifier-v1"
       }
@@ -66,13 +66,13 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:722a1a5216a4aef5f983d829a0ad884977823c72749e0ac5ad7e47ccacc08854",
+        "digest": "sha256:e74429ec1227767801068ce8998d3763f9fd404eafd685e80437ba3307c9f430",
         "status": "passed",
-        "evaluatedAt": "2026-08-06T00:51:49Z",
+        "evaluatedAt": "2026-08-06T14:19:11Z",
         "evalFingerprint": "sha256:ff013336e932a13c1f4a1c10324bc7fe73b65621df668e01852e003a42cef7c2",
         "corpusFingerprint": "sha256:56073936716c3c1e522c7754895e890f1ae80a57cac8d20a41e1042678e90167",
         "modelFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "runtimeFingerprint": "sha256:c522b1e3479a9edcb046a2bd71c1e945f9cdaa09cd68d86e59eb7088b17acdce",
+        "runtimeFingerprint": "sha256:d6a1e5a93b5aaed4805e90d2677a598c611e0a91ba33956ceb13da672dfa1a4b",
         "chunkerVersion": "section-block-v6-finding-freshness",
         "parserVersion": "markdown-finding-v2-identifier-v1"
       }
