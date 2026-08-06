@@ -32,7 +32,7 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:f8e5d366c3e39448a66dc166474e362fefedad381f25a754bd3dfc2d25389cde",
+      "sha256": "sha256:c45a9d276012da6c1be1105efcebc792a701090133cfe493b616a297b9c77153",
       "size": 11804160,
       "mode": "0644"
     },
@@ -41,7 +41,7 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:9b74cad066eba891a6f9637c6ffff0414aceef409735374047cfa6f603fa678e",
+      "sha256": "sha256:beaa5ab3f5c66d53c98e657023958f5f3e00bface182b48c00f7553b5ddf26e8",
       "size": 10862080,
       "mode": "0644"
     },
@@ -50,7 +50,7 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:af463d90314b57a074ff088ac7b291ed5f8be09e998b1060e711fd86dc56f910",
+      "sha256": "sha256:420d6031b00fc12331d782543ee53f885bfa4eb62c05caeca6da68d4cbc26d86",
       "size": 11534462,
       "mode": "0755"
     },
@@ -59,7 +59,7 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:199deca334ee8d11a23d2cb357210fab637755e79840fb94963c9c45b8aeeffe",
+      "sha256": "sha256:c8fd2e638c12b9943914fb7cdb667722bbfb73338809f0adc27a14ee01d7ff74",
       "size": 10813566,
       "mode": "0755"
     },
@@ -68,7 +68,7 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:fd6e5af52fd690baafb972c2c46c77a365a2e66317a816cd8f5d7ffbad0cccd6",
+      "sha256": "sha256:6d153066927848ff9a0534acbcd5e20fa969beeae0d9c31868250bf4d5146e48",
       "size": 11704368,
       "mode": "0755"
     },
@@ -77,7 +77,7 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:a420935f1696d32c621e29013499a9a40150aaf2fe638a820042d955ad9c12d5",
+      "sha256": "sha256:ddef9316ef75dc7ec55d8572fe2350c64c7f0416d0147cfa0d51d61f28d18584",
       "size": 10990434,
       "mode": "0755"
     }
@@ -447,7 +447,7 @@
     {
       "kind": "retrieval-profile",
       "path": "profiles/balanced-v1.json",
-      "sha256": "sha256:4d5466176b1a266d0478c471e4411f4428b6881f9f05d2c71d156b831f1bfafe",
+      "sha256": "sha256:c2f3073596d4742ae7ff04ec0097aff03d8abe051232d92a928f5962f3aa0cab",
       "size": 2960,
       "mode": "0644"
     },
