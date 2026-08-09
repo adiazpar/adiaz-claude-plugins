@@ -82,7 +82,10 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		return StateTransactionReceipt{}, err
 	}
 	if len(dirtyPaths) != 0 && prepared.Request.Action != "reconcile.import" {
-		return StateTransactionReceipt{}, fmt.Errorf("%w: %s", ErrStateDirty, strings.Join(dirtyPaths, ", "))
+		// Naming only the path made every mutation fail with a message that did
+		// not say whether the file was an out-of-band edit or an unexpected
+		// addition, nor what would clear the refusal.
+		return StateTransactionReceipt{}, fmt.Errorf("%w: %s", ErrStateDirty, describeStateDrift(dirtyPaths))
 	}
 	if receipt, found, err := store.loadIdempotencyReceipt(prepared.Request.IdempotencyKey); err != nil {
 		return StateTransactionReceipt{}, err

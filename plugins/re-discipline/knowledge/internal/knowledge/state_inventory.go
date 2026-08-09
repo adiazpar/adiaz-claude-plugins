@@ -143,11 +143,57 @@ func (store *StateStore) loadCommittedInventory(head StateHead) (StateInventory,
 	return inventory, nil
 }
 
+// State drift reasons. Each names a different mistake with a different remedy,
+// so a refusal that reports only the path leaves the caller guessing.
+const (
+	stateDriftModified   = "modified"
+	stateDriftMissing    = "missing"
+	stateDriftUnexpected = "unexpected"
+)
+
+// stateDriftEntry is one canonical path whose bytes disagree with the
+// committed head, classified so the refusal can state the remedy.
+type stateDriftEntry struct {
+	Path   string
+	Reason string
+}
+
+func (entry stateDriftEntry) describe() string {
+	switch entry.Reason {
+	case stateDriftMissing:
+		return entry.Path + " (tracked canonical record is missing: restore its committed bytes, " +
+			"or reconcile the removal through manager_apply reconcile.import)"
+	case stateDriftUnexpected:
+		return entry.Path + " (unexpected file in a canonical state location, not tracked by the " +
+			"committed head: remove it, or publish it through the transition that owns it - run " +
+			"artifacts belong to manager_apply run.prepare and run.return, truth documents to closure)"
+	default:
+		return entry.Path + " (tracked canonical record was edited outside the workflow: restore its " +
+			"committed bytes, or submit the change as a typed record revision through manager_apply)"
+	}
+}
+
+func describeStateDrift(entries []stateDriftEntry) string {
+	described := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		described = append(described, entry.describe())
+	}
+	return strings.Join(described, "; ")
+}
+
+func stateDriftPaths(entries []stateDriftEntry) []string {
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		paths = append(paths, entry.Path)
+	}
+	return paths
+}
+
 // inventoryDrift returns every tracked path whose bytes changed or vanished,
 // plus every untracked path whose location declares it to be canonical state.
-func (store *StateStore) inventoryDrift(inventory StateInventory) ([]string, error) {
+func (store *StateStore) inventoryDrift(inventory StateInventory) ([]stateDriftEntry, error) {
 	committed := inventoryEntriesMap(inventory)
-	dirty := []string{}
+	reasons := map[string]string{}
 	for relative, expected := range committed {
 		absolute, err := store.canonicalOutputPath(relative)
 		if err != nil {
@@ -157,8 +203,10 @@ func (store *StateStore) inventoryDrift(inventory StateInventory) ([]string, err
 		if err != nil {
 			return nil, err
 		}
-		if !exists || actual != expected {
-			dirty = append(dirty, relative)
+		if !exists {
+			reasons[relative] = stateDriftMissing
+		} else if actual != expected {
+			reasons[relative] = stateDriftModified
 		}
 	}
 	candidates, err := store.canonicalInventoryCandidates(inventory.HeadRevision > 0)
@@ -167,10 +215,15 @@ func (store *StateStore) inventoryDrift(inventory StateInventory) ([]string, err
 	}
 	for relative := range candidates {
 		if _, tracked := committed[relative]; !tracked {
-			dirty = append(dirty, relative)
+			reasons[relative] = stateDriftUnexpected
 		}
 	}
-	return SortedUnique(dirty), nil
+	dirty := make([]stateDriftEntry, 0, len(reasons))
+	for relative, reason := range reasons {
+		dirty = append(dirty, stateDriftEntry{Path: relative, Reason: reason})
+	}
+	sort.Slice(dirty, func(i, j int) bool { return dirty[i].Path < dirty[j].Path })
+	return dirty, nil
 }
 
 func (store *StateStore) canonicalInventoryCandidates(includeDurableDocs bool) (map[string]string, error) {
@@ -371,7 +424,7 @@ func (store *StateStore) addRunInventoryEntries(
 	return nil
 }
 
-func requireReconciledInventoryDrift(dirty []string, writes []preparedStateWrite, artifacts []preparedStateArtifact, eventPath string) error {
+func requireReconciledInventoryDrift(dirty []stateDriftEntry, writes []preparedStateWrite, artifacts []preparedStateArtifact, eventPath string) error {
 	explicit := map[string]bool{}
 	touched := map[string]bool{eventPath: true}
 	for _, write := range writes {
@@ -384,7 +437,8 @@ func requireReconciledInventoryDrift(dirty []string, writes []preparedStateWrite
 		touched[artifact.Path] = true
 	}
 	reconciled := []string{}
-	for _, relative := range dirty {
+	for _, entry := range dirty {
+		relative := entry.Path
 		if explicit[relative] {
 			reconciled = append(reconciled, relative)
 			continue
@@ -427,7 +481,8 @@ func (service *Service) canonicalStateIntegrityStatus() map[string]any {
 		status["error"] = err.Error()
 		return status
 	}
-	status["dirtyPaths"] = dirty
+	status["dirtyPaths"] = stateDriftPaths(dirty)
+	status["dirtyDetail"] = describeStateDrift(dirty)
 	status["clean"] = len(dirty) == 0
 	status["inventoryDigest"] = inventory.Digest
 	return status
