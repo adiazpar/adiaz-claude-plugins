@@ -57,12 +57,15 @@ report, retention gap, or digest mismatch and return to the relevant stage.
 Deletion requires explicit manager approval and a durable replacement for the
 artifact's value.
 
-`missing-reviewed-intake` on a run that is already `completed` means its only
-intake left a span `unresolved`. Clear it through `review-subagent`: submit a
-further curator intake over the same frozen report with every span disposed and
-review it. Coverage is a union across reviewed intakes, so this supplies what
-closure requires without disturbing any review already ratified over the
-earlier intake. Do not attempt to reopen or re-return the run.
+`missing-reviewed-intake` on a run that is already `completed` or `invalidated`
+means its only intake left a span `unresolved`. Clear it through
+`review-subagent`: submit a further curator intake over the same frozen report
+with every span disposed and review it. Coverage is a union across reviewed
+intakes, so this supplies what closure requires without disturbing any review
+already ratified over the earlier intake. Do not attempt to reopen or re-return
+the run. An invalidated run is not exempt: its report is still retained and may
+still be cited by a ratified finding, so closure accounts for it like any other
+non-aborted run with a report.
 
 ## Verify And Return
 

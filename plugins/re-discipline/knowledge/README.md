@@ -210,25 +210,40 @@ non-aborted run with a report and disregards any source that still carries an
 closure gate into the campaign, so the refusal happens at the transition that
 can still be repaired and names the run, the unresolved spans, and the
 dispositions that clear them. `invalidated` remains available as the manager's
-explicit void path.
+explicit void path, because it is the only other exit from `returned` and
+refusing it too would leave a dirty run with no exit at all.
 
-`curation_submit` also accepts a source run that is already `completed`, but
-only while that run is stranded: only when no non-superseded intake covers its
-report with every span disposed. This is the exact complement of the
-`run.complete` guard above - no run can satisfy both - and it exists for
-campaigns stranded before that guard did. A completed run whose report already
-carries a clean intake is refused, whether that intake is reviewed (nothing to
-repair; use `overturn` if a conclusion is wrong) or still pending review
-(review it rather than adding a second repair). Every other run state is
-refused, and each refusal names the run, its state, and the remedy.
+Invalidation withdraws the run, not the evidence it already produced. The
+report handle stays frozen, the report stays in the closure plan's retained
+payload, and a finding ratified out of it stays ratified: findings bind their
+source runs by id, the campaign graph requires only that each one resolve, and
+nothing cascades from run invalidation to a finding's review state, validity,
+or projection. Closure therefore keeps requiring a reviewed intake for an
+invalidated run's report; exempting it would let a campaign close with a
+projected truth resting on evidence the coverage gate no longer accounts for.
+`aborted` is exempt for the opposite reason - it is unreachable from
+`returned`, carries no report at all, and can never be cited.
+
+`curation_submit` also accepts a source run that is already `completed` or
+`invalidated`, but only while that run is stranded: only when no non-superseded
+intake covers its report with every span disposed. For `completed` this is the
+exact complement of the `run.complete` guard above - no run can satisfy both -
+and it exists for campaigns stranded before that guard did. `invalidated` has
+no such guard to complement, since that is the one exit `run.complete` must
+keep accepting, so this is the standing repair for a run voided over an
+unresolved span. A run whose report already carries a clean intake is refused
+in either state, whether that intake is reviewed (nothing to repair; use
+`overturn` if a conclusion is wrong) or still pending review (review it rather
+than adding a second repair). Every other run state is refused, and each
+refusal names the run, its state, and the remedy.
 
 The supplementary intake is purely additive. Reviewed report coverage is a
 union across reviewed intakes with unresolved spans computed per intake, so a
 second clean intake moves the run to `reviewed-intake` without altering,
 superseding, or invalidating the review already ratified over the dirty one.
 That second intake carries its own manager review, so the added coverage is
-ratified rather than asserted, and retiring a prior conclusion is still
-`overturn`'s job.
+ratified rather than asserted, it does not restore a run it covers, and
+retiring a prior conclusion is still `overturn`'s job.
 
 ## Cache and context preservation
 

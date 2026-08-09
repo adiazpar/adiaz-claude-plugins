@@ -182,7 +182,7 @@ func TestRunCompleteRefusesToStrandUnresolvedCoverage(t *testing.T) {
 		runID,
 		"I-0901 leaves 1 span(s) unresolved",
 		"path:" + source.run.Report.Path + "#L3-L3",
-		"curation_submit refuses it and no transition returns it",
+		"no transition returns the run",
 		"disposes every span as candidate-finding, duplicate, non-claim, or out-of-scope",
 	} {
 		if !strings.Contains(dirtyErr.Error(), want) {

@@ -233,8 +233,12 @@ func validateAppliedRunCompletion(previous CampaignGraph, writes []preparedState
 		}
 		// `invalidated` is the manager's explicit void path and the only other
 		// exit from `returned`; refusing it too would leave a dirty run with no
-		// exit at all. `aborted` is unreachable from `returned` and is exempt
-		// from reviewed-intake coverage anyway.
+		// exit at all. It does not escape the coverage obligation - closure
+		// exempts only `aborted`, and an invalidated run keeps the frozen report
+		// a ratified finding may still cite - so a run invalidated over a dirty
+		// intake is repaired through validateCurationSourceRunAdmissible rather
+		// than prevented here. `aborted` is unreachable from `returned` and is
+		// exempt from reviewed-intake coverage anyway.
 		if !validOne(run.Status, "completed", "blocked") || run.Report == nil {
 			continue
 		}
@@ -250,12 +254,16 @@ func validateAppliedRunCompletion(previous CampaignGraph, writes []preparedState
 // run's frozen report, and which of them still leave one of its spans
 // `unresolved`.
 //
-// run.complete refuses to leave `returned` unless Clean is non-empty
-// (validateRunReportIsCurated). curation_submit admits a supplementary intake
-// over an already-completed run only while Clean is empty
-// (validateCurationSourceRunAdmissible). The two predicates are exact
-// complements, so they share this one computation rather than each restating
-// it: no run can ever satisfy both, and none can fall between them.
+// run.complete refuses to leave `returned` for `completed` or `blocked` unless
+// Clean is non-empty (validateRunReportIsCurated). curation_submit admits a
+// supplementary intake over a run that has already left `returned` for
+// `completed` or `invalidated` only while Clean is empty
+// (validateCurationSourceRunAdmissible). For `completed` the two predicates are
+// exact complements, so they share this one computation rather than each
+// restating it: no run can ever satisfy both, and none can fall between them.
+// `invalidated` has no completion guard to complement - it is the one exit
+// run.complete may not refuse - so the same emptiness test is the whole
+// admission there.
 type runReportIntakeCoverage struct {
 	// Clean holds the sorted IDs of intakes that cover the report and dispose
 	// every one of its spans.
@@ -325,10 +333,10 @@ func validateRunReportIsCurated(previous CampaignGraph, run RunRecord) error {
 	return fmt.Errorf(
 		"run %s cannot leave returned as %s: %s. Closure classifies every non-aborted run by "+
 			"whether a reviewed curator intake covers its exact report, and an unresolved span does "+
-			"not count as coverage; once the run is no longer returned, curation_submit refuses it "+
-			"and no transition returns it, so the campaign could never satisfy its closure coverage "+
-			"gate. Remedy: while the run is still returned, submit a curator intake over %s that "+
-			"disposes every span as candidate-finding, duplicate, non-claim, or out-of-scope, then "+
-			"complete the run",
+			"not count as coverage; no transition returns the run, and once it has left returned the "+
+			"only remaining route to that coverage is the stranded-run repair curation_submit "+
+			"reserves for runs that can no longer obtain it any other way. Remedy: while the run is "+
+			"still returned, submit a curator intake over %s that disposes every span as "+
+			"candidate-finding, duplicate, non-claim, or out-of-scope, then complete the run",
 		run.ID, run.Status, cause, run.Report.Path)
 }

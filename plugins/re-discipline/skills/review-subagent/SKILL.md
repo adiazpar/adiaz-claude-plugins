@@ -86,15 +86,23 @@ refuses `completed` and `blocked` while the run's report has no clean intake.
 Curate first; the refusal names the run, the unresolved spans, and the
 dispositions that clear them.
 
+`invalidated` is never refused, because it is the only other exit from
+`returned`. It withdraws the run, not the report: the report handle stays
+frozen, any finding already ratified out of it stays ratified, and closure
+still requires a reviewed intake covering it. Curate before invalidating a
+returned run, exactly as before completing one.
+
 If closure already reports `missing-reviewed-intake` for a run that is
-`completed`, the run was stranded before that guard existed and is repaired,
-not reopened. Submit a further curator intake over the same frozen report with
-every span disposed, then review it. The engine admits a completed run for
-curation only while it is stranded, so this cannot be used on a healthy run,
-and coverage is a union across reviewed intakes: the supplementary intake adds
-the coverage closure needs and changes nothing about the review already
-ratified over the earlier one. If that earlier conclusion is itself wrong, use
-`overturn` - a second intake never retires the first.
+`completed` or `invalidated`, the run is repaired, not reopened. Submit a
+further curator intake over the same frozen report with every span disposed,
+then review it. The engine admits such a run for curation only while it is
+stranded, so this cannot be used on a healthy run, and coverage is a union
+across reviewed intakes: the supplementary intake adds the coverage closure
+needs and changes nothing about the review already ratified over the earlier
+one. It does not restore the run either - an invalidated run stays invalidated,
+so weigh each candidate from its report on that footing. If the earlier
+conclusion is itself wrong, use `overturn` - a second intake never retires the
+first.
 
 Finish by calling `state(mode="resume", campaignId=...)` and present active
 work, unresolved blocks, due deferrals, pending intake, challenges, and next
