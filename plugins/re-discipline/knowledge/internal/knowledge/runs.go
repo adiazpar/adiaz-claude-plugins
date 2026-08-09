@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -201,4 +203,103 @@ func validateAppliedRunReturn(previous CampaignGraph, request StateTransactionRe
 		return errors.New("automatic curation work does not match the frozen returned run")
 	}
 	return nil
+}
+
+// validateAppliedRunCompletion refuses to move a run out of `returned` while
+// its frozen report has no clean curator intake.
+//
+// `returned` is the only run state in which curation_submit will accept an
+// intake over the run's report (validateCurationGraphBindings requires it), and
+// runTransitions has no edge back: completed and blocked reach only themselves
+// and invalidated. ComputeClosureCoverage, meanwhile, classifies every
+// non-aborted run with a report by reviewedReportCoverage, which ignores any
+// source whose intake still disposes a span as `unresolved`. Completing a run
+// whose intake is dirty or absent therefore fixes "missing-reviewed-intake"
+// into the campaign forever: the closure gate can never be satisfied and the
+// campaign can never close.
+//
+// This transition is the last point at which the situation is still repairable,
+// so it is where the engine must refuse, naming the run, the spans that are
+// unresolved, and the curation that would clear them.
+func validateAppliedRunCompletion(previous CampaignGraph, writes []preparedStateWrite) error {
+	for _, write := range writes {
+		run, isRun := write.Record.(RunRecord)
+		if !isRun {
+			continue
+		}
+		prior, present := previous.Runs[run.ID]
+		if !present || prior.Status != "returned" || run.Status == prior.Status {
+			continue
+		}
+		// `invalidated` is the manager's explicit void path and the only other
+		// exit from `returned`; refusing it too would leave a dirty run with no
+		// exit at all. `aborted` is unreachable from `returned` and is exempt
+		// from reviewed-intake coverage anyway.
+		if !validOne(run.Status, "completed", "blocked") || run.Report == nil {
+			continue
+		}
+		if err := validateRunReportIsCurated(previous, run); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRunReportIsCurated(previous CampaignGraph, run RunRecord) error {
+	sourceKey := coverageSourceKey(run.Report.Path, run.Report.SHA256)
+	covering := []string{}
+	unresolvedByIntake := map[string][]string{}
+	for _, intake := range previous.Intakes {
+		if intake.Status == "superseded" {
+			continue
+		}
+		carries := false
+		for _, source := range intake.SourceRuns {
+			if coverageSourceKey(source.Path, source.SHA256) == sourceKey {
+				carries = true
+				break
+			}
+		}
+		if !carries {
+			continue
+		}
+		covering = append(covering, intake.ID)
+		for _, entry := range intake.Coverage {
+			if entry.Disposition != "unresolved" ||
+				coverageSourceKey(entry.SourcePath, entry.SourceSHA256) != sourceKey {
+				continue
+			}
+			unresolvedByIntake[intake.ID] = append(unresolvedByIntake[intake.ID],
+				canonicalCoverageHandle(entry))
+		}
+	}
+	sort.Strings(covering)
+	clean := []string{}
+	dirty := []string{}
+	for _, intakeID := range covering {
+		spans := unresolvedByIntake[intakeID]
+		if len(spans) == 0 {
+			clean = append(clean, intakeID)
+			continue
+		}
+		sort.Strings(spans)
+		dirty = append(dirty, fmt.Sprintf("%s leaves %d span(s) unresolved (%s)",
+			intakeID, len(spans), strings.Join(spans, ", ")))
+	}
+	if len(clean) > 0 {
+		return nil
+	}
+	cause := fmt.Sprintf("no curator intake covers its report %s", run.Report.Path)
+	if len(dirty) > 0 {
+		cause = "its only curator intake(s) still carry unresolved coverage: " + strings.Join(dirty, "; ")
+	}
+	return fmt.Errorf(
+		"run %s cannot leave returned as %s: %s. Closure classifies every non-aborted run by "+
+			"whether a reviewed curator intake covers its exact report, and an unresolved span does "+
+			"not count as coverage; once the run is no longer returned, curation_submit refuses it "+
+			"and no transition returns it, so the campaign could never satisfy its closure coverage "+
+			"gate. Remedy: while the run is still returned, submit a curator intake over %s that "+
+			"disposes every span as candidate-finding, duplicate, non-claim, or out-of-scope, then "+
+			"complete the run",
+		run.ID, run.Status, cause, run.Report.Path)
 }

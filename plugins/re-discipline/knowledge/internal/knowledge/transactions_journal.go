@@ -433,6 +433,11 @@ func (store *StateStore) validateAndApplyWrites(request StateTransactionRequest,
 			return CampaignGraph{}, err
 		}
 	}
+	if request.Action == "run.complete" {
+		if err := validateAppliedRunCompletion(graph, writes); err != nil {
+			return CampaignGraph{}, err
+		}
+	}
 	return next, nil
 }
 

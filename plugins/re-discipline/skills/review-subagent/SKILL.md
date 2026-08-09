@@ -35,14 +35,22 @@ overlaps. Each candidate evidence handle must exactly match a targeted span's
 source run, path, digest, bounds, and object key. A complete coverage-only
 packet may contain zero candidates.
 
+`unresolved` is a legal disposition but it is not coverage. Closure ignores any
+source whose intake still carries an unresolved span, and the engine refuses to
+complete a run while every intake over its report leaves one. Resolve the span
+into `candidate-finding`, `duplicate`, `non-claim`, or `out-of-scope`, or submit
+a further intake that does, before completing the run.
+
 Submit one `manager_apply(action="review.submit")` transaction bound to the
 persisted canonical intake revision, exact candidate revisions and digests,
-exact evidence handles, and packet digest. Do not rebuild the packet from
-caller-edited copies: the engine reconstructs it from canonical pre-commit
-state. It must carry one explicit decision for every candidate: `ratify`,
-`reject`, `challenge`, `merge`, `split`, `hold`, `correct-grade`, or
-`supersede`. Routine uncontested rows may share a single submission, but they
-still receive independent decision rows.
+exact evidence handles, and packet digest. Echo `reviewPacket.intake` from the
+committed record as read; the engine compares it against canonical state in
+persisted form, so a collection that is absent from the file may be sent absent.
+Do not rebuild the packet from caller-edited copies: the engine reconstructs it
+from canonical pre-commit state. It must carry one explicit decision for every
+candidate: `ratify`, `reject`, `challenge`, `merge`, `split`, `hold`,
+`correct-grade`, or `supersede`. Routine uncontested rows may share a single
+submission, but they still receive independent decision rows.
 
 `manager_apply(action="decision.record")` is the same transaction under a
 different name and carries the same payload. There is no standalone decision
@@ -71,6 +79,11 @@ After coverage and decisions are accepted, submit the run's terminal
 transition through `manager_apply` with expected revisions and an idempotency
 key. A blocked run must identify its blocker and resulting work item. Never
 mutate the frozen report to change its epistemic status.
+
+`returned` is the only state in which a curator intake may be submitted for a
+run, and nothing transitions back to it, so the engine refuses `completed` and
+`blocked` while the run's report has no clean intake. Curate first; the refusal
+names the run, the unresolved spans, and the dispositions that clear them.
 
 Finish by calling `state(mode="resume", campaignId=...)` and present active
 work, unresolved blocks, due deferrals, pending intake, challenges, and next
