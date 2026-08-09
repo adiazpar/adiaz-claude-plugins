@@ -63,9 +63,16 @@ means its only intake left a span `unresolved`. Clear it through
 with every span disposed and review it. Coverage is a union across reviewed
 intakes, so this supplies what closure requires without disturbing any review
 already ratified over the earlier intake. Do not attempt to reopen or re-return
-the run. An invalidated run is not exempt: its report is still retained and may
-still be cited by a ratified finding, so closure accounts for it like any other
-non-aborted run with a report.
+the run. An invalidated run that returned is not exempt: its report is still
+retained and may still be cited by a ratified finding, so closure accounts for
+it like any other run with a report.
+
+`missing-report` means a run froze no report. Closure exempts a run that was
+`aborted`, and one that was `invalidated` before it ever returned, because
+neither can be cited: no coverage span can exist over a report that was never
+written. So this blocker only ever names a run that is still `prepared` or
+`running`. Return it, or end it through `review-subagent` as `aborted` with a
+reason in `resultSummary`. Do not try to curate it - there is nothing to cover.
 
 ## Verify And Return
 

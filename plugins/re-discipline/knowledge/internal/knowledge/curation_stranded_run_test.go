@@ -656,19 +656,38 @@ func TestCurationSourceRunAdmissionIsExactlyTheStrandedCase(t *testing.T) {
 			},
 		},
 		{
-			// Invalidated before the run ever returned: closure calls this
-			// `missing-report`, not `missing-reviewed-intake`, and no intake
-			// can dispose spans of a report that was never frozen.
+			// Invalidated before the run ever returned: no intake can dispose
+			// spans of a report that was never frozen, and closure exempts the
+			// run rather than demanding one, so the refusal must not send a
+			// curator after coverage that cannot exist.
 			name: "invalidated with no frozen report", status: "invalidated", noReport: true, admit: false,
-			wants: []string{"R-20260802-0091 is invalidated", "has no frozen report"},
+			wants: []string{
+				"R-20260802-0091 is invalidated", "has no frozen report",
+				"closure exempts a run voided before it ever returned",
+				"aborted is the more accurate record",
+			},
 		},
 		{
 			name: "prepared", status: "prepared", admit: false,
 			wants: []string{"R-20260802-0091 is prepared", "return the run first"},
 		},
 		{
+			name: "prepared with no frozen report", status: "prepared", noReport: true, admit: false,
+			wants: []string{
+				"R-20260802-0091 is prepared", "has no frozen report", "return the run first",
+				"end it through manager_apply run.complete as aborted",
+			},
+		},
+		{
 			name: "running", status: "running", admit: false,
 			wants: []string{"R-20260802-0091 is running", "return the run first"},
+		},
+		{
+			name: "running with no frozen report", status: "running", noReport: true, admit: false,
+			wants: []string{
+				"R-20260802-0091 is running", "has no frozen report", "return the run first",
+				"end it through manager_apply run.complete as aborted",
+			},
 		},
 		{
 			name: "blocked", status: "blocked", admit: false,

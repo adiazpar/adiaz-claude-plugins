@@ -173,7 +173,36 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 		switch {
 		case run.Status == "aborted":
 			coverage.SourceRunCoverage[id] = "aborted-with-reason"
+		case run.Status == "invalidated" && run.Report == nil:
+			// A run voided before it ever returned. `run.complete` accepts
+			// `invalidated` from `prepared` and `running` because a manager
+			// must be able to take a run that will never come back out of
+			// flight, and ValidateRun requires a report only from `returned`,
+			// `completed`, and `blocked` - so this is the one terminal state
+			// that can carry no report at all besides `aborted`.
+			//
+			// Demanding the report here made the campaign unclosable:
+			// `invalidated` is absorbing, terminal run records are immutable
+			// (ValidateRunTransition), and the stranded-run curation admission
+			// cannot help because an intake must bind a source to one
+			// canonical run report by path and digest.
+			//
+			// The exemption costs nothing the gate was protecting. It exists so
+			// that no reviewed claim rests on report bytes a curator never
+			// normalized, and this run froze no bytes: with no report there is
+			// no coverage span, so validateCurationGraphBindings can never
+			// resolve a source to it and can never bind a candidate finding's
+			// sourceRuns to it. That is exactly why `aborted` is exempt too,
+			// and exactly what an invalidated run that kept its frozen report
+			// does not qualify for. The run's payload files are unaffected:
+			// FileRetention below still classifies every one of them.
+			coverage.SourceRunCoverage[id] = "invalidated-without-report"
 		case run.Report == nil:
+			// Whatever is left is a run still in flight - `prepared` or
+			// `running`. Closure must not step over it, and the remedy is
+			// available: return the run, or end it with `run.complete` as
+			// `aborted` (with a reason) or `invalidated` (naming the run that
+			// supersedes it).
 			coverage.SourceRunCoverage[id] = "missing-report"
 			coverage.MissingDecisions = append(coverage.MissingDecisions, "run:"+id+":report")
 		case reviewedReports[reviewedRunCoverageKey(id, *run.Report)]:
@@ -407,7 +436,8 @@ func ValidateClosureCoverage(coverage ClosureCoverage) error {
 	}
 	for key, value := range coverage.SourceRunCoverage {
 		if !runIDRE.MatchString(key) || !validOne(value,
-			"reviewed-intake", "aborted-with-reason", "missing-report", "missing-reviewed-intake") {
+			"reviewed-intake", "aborted-with-reason", "invalidated-without-report",
+			"missing-report", "missing-reviewed-intake") {
 			return fmt.Errorf("closure run coverage %q has an invalid disposition", key)
 		}
 	}

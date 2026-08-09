@@ -92,6 +92,15 @@ frozen, any finding already ratified out of it stays ratified, and closure
 still requires a reviewed intake covering it. Curate before invalidating a
 returned run, exactly as before completing one.
 
+A run that never returned is a different transition and needs no curation at
+all. It froze no report, so nothing can cite it and closure exempts it. End it
+through `manager_apply` `run.complete` as `aborted`, which is the accurate
+record: it carries the reason in `resultSummary`, and it is reachable from both
+`prepared` and `running`. Use `invalidated` only when a specific run supersedes
+it, since that status carries `invalidatedBy` rather than a reason. Neither
+strands the campaign, and neither can be corrected into the other afterwards -
+both are terminal and immutable - so choose at the transition.
+
 If closure already reports `missing-reviewed-intake` for a run that is
 `completed` or `invalidated`, the run is repaired, not reopened. Submit a
 further curator intake over the same frozen report with every span disposed,
