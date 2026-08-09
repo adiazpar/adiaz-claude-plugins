@@ -1,6 +1,6 @@
 {
   "name": "re-discipline",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Transactional campaigns, unified runs, atomic findings, bounded context, closure-gated truth, and governed cross-host retrieval.",
   "author": {
     "name": "Alex Diaz",
