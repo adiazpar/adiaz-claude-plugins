@@ -1,6 +1,8 @@
 package knowledge
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -638,8 +640,8 @@ func validateAppliedManagerReview(
 	if !present {
 		return fmt.Errorf("review intake %s is not canonical campaign state", review.IntakeID)
 	}
-	if !reflect.DeepEqual(submission.Intake, priorIntake) {
-		return errors.New("review packet intake is not the exact canonical submitted intake")
+	if err := validateSubmittedIntakeIsCanonical(previous, submission.Intake, priorIntake); err != nil {
+		return err
 	}
 	candidates := map[string]FindingDocument{}
 	for _, findingID := range priorIntake.CandidateFindingIDs {
@@ -709,6 +711,131 @@ func validateAppliedManagerReview(
 		return err
 	}
 	return validateManagerReviewDocumentOutcomes(priorIntake, candidates, *review, *intake, outcomes)
+}
+
+// validateSubmittedIntakeIsCanonical proves that the intake echoed in a review
+// packet is the committed intake, and names every field on which it is not.
+//
+// The comparison is over the canonical persisted form of both records rather
+// than over the in-memory Go values. Those two shapes are not the same shape,
+// and only one of them is reachable by a caller. sealIntakeRecord runs
+// normalizeIntakeRecord, which rewrites nil string slices to empty non-nil
+// slices via SortedUnique; canonicalJSON then writes the record with
+// `omitempty`, so every one of those empty collections is absent from the file
+// on disk. A caller that reads the persisted record and echoes it back
+// therefore holds nil where the loader holds []string{} - a difference
+// reflect.DeepEqual rejects, that CanonicalDigest cannot see (both marshal to
+// nothing), and that no caller can repair by guessing, because the fields that
+// get normalized and the fields that carry `omitempty` are different sets.
+//
+// Comparing persisted forms is the same technique validateAppliedRunReturn
+// already uses for the automatic curation work item: normalize both sides, then
+// require exact equality. The declared digest, revision, status and every
+// content field are still compared verbatim, so a genuinely different intake is
+// still refused; what is no longer refused is a faithful echo of the committed
+// bytes.
+func validateSubmittedIntakeIsCanonical(previous CampaignGraph, submitted, canonical IntakeRecord) error {
+	submittedBody, err := canonicalIntakeComparisonForm(submitted)
+	if err != nil {
+		return fmt.Errorf("review packet intake could not be canonicalized: %w", err)
+	}
+	canonicalBody, err := canonicalIntakeComparisonForm(canonical)
+	if err != nil {
+		return fmt.Errorf("canonical intake %s could not be canonicalized: %w", canonical.ID, err)
+	}
+	if bytes.Equal(submittedBody, canonicalBody) {
+		return nil
+	}
+	slug := ""
+	if previous.Campaign != nil {
+		slug = previous.Campaign.Slug
+	}
+	path := fmt.Sprintf("active/%s/intake/%s.json", slug, canonical.ID)
+	differences := canonicalFieldDifferences(submittedBody, canonicalBody)
+	detail := "the submitted and canonical records differ"
+	if len(differences) > 0 {
+		detail = "differing fields: " + strings.Join(differences, "; ")
+	}
+	return fmt.Errorf(
+		"review packet intake %s is not the exact canonical submitted intake (%s); "+
+			"the reviewed packet must echo the committed record at %s, so re-read that record "+
+			"and resubmit it unchanged (an empty collection may be present or absent, but every "+
+			"other value must match the committed revision exactly)",
+		canonical.ID, detail, path)
+}
+
+// canonicalIntakeComparisonForm renders one intake in the exact bytes the
+// engine would persist for it. Collections that the engine writes unconditionally
+// are coerced from nil to empty so that a record read back from disk and a
+// record sealed in memory produce identical bytes; the `omitempty` collections
+// need no coercion because both shapes already marshal to nothing.
+func canonicalIntakeComparisonForm(record IntakeRecord) ([]byte, error) {
+	normalizeIntakeRecord(&record)
+	if record.SourceRuns == nil {
+		record.SourceRuns = []FileHandle{}
+	}
+	if record.Coverage == nil {
+		record.Coverage = []CoverageEntry{}
+	}
+	if record.Triage == nil {
+		record.Triage = map[string]string{}
+	}
+	return canonicalJSON(record)
+}
+
+// canonicalFieldDifferences names the top-level canonical fields on which two
+// rendered records disagree, with a bounded rendering of each side. A refusal
+// that only asserts inequality leaves a caller bisecting a record by hand.
+func canonicalFieldDifferences(submitted, canonical []byte) []string {
+	left, right := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	if json.Unmarshal(submitted, &left) != nil || json.Unmarshal(canonical, &right) != nil {
+		return nil
+	}
+	names := map[string]bool{}
+	for name := range left {
+		names[name] = true
+	}
+	for name := range right {
+		names[name] = true
+	}
+	sorted := make([]string, 0, len(names))
+	for name := range names {
+		sorted = append(sorted, name)
+	}
+	sort.Strings(sorted)
+	differences := make([]string, 0, len(sorted))
+	for _, name := range sorted {
+		leftValue, leftPresent := left[name]
+		rightValue, rightPresent := right[name]
+		if leftPresent == rightPresent && bytes.Equal(compactJSONValue(leftValue), compactJSONValue(rightValue)) {
+			continue
+		}
+		differences = append(differences, fmt.Sprintf("%s (submitted %s, canonical %s)",
+			name, renderCanonicalFieldValue(leftValue, leftPresent),
+			renderCanonicalFieldValue(rightValue, rightPresent)))
+	}
+	return differences
+}
+
+func compactJSONValue(value json.RawMessage) []byte {
+	compacted := &bytes.Buffer{}
+	if err := json.Compact(compacted, value); err != nil {
+		return value
+	}
+	return compacted.Bytes()
+}
+
+func renderCanonicalFieldValue(value json.RawMessage, present bool) string {
+	if !present {
+		return "absent"
+	}
+	// Truncate on a rune boundary so a long field cannot leave a broken
+	// multi-byte sequence in the refusal text.
+	runes := []rune(string(compactJSONValue(value)))
+	if len(runes) > 160 {
+		return string(runes[:157]) + "..."
+	}
+	return string(runes)
 }
 
 func validateReviewWorkItemCreations(

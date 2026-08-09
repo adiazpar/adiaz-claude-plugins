@@ -192,6 +192,25 @@ combined size of those fields is also capped per record at write time, so a
 manager transition that would introduce or grow a record too large to delegate
 is refused instead of leaving every later run to fail.
 
+`review.submit` and `decision.record` require `reviewPacket.intake` to be the
+committed intake. The comparison is over the canonical persisted form of both
+records, not over decoded in-memory values, because the two are not the same
+shape: sealing rewrites empty collections to non-nil slices that `omitempty`
+then removes from the file, so an absent collection and an empty one are the
+same record. Everything else - revision, status, digest, coverage, candidates,
+and every text field - must match exactly, and a mismatch names each differing
+field with both values.
+
+`run.complete` refuses `completed` and `blocked` for a returned run whose
+report has no clean curator intake. `returned` is the only state in which
+`curation_submit` accepts an intake for a run and no transition leads back to
+it, while closure requires a reviewed intake for every non-aborted run with a
+report and disregards any source that still carries an `unresolved` span.
+Completing early would therefore fix an unsatisfiable closure gate into the
+campaign, so the refusal happens at the transition that can still be repaired
+and names the run, the unresolved spans, and the dispositions that clear them.
+`invalidated` remains available as the manager's explicit void path.
+
 ## Cache and context preservation
 
 The preferred cache is
