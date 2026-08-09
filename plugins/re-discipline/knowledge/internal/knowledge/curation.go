@@ -373,9 +373,16 @@ func validateCurationGraphBindings(
 // requires only that each source run resolve, while nothing cascades from run
 // invalidation to a finding's review state, validity, or projection. Exempting
 // the report would let a campaign close with a projected truth resting on
-// evidence the coverage gate no longer accounts for. `aborted` is exempt for
-// the opposite reason: it is unreachable from `returned`, carries no report at
-// all, and so can never be cited.
+// evidence the coverage gate no longer accounts for.
+//
+// The two exemptions closure does grant turn on the report, not the status.
+// `aborted` is unreachable from `returned` and carries no report at all, and a
+// run invalidated before it ever returned carries none either. Neither can be
+// cited: validateCurationGraphBindings resolves an intake source to a run only
+// by matching a frozen report handle, and a candidate's sourceRuns must equal
+// exactly the runs its coverage spans resolve to, so no span and no finding can
+// ever bind to a run that froze no bytes. Both are therefore refused here, with
+// a remedy that says so rather than pointing at a report that cannot exist.
 //
 // A run whose report already carries a clean, non-superseded intake is still
 // refused in either state, so this cannot be used to pile supplementary intakes
@@ -434,11 +441,24 @@ func validateCurationSourceRunAdmissible(graph CampaignGraph, run RunRecord) err
 
 func curationSourceRunRemedy(run RunRecord) string {
 	if run.Report == nil {
-		// Closure calls such a run `missing-report`, not
-		// `missing-reviewed-intake`; no intake can dispose spans of a report
-		// that was never frozen.
-		return "this run has no frozen report, so no intake can cover it; closure needs the report " +
-			"itself, not curation"
+		// No intake can dispose spans of a report that was never frozen, so
+		// the remedy is never curation. What it is instead depends on whether
+		// the run can still produce one.
+		switch run.Status {
+		case "prepared", "running":
+			return "this run has no frozen report, so no intake can cover it; return the run first, " +
+				"so its report is frozen, then curate it - or, if it will never return, end it " +
+				"through manager_apply run.complete as aborted with a reason in resultSummary, " +
+				"which closure exempts"
+		case "invalidated":
+			return "this run has no frozen report, so no intake can cover it; closure exempts a run " +
+				"voided before it ever returned, exactly as it exempts an aborted one, so there is " +
+				"nothing to clear here. aborted is the more accurate record of a run that never " +
+				"came back: it carries the reason rather than a superseding run id"
+		default:
+			return "this run has no frozen report, so no intake can cover it, and closure does not " +
+				"ask for one"
+		}
 	}
 	switch run.Status {
 	case "prepared", "running":

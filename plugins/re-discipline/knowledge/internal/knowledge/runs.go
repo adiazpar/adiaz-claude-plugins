@@ -233,12 +233,13 @@ func validateAppliedRunCompletion(previous CampaignGraph, writes []preparedState
 		}
 		// `invalidated` is the manager's explicit void path and the only other
 		// exit from `returned`; refusing it too would leave a dirty run with no
-		// exit at all. It does not escape the coverage obligation - closure
-		// exempts only `aborted`, and an invalidated run keeps the frozen report
-		// a ratified finding may still cite - so a run invalidated over a dirty
-		// intake is repaired through validateCurationSourceRunAdmissible rather
-		// than prevented here. `aborted` is unreachable from `returned` and is
-		// exempt from reviewed-intake coverage anyway.
+		// exit at all. It does not escape the coverage obligation - closure's
+		// exemptions are for runs that froze no report, and a run leaving
+		// `returned` always has one, which a ratified finding may still cite -
+		// so a run invalidated over a dirty intake is repaired through
+		// validateCurationSourceRunAdmissible rather than prevented here.
+		// `aborted` is unreachable from `returned` and is exempt from
+		// reviewed-intake coverage anyway.
 		if !validOne(run.Status, "completed", "blocked") || run.Report == nil {
 			continue
 		}

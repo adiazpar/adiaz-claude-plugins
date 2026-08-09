@@ -221,8 +221,30 @@ nothing cascades from run invalidation to a finding's review state, validity,
 or projection. Closure therefore keeps requiring a reviewed intake for an
 invalidated run's report; exempting it would let a campaign close with a
 projected truth resting on evidence the coverage gate no longer accounts for.
-`aborted` is exempt for the opposite reason - it is unreachable from
-`returned`, carries no report at all, and can never be cited.
+
+Closure's two exemptions turn on the report, not on the status. `aborted`
+carries no report at all, and neither does a run invalidated before it ever
+returned - `run.complete` accepts `invalidated` from `prepared` and `running`
+so a manager can take a run that will never come back out of flight, and only
+`returned`, `completed`, and `blocked` require a report handle. Neither run can
+be cited by anything: an intake source resolves to a run only by matching a
+frozen report handle, and a candidate finding's `sourceRuns` must equal exactly
+the runs its coverage spans resolve to, so a run that froze no bytes can carry
+no span and back no claim. Closure records them as `aborted-with-reason` and
+`invalidated-without-report` and asks for nothing further. Demanding a report
+from the second was unsatisfiable: `invalidated` is absorbing, terminal run
+records are immutable, and the stranded-run curation below needs a frozen
+report to curate against, so the campaign could never close. A run that is
+still `prepared` or `running` is a different case and still reports
+`missing-report`: closure must not step over work in flight, and the remedy is
+to return the run, or to end it as `aborted` with a reason.
+
+`aborted` is the more accurate record of a run that never came back, and it is
+reachable from both `prepared` and `running`: it carries the reason in
+`resultSummary`, where `invalidated` carries the id of the run that supersedes
+it. Both are exempt, so neither strands a campaign; the engine names the better
+one when a curator tries to curate such a run, which is where the question is
+actually asked.
 
 `curation_submit` also accepts a source run that is already `completed` or
 `invalidated`, but only while that run is stranded: only when no non-superseded
