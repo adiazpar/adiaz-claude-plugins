@@ -344,47 +344,67 @@ func validateCurationGraphBindings(
 // the run has just come back, its report is frozen, and nothing has been
 // concluded about it yet.
 //
-// A `completed` run is admitted only while it is genuinely stranded. Closure
-// classifies every non-aborted run with a report by whether a reviewed curator
-// intake covers that report with no `unresolved` span (reviewedReportCoverage),
-// and `completed` has no transition back to `returned`. A run completed over an
-// intake that still carried an unresolved span therefore fixes
-// "missing-reviewed-intake" into the campaign with no way to clear it: curation
-// refused the run, review could not create an intake, and no manager override
-// seeds SourceRunCoverage. validateAppliedRunCompletion now refuses that
-// completion, but it cannot repair a campaign that was stranded before it
-// existed, and this is the only remaining route to a clean intake for those
-// runs.
+// A run that has left `returned` for `completed` or `invalidated` is admitted
+// only while it is genuinely stranded. Closure classifies every non-aborted run
+// with a report by whether a reviewed curator intake covers that report with no
+// `unresolved` span (reviewedReportCoverage), and neither state has a
+// transition back to `returned`. A run that left `returned` over an intake that
+// still carried an unresolved span therefore fixes "missing-reviewed-intake"
+// into the campaign with no way to clear it: curation refused the run, review
+// could not create an intake, and no manager override seeds SourceRunCoverage.
+// This is the only remaining route to a clean intake for those runs.
 //
-// The admission is the exact complement of that completion guard: both ask
-// inspectRunReportIntakeCoverage the same question, and a completed run is
-// admitted here precisely when it could not have passed there. A completed run
-// whose report already carries a clean, non-superseded intake is still refused,
-// so this cannot be used to pile supplementary intakes onto healthy runs, nor
-// to add a second repair while one is already pending review. Every other run
-// state stays refused.
+// For `completed` the admission is the exact complement of the completion
+// guard: both ask inspectRunReportIntakeCoverage the same question, and a
+// completed run is admitted here precisely when it could not have passed
+// validateAppliedRunCompletion. That guard now prevents the strand, but it
+// cannot repair a campaign stranded before it existed.
+//
+// `invalidated` needs the same admission for the opposite reason: it is the one
+// exit from `returned` that the completion guard must not refuse, because it is
+// the only other exit and refusing it would leave a dirty run with no exit at
+// all. So the engine still creates this strand today, and curation is where it
+// is repaired.
+//
+// Closure does not simply exempt an invalidated run instead, and must not: an
+// invalidated run's report stays frozen (ValidateRunTransition), stays in the
+// closure plan's retained payload, and can still be cited by a ratified
+// finding - FindingRecord.SourceRuns is bound at curation and CampaignGraph
+// requires only that each source run resolve, while nothing cascades from run
+// invalidation to a finding's review state, validity, or projection. Exempting
+// the report would let a campaign close with a projected truth resting on
+// evidence the coverage gate no longer accounts for. `aborted` is exempt for
+// the opposite reason: it is unreachable from `returned`, carries no report at
+// all, and so can never be cited.
+//
+// A run whose report already carries a clean, non-superseded intake is still
+// refused in either state, so this cannot be used to pile supplementary intakes
+// onto healthy runs, nor to add a second repair while one is already pending
+// review. Every other run state stays refused.
 //
 // A supplementary intake is purely additive. reviewedReportCoverage unions the
 // clean sources of every reviewed intake with no supersession or uniqueness
 // filter and computes unresolved spans per intake, so the new intake flips this
 // run to `reviewed-intake` without altering, superseding, or invalidating the
-// ratified review already recorded over the dirty one. Retiring a prior
-// conclusion remains the business of overturn.
+// ratified review already recorded over the dirty one. It does not restore the
+// run either: an invalidated run stays invalidated, and its candidates face the
+// same individual manager review as any other. Retiring a prior conclusion
+// remains the business of overturn.
 func validateCurationSourceRunAdmissible(graph CampaignGraph, run RunRecord) error {
 	if run.Status == "returned" {
 		return nil
 	}
-	if run.Status != "completed" || run.Report == nil {
+	if !validOne(run.Status, "completed", "invalidated") || run.Report == nil {
 		return fmt.Errorf(
 			"intake source run %s is %s and cannot be curated: curation accepts a returned run, "+
-				"and a completed run only while its frozen report still has no clean curator intake "+
-				"for closure to count. Remedy: %s",
+				"and a completed or invalidated run only while its frozen report still has no clean "+
+				"curator intake for closure to count. Remedy: %s",
 			run.ID, run.Status, curationSourceRunRemedy(run))
 	}
 	coverage := inspectRunReportIntakeCoverage(graph, *run.Report)
 	if len(coverage.Clean) == 0 {
-		// Genuinely stranded: completed, and closure cannot be satisfied for
-		// this report by any intake that exists.
+		// Genuinely stranded: no longer returned, and closure cannot be
+		// satisfied for this report by any intake that exists.
 		return nil
 	}
 	remedy := fmt.Sprintf(
@@ -406,10 +426,10 @@ func validateCurationSourceRunAdmissible(graph CampaignGraph, run RunRecord) err
 			strings.Join(coverage.Dirty, "; "))
 	}
 	return fmt.Errorf(
-		"intake source run %s is completed and its report %s is already covered by clean curator "+
-			"intake(s) %s%s, so it is not stranded: a completed run may be curated only to supply the "+
-			"clean coverage closure requires and cannot otherwise obtain. Remedy: %s",
-		run.ID, run.Report.Path, strings.Join(coverage.Clean, ", "), dirty, remedy)
+		"intake source run %s is %s and its report %s is already covered by clean curator "+
+			"intake(s) %s%s, so it is not stranded: a run that has left returned may be curated only "+
+			"to supply the clean coverage closure requires and cannot otherwise obtain. Remedy: %s",
+		run.ID, run.Status, run.Report.Path, strings.Join(coverage.Clean, ", "), dirty, remedy)
 }
 
 func curationSourceRunRemedy(run RunRecord) string {
@@ -423,9 +443,10 @@ func curationSourceRunRemedy(run RunRecord) string {
 	switch run.Status {
 	case "prepared", "running":
 		return "return the run first, so its report is frozen, then curate it"
-	case "blocked", "invalidated":
-		return "a run in this state carries no conclusion to repair; reopen the work item and " +
-			"delegate a fresh run instead"
+	case "blocked":
+		return "run.complete already required a clean curator intake before this run could be " +
+			"blocked, so there is nothing here for a further intake to supply; if the work must " +
+			"continue, reopen the work item and delegate a fresh run"
 	case "aborted":
 		return "an aborted run is exempt from closure coverage and needs no intake"
 	default:

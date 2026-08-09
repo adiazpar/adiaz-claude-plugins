@@ -282,6 +282,270 @@ func TestSupplementaryCurationRepairsAStrandedCompletedRun(t *testing.T) {
 	}
 }
 
+// invalidateReturnedRun voids a returned run the only way a manager can.
+// `run.invalidate` has no action of its own: it routes through `run.complete`,
+// which accepts `invalidated` for a returned run unconditionally because it is
+// the one exit from `returned` that the completion guard may not refuse.
+func invalidateReturnedRun(
+	t *testing.T,
+	fixture runPreparationFixture,
+	receipt StateTransactionReceipt,
+	invalidatedBy, at, idempotencyKey string,
+) (StateTransactionReceipt, error) {
+	t.Helper()
+	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := fixture.request.Runs[0].ID
+	returned := graph.Runs[runID]
+	if returned.Status != "returned" {
+		t.Fatalf("fixture run is %s, not returned", returned.Status)
+	}
+	invalidated := returned
+	invalidated.RecordMeta = lifecycleAdvanceMeta(
+		invalidated.RecordMeta, at, "manager", returned.CorrelationID)
+	invalidated.Status, invalidated.TerminalAt = "invalidated", at
+	invalidated.InvalidatedBy = invalidatedBy
+	work := graph.WorkItems[returned.PrimaryWorkItemID]
+	priorWork := work.Digest
+	work.RecordMeta = lifecycleAdvanceMeta(work.RecordMeta, at, "manager", returned.CorrelationID)
+	work.ActiveRunIDs = nil
+	work.CompletedRunIDs = append(append([]string(nil), work.CompletedRunIDs...), runID)
+	return fixture.service.ManagerApply(context.Background(), ManagerApplyRequest{
+		Action: "run.complete", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: returned.CorrelationID, IdempotencyKey: idempotencyKey,
+		Rationale:            "The returned run is withdrawn in favour of the run that supersedes it.",
+		ExpectedHeadRevision: receipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   receipt.ResultingHead.Digest,
+		ExpectedRecordDigests: map[string]string{
+			runID: returned.Digest, work.ID: priorWork,
+		},
+		Runs: []RunRecord{invalidated}, WorkItems: []WorkItemRecord{work},
+	})
+}
+
+// TestRatifiedFindingsOutliveTheirSourceRunsInvalidation answers the question
+// that decides how closure must treat an invalidated run: can a ratified
+// finding still cite one?
+//
+// It can. A finding binds its source runs by id (FindingRecord.SourceRuns) and
+// the campaign graph requires only that each one resolve - never that it be in
+// any particular state. Nothing cascades from run invalidation to findings:
+// ValidateRunTransition does not look at findings, findingClosureDisposition
+// and findingIsEpistemicallyLive do not look at run status, and no transition
+// retracts a ratified review. So a manager can ratify a finding out of a run's
+// report and then invalidate that run, and the finding stays live, stays
+// ratified, and stays eligible for truth projection.
+//
+// That is why closure keeps demanding a reviewed intake for an invalidated
+// run's frozen report. Exempting it the way `aborted` is exempt would let a
+// campaign close while a projected truth rests on report bytes the coverage
+// gate no longer accounts for. `aborted` is exempt for the opposite reason: it
+// is unreachable from `returned` and carries no report at all, so there is
+// nothing for an intake to cover and no finding can ever cite it.
+func TestRatifiedFindingsOutliveTheirSourceRunsInvalidation(t *testing.T) {
+	graph := closureTestGraph(t)
+	runID := "R-20260802-0001"
+	run := graph.Runs[runID]
+	if run.Report == nil {
+		t.Fatal("fixture run has no frozen report")
+	}
+	run.Status, run.InvalidatedBy, run.Digest = "invalidated", "R-20260802-0002", ""
+	sealed, _, err := sealRunRecord(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph.Runs[runID] = sealed.(RunRecord)
+
+	if err := graph.Validate(); err != nil {
+		t.Fatalf("a ratified finding may not cite an invalidated run after all: %v", err)
+	}
+	finding := graph.Findings["F-0001"]
+	if !containsString(finding.SourceRuns, runID) {
+		t.Fatalf("fixture finding does not cite the invalidated run: %v", finding.SourceRuns)
+	}
+	if finding.ReviewState != "manager-ratified" || !findingIsEpistemicallyLive(finding) ||
+		findingClosureDisposition(finding) != "truth" {
+		t.Fatalf("invalidating the run changed the standing of the finding it sourced: %s/%s/%s",
+			finding.ReviewState, finding.Validity, findingClosureDisposition(finding))
+	}
+
+	coverage, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coverage.FindingCoverage["F-0001"] != "truth" {
+		t.Fatalf("closure stopped projecting a finding sourced from an invalidated run: %s",
+			coverage.FindingCoverage["F-0001"])
+	}
+	if coverage.SourceRunCoverage[runID] != "reviewed-intake" {
+		t.Fatalf("closure stopped accounting for the invalidated run's frozen report: %s",
+			coverage.SourceRunCoverage[runID])
+	}
+}
+
+// TestSupplementaryCurationRepairsAStrandedInvalidatedRun is the end-to-end
+// regression for the strand that survived the completed-run repair.
+//
+// `run.complete` refuses `completed` and `blocked` over a dirty intake but must
+// leave `invalidated` open - it is the only other exit from `returned`, and
+// refusing it too would leave a dirty run with no exit at all. Closure,
+// however, exempts only `aborted`, so invalidating that run fixes
+// `missing-reviewed-intake` into the campaign exactly as completing it once
+// did, and the completed-run admission did not reach it.
+//
+// Unlike the completed strand, this one needs no legacy fixture: it is
+// reachable through the live engine today, which is what makes it worth
+// closing.
+func TestSupplementaryCurationRepairsAStrandedInvalidatedRun(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRunPreparationFixture(t)
+	source := returnNormalizationSourceRun(t, fixture)
+	runID := fixture.request.Runs[0].ID
+
+	dirty := completionTestIntake("I-0921", "corr-invalidated-dirty", *source.run.Report, "unresolved")
+	dirtyReceipt, err := fixture.service.CurationSubmit(ctx, CurationSubmitRequest{
+		Actor: "knowledge-curator", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: dirty.CorrelationID, IdempotencyKey: "idem-invalidated-dirty",
+		ExpectedHeadRevision: source.receipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   source.receipt.ResultingHead.Digest,
+		Intake:               dirty,
+	})
+	if err != nil {
+		t.Fatalf("submit the curator intake with an unresolved span: %v", err)
+	}
+	reviewReceipt := reviewCommittedIntake(t, fixture, dirtyReceipt,
+		"I-0921", "V-0921", "corr-invalidated-dirty-review", "idem-invalidated-dirty-review",
+		"2026-08-02T18:07:00Z", 1)
+
+	// The transition the completion guard deliberately does not refuse.
+	strandedReceipt, err := invalidateReturnedRun(t, fixture, reviewReceipt,
+		"R-20260802-0092", "2026-08-02T18:08:00Z", "idem-invalidated-void")
+	if err != nil {
+		t.Fatalf("invalidate a returned run over a dirty intake: %v", err)
+	}
+
+	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Runs[runID].Status != "invalidated" {
+		t.Fatalf("fixture run is %s, not invalidated", graph.Runs[runID].Status)
+	}
+	stranded, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stranded.SourceRunCoverage[runID] != "missing-reviewed-intake" ||
+		!containsString(stranded.MissingDecisions, "run:"+runID+":coverage") {
+		t.Fatalf("the fixture is not stranded: %s", stranded.SourceRunCoverage[runID])
+	}
+
+	// The coverage gate is not the only one keyed on this run's report: the
+	// closure normalization gate exempts `aborted` and curator runs and nothing
+	// else, so an invalidated run's report is demanded there too. Exempting
+	// invalidated runs from ComputeClosureCoverage alone would have moved the
+	// strand from the project stage to the reconcile stage, not removed it.
+	queued, err := fixture.service.queueClosureNormalization(graph, "2099-01-01T18:03:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued) != 1 || queued[0].RunID != runID {
+		t.Fatalf("closure normalization did not demand the invalidated run's report: %#v", queued)
+	}
+	blockers, err := fixture.service.closureNormalizationBlockers(graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(blockers, "normalization:"+runID+":queued") {
+		t.Fatalf("closure normalize gate did not block on the invalidated run: %v", blockers)
+	}
+
+	// Whatever the repair does, it must not touch what the manager already
+	// ratified. Compare the committed bytes, not a projection of them.
+	reviewPath := filepath.Join(fixture.root, "active", "test-campaign", "reviews", "V-0921.json")
+	dirtyIntakePath := filepath.Join(fixture.root, "active", "test-campaign", "intake", "I-0921.json")
+	priorReview := mustReadFile(t, reviewPath)
+	priorIntake := mustReadFile(t, dirtyIntakePath)
+
+	clean := completionTestIntake("I-0922", "corr-invalidated-repair", *source.run.Report, "non-claim")
+	repairReceipt, err := fixture.service.CurationSubmit(ctx, CurationSubmitRequest{
+		Actor: "knowledge-curator", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: clean.CorrelationID, IdempotencyKey: "idem-invalidated-repair",
+		ExpectedHeadRevision: strandedReceipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   strandedReceipt.ResultingHead.Digest,
+		Intake:               clean,
+	})
+	if err != nil {
+		t.Fatalf("a stranded invalidated run refused its only remaining repair: %v", err)
+	}
+	repairedReceipt := reviewCommittedIntake(t, fixture, repairReceipt,
+		"I-0922", "V-0922", "corr-invalidated-repair-review", "idem-invalidated-repair-review",
+		"2026-08-02T18:09:00Z", 2)
+
+	graph, err = fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.SourceRunCoverage[runID] != "reviewed-intake" ||
+		containsString(repaired.MissingDecisions, "run:"+runID+":coverage") {
+		t.Fatalf("the supplementary intake did not clear closure coverage: %#v", repaired)
+	}
+	// The normalization gate's epistemic half is satisfied by the same intake:
+	// the run is covered, so closure stops demanding a new queue item for it.
+	// Its outstanding item is ordinary work with a route to resolution, not a
+	// strand.
+	requeued, err := fixture.service.queueClosureNormalization(graph, "2099-01-01T18:05:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requeued) != 0 {
+		t.Fatalf("closure still demands normalization for a covered run: %#v", requeued)
+	}
+
+	// The prior conclusion is untouched: same bytes, same binding, same
+	// unresolved span. The repair added provenance; it retired nothing.
+	if string(mustReadFile(t, reviewPath)) != string(priorReview) {
+		t.Fatal("the ratified review record changed during the repair")
+	}
+	if string(mustReadFile(t, dirtyIntakePath)) != string(priorIntake) {
+		t.Fatal("the reviewed intake record changed during the repair")
+	}
+	survivor, present := graph.Intakes["I-0921"]
+	if !present || survivor.Status != "reviewed" {
+		t.Fatalf("the originally reviewed intake did not survive as reviewed: %+v", survivor)
+	}
+	if graph.Runs[runID].Status != "invalidated" || graph.Runs[runID].InvalidatedBy != "R-20260802-0092" {
+		t.Fatalf("the repair changed the run's own standing: %+v", graph.Runs[runID])
+	}
+
+	// And the door closes behind the repair: the run is covered again, so a
+	// further supplementary intake has nothing to supply.
+	surplus := completionTestIntake("I-0923", "corr-invalidated-surplus", *source.run.Report, "non-claim")
+	_, surplusErr := fixture.service.CurationSubmit(ctx, CurationSubmitRequest{
+		Actor: "knowledge-curator", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: surplus.CorrelationID, IdempotencyKey: "idem-invalidated-surplus",
+		ExpectedHeadRevision: repairedReceipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   repairedReceipt.ResultingHead.Digest,
+		Intake:               surplus,
+	})
+	if surplusErr == nil {
+		t.Fatal("a covered invalidated run accepted a supplementary intake")
+	}
+	for _, want := range []string{
+		runID, "is invalidated", "already covered by clean curator intake(s) I-0922", "overturn",
+	} {
+		if !strings.Contains(surplusErr.Error(), want) {
+			t.Fatalf("surplus refusal does not report %q: %v", want, surplusErr)
+		}
+	}
+}
+
 // admissibilityTestGraph builds the smallest graph that binds one run report to
 // a chosen set of curator intakes.
 func admissibilityTestGraph(status string, intakes ...IntakeRecord) (CampaignGraph, RunRecord) {
@@ -319,15 +583,17 @@ func admissibilityTestIntake(id, status, disposition string) IntakeRecord {
 
 // TestCurationSourceRunAdmissionIsExactlyTheStrandedCase pins the predicate
 // itself, including every state that must stay refused. The relaxation is worth
-// only as much as its boundary: a completed run is admitted precisely when
-// closure has no clean intake to count and none can be produced any other way.
+// only as much as its boundary: a run that has left `returned` is admitted
+// precisely when closure has no clean intake to count and none can be produced
+// any other way.
 func TestCurationSourceRunAdmissionIsExactlyTheStrandedCase(t *testing.T) {
 	for _, testCase := range []struct {
-		name    string
-		status  string
-		intakes []IntakeRecord
-		admit   bool
-		wants   []string
+		name     string
+		status   string
+		noReport bool
+		intakes  []IntakeRecord
+		admit    bool
+		wants    []string
 	}{
 		{
 			name: "returned is unconditional", status: "returned", admit: true,
@@ -368,6 +634,35 @@ func TestCurationSourceRunAdmissionIsExactlyTheStrandedCase(t *testing.T) {
 			},
 		},
 		{
+			name: "invalidated with no intake at all", status: "invalidated", admit: true,
+		},
+		{
+			name: "invalidated with only unresolved coverage", status: "invalidated", admit: true,
+			intakes: []IntakeRecord{admissibilityTestIntake("I-0001", "reviewed", "unresolved")},
+		},
+		{
+			name: "invalidated whose only clean intake is superseded", status: "invalidated", admit: true,
+			intakes: []IntakeRecord{
+				admissibilityTestIntake("I-0001", "superseded", "non-claim"),
+				admissibilityTestIntake("I-0002", "reviewed", "unresolved"),
+			},
+		},
+		{
+			name: "invalidated and already cleanly reviewed", status: "invalidated", admit: false,
+			intakes: []IntakeRecord{admissibilityTestIntake("I-0001", "reviewed", "non-claim")},
+			wants: []string{
+				"R-20260802-0091 is invalidated", "already covered by clean curator intake(s) I-0001",
+				"not stranded", "overturn it rather than curating the run again",
+			},
+		},
+		{
+			// Invalidated before the run ever returned: closure calls this
+			// `missing-report`, not `missing-reviewed-intake`, and no intake
+			// can dispose spans of a report that was never frozen.
+			name: "invalidated with no frozen report", status: "invalidated", noReport: true, admit: false,
+			wants: []string{"R-20260802-0091 is invalidated", "has no frozen report"},
+		},
+		{
 			name: "prepared", status: "prepared", admit: false,
 			wants: []string{"R-20260802-0091 is prepared", "return the run first"},
 		},
@@ -377,11 +672,10 @@ func TestCurationSourceRunAdmissionIsExactlyTheStrandedCase(t *testing.T) {
 		},
 		{
 			name: "blocked", status: "blocked", admit: false,
-			wants: []string{"R-20260802-0091 is blocked", "delegate a fresh run instead"},
-		},
-		{
-			name: "invalidated", status: "invalidated", admit: false,
-			wants: []string{"R-20260802-0091 is invalidated", "delegate a fresh run instead"},
+			wants: []string{
+				"R-20260802-0091 is blocked",
+				"run.complete already required a clean curator intake",
+			},
 		},
 		{
 			name: "aborted", status: "aborted", admit: false,
@@ -390,6 +684,10 @@ func TestCurationSourceRunAdmissionIsExactlyTheStrandedCase(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			graph, run := admissibilityTestGraph(testCase.status, testCase.intakes...)
+			if testCase.noReport {
+				run.Report = nil
+				graph.Runs[run.ID] = run
+			}
 			err := validateCurationSourceRunAdmissible(graph, run)
 			if testCase.admit {
 				if err != nil {
@@ -414,6 +712,13 @@ func TestCurationSourceRunAdmissionIsExactlyTheStrandedCase(t *testing.T) {
 // inspectRunReportIntakeCoverage the same question, so for every intake shape a
 // run can carry, exactly one of "run.complete accepts it" and "curation admits
 // a supplementary intake for it" holds.
+//
+// It also pins that `invalidated` is admitted on exactly the same predicate as
+// `completed`. The two states reach the strand differently - one is now
+// prevented at the transition and repaired only for legacy campaigns, the other
+// is a transition the engine must keep accepting - but "stranded" means the
+// same thing for both, and a stranded-only admission that answered differently
+// for them would be a second predicate to keep in step.
 func TestCurationAdmissionAndCompletionGuardAreExactComplements(t *testing.T) {
 	shapes := [][]IntakeRecord{
 		{},
@@ -438,13 +743,21 @@ func TestCurationAdmissionAndCompletionGuardAreExactComplements(t *testing.T) {
 		completedGraph, completedRun := admissibilityTestGraph("completed", intakes...)
 		curatable := validateCurationSourceRunAdmissible(completedGraph, completedRun) == nil
 
+		invalidatedGraph, invalidatedRun := admissibilityTestGraph("invalidated", intakes...)
+		invalidatedCuratable := validateCurationSourceRunAdmissible(
+			invalidatedGraph, invalidatedRun) == nil
+
+		ids := []string{}
+		for _, intake := range intakes {
+			ids = append(ids, intake.ID+"/"+intake.Status)
+		}
 		if completable == curatable {
-			ids := []string{}
-			for _, intake := range intakes {
-				ids = append(ids, intake.ID+"/"+intake.Status)
-			}
 			t.Fatalf("guards overlap or leave a gap for intakes %v: completable=%v curatable=%v",
 				ids, completable, curatable)
+		}
+		if invalidatedCuratable != curatable {
+			t.Fatalf("the stranded admission answers differently for intakes %v: "+
+				"completed=%v invalidated=%v", ids, curatable, invalidatedCuratable)
 		}
 	}
 }
