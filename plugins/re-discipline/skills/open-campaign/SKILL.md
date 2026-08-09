@@ -36,6 +36,14 @@ Do not precreate empty folders, generic evidence categories, or run payload
 trees. Link source backlog or goal handles as record relations rather than
 copying their prose into campaign state.
 
+Keep the objective, scope, exclusions, and success and closure criteria
+compact. Every one of those fields is mandatory context in every future run's
+context pack, so the engine caps their combined size per record and refuses
+`campaign.open` and `campaign.update` above it, naming the offending field.
+The same cap applies to a work item's problem and acceptance criteria. Put
+long-form rationale in a finding, the work-item description, or a durable
+truth document, which are retrieved rather than mandatory.
+
 Update project navigation only through the engine result or its generated
 projection. Preserve unrelated navigation content.
 

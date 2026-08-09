@@ -44,6 +44,12 @@ state. It must carry one explicit decision for every candidate: `ratify`,
 `supersede`. Routine uncontested rows may share a single submission, but they
 still receive independent decision rows.
 
+`manager_apply(action="decision.record")` is the same transaction under a
+different name and carries the same payload. There is no standalone decision
+record: a manager decision is always recorded against reviewed candidates, and
+the `rationale` field is journaled with every transition rather than being a
+record of its own.
+
 Attention, conflicted, and truth-touching rows require individually reasoned
 outcomes and cannot inherit a bulk action. Treat intake `spawnedWorkItems` IDs
 as proposals; only the manager review transaction may create corresponding

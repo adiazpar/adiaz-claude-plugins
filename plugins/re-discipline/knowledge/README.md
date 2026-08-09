@@ -175,6 +175,23 @@ compiled pack changed between operations. Before launch, run
 `verify-pack --input <context-pack.json> --expected-digest <retained-digest>`.
 Reading a digest from the pack being verified is not independent verification.
 
+`run.prepare` takes the raw brief text and the previewed pack under
+`runPreparation`. The submitted run record's `brief` and `contextPack` handles
+are optional: their digests cover engine-canonical bytes - the brief gains an
+engine-sealed write-grant block and the pack is re-serialized by the runtime -
+so the engine derives both when they are omitted. Supplied handles are still
+compared byte for byte, which keeps compare-and-swap available to an
+independent verifier that computes the same canonical bytes.
+
+A pack refuses to compile when its mandatory scoped context - the campaign
+objective, scope, exclusions, success and closure criteria, and the work-item
+problem and acceptance criteria - cannot fit the requested budget. The refusal
+names each contributing constraint and card with its token cost and the
+minimum budget that would work. Because that context is never droppable, the
+combined size of those fields is also capped per record at write time, so a
+manager transition that would introduce or grow a record too large to delegate
+is refused instead of leaving every later run to fail.
+
 ## Cache and context preservation
 
 The preferred cache is

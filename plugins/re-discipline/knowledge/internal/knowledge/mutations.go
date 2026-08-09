@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -124,6 +125,10 @@ func (service *Service) ManagerApply(ctx context.Context, request ManagerApplyRe
 	if strings.TrimSpace(request.Actor) == "" {
 		return StateTransactionReceipt{}, errors.New("manager actor is required")
 	}
+	request, completionErr := completeRunPreparationHandles(request)
+	if completionErr != nil {
+		return StateTransactionReceipt{}, completionErr
+	}
 	store := NewStateStoreWithBoundary(service.Boundary)
 	if err := store.Recover(ctx); err != nil {
 		return StateTransactionReceipt{}, err
@@ -162,6 +167,13 @@ func (service *Service) ManagerApply(ctx context.Context, request ManagerApplyRe
 		}
 	}
 	if err := validateManagerActionPayload(request, allowedKinds, service.Configuration); err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	// Mandatory scoped context is never droppable from a context pack, so a
+	// record that cannot fit one bricks every later run for its campaign.
+	// Refusing the write that introduces it is the only point where the caller
+	// still knows which field it just made too large.
+	if err := validateScopedContextBudgetDelta(graph, request); err != nil {
 		return StateTransactionReceipt{}, err
 	}
 	artifacts, err := service.prepareManagerRunArtifacts(ctx, store, graph, request)
@@ -221,7 +233,13 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 		total += count
 	}
 	if total == 0 && !archiveAction {
-		return errors.New("manager mutation contains no typed records")
+		// A rationale is transaction metadata journaled with every transition;
+		// it is not itself a record. Naming the accepted kinds and the concrete
+		// obligation keeps a caller from concluding that the action is broken.
+		return fmt.Errorf(
+			"manager action %s contains no typed records; it accepts %s. %s",
+			request.Action, describeAllowedRecordKinds(allowed),
+			managerActionObligation(request.Action))
 	}
 	switch request.Action {
 	case "campaign.update":
@@ -260,7 +278,9 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 		}
 	case "review.submit", "decision.record":
 		if request.Review == nil || request.Intake == nil || request.ReviewPacket == nil {
-			return errors.New("manager review requires review, resulting intake, and the exact reviewed packet")
+			return fmt.Errorf(
+				"manager action %s requires review, resulting intake, and the exact reviewed packet: %s",
+				request.Action, managerActionObligation(request.Action))
 		}
 		packet := request.ReviewPacket.Packet()
 		if err := ValidateReviewPacketEnvelope(request.ReviewPacket.Envelope, packet); err != nil {
@@ -306,6 +326,56 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 		}
 	}
 	return nil
+}
+
+// managerActionObligations states, for each typed manager transition, the
+// concrete payload the engine requires. A caller that sends only a rationale
+// otherwise receives a generic refusal and cannot tell whether the action is
+// misdesigned or simply misused.
+var managerActionObligations = map[string]string{
+	"campaign.open":   "Submit the open campaign record and its root work item.",
+	"campaign.update": "Submit the next campaign revision.",
+	"work.create":     "Submit at least one new work item.",
+	"work.update":     "Submit at least one next work-item revision.",
+	"run.prepare": "Submit the prepared run, its primary work item, and the runPreparation " +
+		"brief and context pack.",
+	"run.start":  "Submit the running run and its primary work item.",
+	"run.return": "Submit the returned run with a frozen report handle and its primary work item.",
+	"run.complete": "Submit the terminal run, its primary work item, and any findings the " +
+		"review ratified.",
+	"closure.remediation.run.create": "Submit the prepared remediation run, its primary work " +
+		"item, and the runPreparation brief and context pack.",
+	"review.submit": "A manager review is a transaction over a curated packet: submit the review " +
+		"record, the resulting reviewed intake revision, and the exact reviewed packet.",
+	"finding.challenge": "Submit at least one finding whose validity is challenged.",
+	"finding.update":    "Submit at least one next finding revision.",
+	"decision.record": "decision.record is the same review transaction as review.submit: a manager " +
+		"decision is recorded against reviewed candidates, so submit the review record, the resulting " +
+		"reviewed intake revision, and the exact reviewed packet. A standalone rationale is not a record; " +
+		"every transition already journals its rationale in the state event.",
+	"reconcile.import": "Submit the exact canonical records being reconciled.",
+}
+
+func managerActionObligation(action string) string {
+	if obligation, ok := managerActionObligations[action]; ok {
+		return obligation
+	}
+	return "Submit at least one typed record."
+}
+
+func describeAllowedRecordKinds(allowed map[string]bool) string {
+	kinds := make([]string, 0, len(allowed))
+	for kind := range allowed {
+		kinds = append(kinds, kind)
+	}
+	if len(kinds) == 0 {
+		return "no typed records"
+	}
+	sort.Strings(kinds)
+	if len(kinds) == 1 {
+		return kinds[0] + " records"
+	}
+	return strings.Join(kinds[:len(kinds)-1], ", ") + ", and " + kinds[len(kinds)-1] + " records"
 }
 
 func (service *Service) prepareManagerRunArtifacts(
@@ -404,41 +474,124 @@ func (service *Service) prepareManagerRunArtifacts(
 	return artifacts, nil
 }
 
-func runPreparationArtifacts(request ManagerApplyRequest) ([]StateArtifactWrite, error) {
+// runLaunchArtifacts are the three immutable files a delegated run publishes.
+// Their digests are the engine's own canonicalization: canonicalRunBrief
+// appends the engine-sealed write-grant block to the submitted brief, and
+// canonicalJSON serializes the pack with this package's exact indentation,
+// field ordering, and HTML escaping.
+type runLaunchArtifacts struct {
+	Override StateArtifactWrite
+	Brief    StateArtifactWrite
+	Pack     StateArtifactWrite
+}
+
+func (artifacts runLaunchArtifacts) writes() []StateArtifactWrite {
+	return []StateArtifactWrite{artifacts.Override, artifacts.Brief, artifacts.Pack}
+}
+
+func buildRunLaunchArtifacts(request ManagerApplyRequest) (runLaunchArtifacts, error) {
 	if request.RunPreparation == nil || len(request.Runs) != 1 {
-		return nil, errors.New("run preparation requires exactly one run and launch payload")
+		return runLaunchArtifacts{}, errors.New(
+			"run preparation requires exactly one run and launch payload")
 	}
 	run := request.Runs[0]
 	preparation := *request.RunPreparation
 	briefBody, err := canonicalRunBrief(preparation.Brief, run.WriteGrants)
 	if err != nil {
-		return nil, err
+		return runLaunchArtifacts{}, err
 	}
 	if _, err := VerifyContextPackValueExpected(
 		preparation.ContextPack, preparation.ContextPack.Digest, preparation.ContextPack.PackID,
 	); err != nil {
-		return nil, fmt.Errorf("run preparation context pack: %w", err)
+		return runLaunchArtifacts{}, fmt.Errorf("run preparation context pack: %w", err)
 	}
 	packBody, err := canonicalJSON(preparation.ContextPack)
 	if err != nil {
-		return nil, fmt.Errorf("serialize run preparation context pack: %w", err)
+		return runLaunchArtifacts{}, fmt.Errorf("serialize run preparation context pack: %w", err)
 	}
 	runPrefix := "active/" + request.CampaignSlug + "/runs/" + run.ID + "/"
-	brief := StateArtifactWrite{
-		Path: runPrefix + "brief.md", ContentDigest: "sha256:" + SHA256Bytes(briefBody), Body: briefBody,
-	}
-	pack := StateArtifactWrite{
-		Path: runPrefix + "context-pack.json", ContentDigest: "sha256:" + SHA256Bytes(packBody), Body: packBody,
-	}
 	overrideBody := []byte(strings.TrimSpace(migrationDrafterOverrideTemplate) + "\n")
-	override := StateArtifactWrite{
-		Path: runPrefix + "AGENTS.override.md", ContentDigest: "sha256:" + SHA256Bytes(overrideBody), Body: overrideBody,
+	return runLaunchArtifacts{
+		Override: StateArtifactWrite{
+			Path:          runPrefix + "AGENTS.override.md",
+			ContentDigest: "sha256:" + SHA256Bytes(overrideBody), Body: overrideBody,
+		},
+		Brief: StateArtifactWrite{
+			Path:          runPrefix + "brief.md",
+			ContentDigest: "sha256:" + SHA256Bytes(briefBody), Body: briefBody,
+		},
+		Pack: StateArtifactWrite{
+			Path:          runPrefix + "context-pack.json",
+			ContentDigest: "sha256:" + SHA256Bytes(packBody), Body: packBody,
+		},
+	}, nil
+}
+
+// completeRunPreparationHandles derives the launch handles a delegated run
+// omitted.
+//
+// The brief and context-pack digests are taken over engine-canonical bytes
+// that no caller can reproduce without reimplementing this package, so
+// demanding them as input made the documented delegation workflow impossible
+// to execute by hand. Omitting them now means "the engine's canonicalization
+// is authoritative", which is the only answer a caller could ever have given.
+// Supplying them stays legal and stays strict: runPreparationArtifacts still
+// compares byte for byte, so an independent verifier that computes the same
+// digests keeps its compare-and-swap.
+func completeRunPreparationHandles(request ManagerApplyRequest) (ManagerApplyRequest, error) {
+	if !validOne(request.Action, "run.prepare", "closure.remediation.run.create") ||
+		request.RunPreparation == nil || len(request.Runs) != 1 {
+		return request, nil
 	}
-	if run.Brief == nil || run.Brief.Path != brief.Path || run.Brief.SHA256 != brief.ContentDigest ||
-		run.ContextPack == nil || run.ContextPack.Path != pack.Path || run.ContextPack.SHA256 != pack.ContentDigest {
-		return nil, errors.New("run launch handles do not match the generated brief and context-pack artifacts")
+	run := request.Runs[0]
+	if run.Brief != nil && run.ContextPack != nil {
+		return request, nil
 	}
-	return []StateArtifactWrite{override, brief, pack}, nil
+	launch, err := buildRunLaunchArtifacts(request)
+	if err != nil {
+		return request, err
+	}
+	if run.Brief == nil {
+		run.Brief = &FileHandle{Path: launch.Brief.Path, SHA256: launch.Brief.ContentDigest}
+	}
+	if run.ContextPack == nil {
+		run.ContextPack = &FileHandle{Path: launch.Pack.Path, SHA256: launch.Pack.ContentDigest}
+	}
+	request.Runs = append([]RunRecord(nil), request.Runs...)
+	request.Runs[0] = run
+	return request, nil
+}
+
+func runPreparationArtifacts(request ManagerApplyRequest) ([]StateArtifactWrite, error) {
+	launch, err := buildRunLaunchArtifacts(request)
+	if err != nil {
+		return nil, err
+	}
+	run := request.Runs[0]
+	if err := compareRunLaunchHandle("brief", run.Brief, launch.Brief); err != nil {
+		return nil, err
+	}
+	if err := compareRunLaunchHandle("context pack", run.ContextPack, launch.Pack); err != nil {
+		return nil, err
+	}
+	return launch.writes(), nil
+}
+
+func compareRunLaunchHandle(label string, submitted *FileHandle, generated StateArtifactWrite) error {
+	remedy := "omit the run record's brief and contextPack handles to let the engine derive them, " +
+		"or compute them from the engine-canonical bytes it publishes"
+	if submitted == nil {
+		return fmt.Errorf(
+			"run launch %s handle is missing; the engine generates %s with digest %s; %s",
+			label, generated.Path, generated.ContentDigest, remedy)
+	}
+	if submitted.Path != generated.Path || submitted.SHA256 != generated.ContentDigest {
+		return fmt.Errorf(
+			"run launch %s handle %s/%s does not match the generated artifact %s/%s; %s",
+			label, submitted.Path, submitted.SHA256,
+			generated.Path, generated.ContentDigest, remedy)
+	}
+	return nil
 }
 
 func replayManagerRunPreparation(

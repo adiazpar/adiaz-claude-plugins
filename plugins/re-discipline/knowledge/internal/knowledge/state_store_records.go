@@ -212,20 +212,27 @@ func (store *StateStore) readCanonicalRecordValue(relative string) ([]byte, any,
 	if err := validateRelativeRecordPath(relative); err != nil {
 		return nil, nil, CanonicalRecordHandle{}, err
 	}
+	// Every failure below names the exact canonical path. The underlying
+	// filesystem error is often a bare platform errno - on Windows literally
+	// "The system cannot find the file specified." - which told a caller
+	// nothing about which record the engine could not read.
 	absolute, err := store.Boundary.Resolve(relative, true)
 	if err != nil {
-		return nil, nil, CanonicalRecordHandle{}, err
+		return nil, nil, CanonicalRecordHandle{}, fmt.Errorf("resolve canonical record %s: %w", relative, err)
 	}
 	body, err := readSingleLinkRegularFile(absolute)
 	if err != nil {
-		return nil, nil, CanonicalRecordHandle{}, err
+		return nil, nil, CanonicalRecordHandle{}, fmt.Errorf("read canonical record %s: %w", relative, err)
 	}
 	value, canonical, err := decodeCanonicalRecord(relative, body)
 	if err != nil {
-		return nil, nil, CanonicalRecordHandle{}, err
+		return nil, nil, CanonicalRecordHandle{}, fmt.Errorf("decode canonical record %s: %w", relative, err)
 	}
 	if !bytes.Equal(body, canonical) {
-		return nil, nil, CanonicalRecordHandle{}, errors.New("canonical record bytes are not in deterministic form")
+		return nil, nil, CanonicalRecordHandle{}, fmt.Errorf(
+			"canonical record %s bytes are not in deterministic form: it was edited outside the "+
+				"workflow. Remedy: restore its committed bytes, or submit the change as a typed record "+
+				"revision through manager_apply", relative)
 	}
 	id, revision, digest := recordHandleIdentity(value)
 	return body, value, CanonicalRecordHandle{
@@ -393,9 +400,24 @@ func (store *StateStore) loadRunRecords(slug string, graph *CampaignGraph) error
 	}
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() || !runIDRE.MatchString(entry.Name()) {
-			return fmt.Errorf("runs contains unexpected entry %s", entry.Name())
+			return fmt.Errorf(
+				"canonical run directory %s contains unexpected entry %s; only run directories named "+
+					"R-YYYYMMDD-NNNN belong here. Remedy: remove that entry, or publish it through the "+
+					"transition that owns it", relative, entry.Name())
 		}
 		path := relative + "/" + entry.Name() + "/run.json"
+		// A run directory without its canonical record was created out of band -
+		// typically by writing a report or payload under a run ID that was never
+		// published through manager_apply run.prepare. Reading the missing record
+		// surfaced only the operating system's bare "cannot find the file"
+		// message, which named neither the path nor the cause.
+		if _, statErr := os.Lstat(filepath.Join(absolute, entry.Name(), "run.json")); os.IsNotExist(statErr) {
+			return fmt.Errorf(
+				"unregistered run directory %s/%s has no canonical %s; no run was ever published for that ID. "+
+					"Remedy: remove that directory, or publish the run through manager_apply run.prepare "+
+					"before writing any file under it",
+				relative, entry.Name(), path)
+		}
 		_, value, _, err := store.readCanonicalRecordValue(path)
 		if err != nil {
 			return err

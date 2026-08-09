@@ -241,8 +241,8 @@ func (service *Service) compileContextPack(
 			return pack, nil
 		}
 		if len(pack.Cards) <= mandatoryCount {
-			return ContextPack{}, errors.New(
-				"token or byte budget is too small for mandatory scoped context")
+			return ContextPack{}, mandatoryContextBudgetError(
+				pack, len(body), selected.Effective.Packing.MaxBytes, roleBudget)
 		}
 		pack.Cards = pack.Cards[:len(pack.Cards)-1]
 		pack.Omitted["budget"]++

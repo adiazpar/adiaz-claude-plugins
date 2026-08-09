@@ -164,6 +164,81 @@ func TestManagerRunPreparationPublishesLaunchAtomicallyAndIdempotently(t *testin
 	}
 }
 
+// TestManagerRunPreparationDerivesOmittedLaunchHandles pins the fix for a
+// contract a caller could not satisfy. The brief digest covers bytes the
+// engine itself appends (the sealed write-grant block) and the pack digest
+// covers this package's exact canonical JSON, so no caller could compute
+// either without reimplementing the engine. Omitting both handles must now
+// succeed and must publish byte-identical artifacts.
+func TestManagerRunPreparationDerivesOmittedLaunchHandles(t *testing.T) {
+	fixture := newRunPreparationFixture(t)
+	request := fixture.request
+	request.Runs = append([]RunRecord(nil), fixture.request.Runs...)
+	run := request.Runs[0]
+	run.Brief, run.ContextPack = nil, nil
+	request.Runs[0] = run
+
+	receipt, err := fixture.service.ManagerApply(context.Background(), request)
+	if err != nil {
+		t.Fatalf("run preparation without caller-computed handles was refused: %v", err)
+	}
+	if len(receipt.Artifacts) != 3 {
+		t.Fatalf("derived preparation published %d launch artifacts", len(receipt.Artifacts))
+	}
+	runID := fixture.request.Runs[0].ID
+	prefix := filepath.Join(fixture.root, "active", "test-campaign", "runs", runID)
+	brief, briefErr := os.ReadFile(filepath.Join(prefix, "brief.md"))
+	packBody, packErr := os.ReadFile(filepath.Join(prefix, "context-pack.json"))
+	if briefErr != nil || packErr != nil ||
+		!reflect.DeepEqual(brief, fixture.brief) || !reflect.DeepEqual(packBody, fixture.packBody) {
+		t.Fatalf("derived artifacts differ from the canonical bytes: briefErr=%v packErr=%v", briefErr, packErr)
+	}
+
+	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := graph.Runs[runID]
+	if committed.Brief == nil || committed.ContextPack == nil ||
+		committed.Brief.SHA256 != "sha256:"+SHA256Bytes(fixture.brief) ||
+		committed.ContextPack.SHA256 != "sha256:"+SHA256Bytes(fixture.packBody) {
+		t.Fatalf("committed run record did not adopt the derived handles: %+v", committed)
+	}
+
+	// The derived transition stays idempotent under an exact retry.
+	replayed, err := fixture.service.ManagerApply(context.Background(), request)
+	if err != nil || !reflect.DeepEqual(replayed, receipt) {
+		t.Fatalf("derived run preparation retry did not replay its receipt: %v", err)
+	}
+}
+
+// TestManagerRunPreparationStillVerifiesSuppliedLaunchHandles keeps the
+// compare-and-swap intact for an independent verifier that does compute the
+// digests, and requires the refusal to be actionable.
+func TestManagerRunPreparationStillVerifiesSuppliedLaunchHandles(t *testing.T) {
+	fixture := newRunPreparationFixture(t)
+	request := fixture.request
+	request.Runs = append([]RunRecord(nil), fixture.request.Runs...)
+	run := request.Runs[0]
+	run.Brief = &FileHandle{Path: run.Brief.Path, SHA256: stateTestDigest("a")}
+	request.Runs[0] = run
+
+	_, err := fixture.service.ManagerApply(context.Background(), request)
+	if err == nil {
+		t.Fatal("a wrong caller-supplied brief digest was accepted")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"run launch brief handle",
+		"does not match the generated artifact",
+		"omit the run record's brief and contextPack handles",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("launch-handle refusal does not explain %q: %s", want, message)
+		}
+	}
+}
+
 func TestManagerRunPreparationRejectsTamperAndHalfPreparedLaunches(t *testing.T) {
 	t.Run("delegated payload is mandatory", func(t *testing.T) {
 		fixture := newRunPreparationFixture(t)
