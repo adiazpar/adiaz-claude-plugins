@@ -1,0 +1,450 @@
+package knowledge
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// reviewCommittedIntake ratifies one committed curator intake exactly as a
+// manager would: it echoes the persisted record, seals a packet envelope over
+// it, and commits the immutable receipt together with the reviewed intake.
+func reviewCommittedIntake(
+	t *testing.T,
+	fixture runPreparationFixture,
+	receipt StateTransactionReceipt,
+	intakeID, reviewID, correlation, idempotencyKey, at string,
+	ordinal int,
+) StateTransactionReceipt {
+	t.Helper()
+	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := graph.Intakes[intakeID]
+	envelope := testReviewPacketEnvelope(t, CurationPacket{Intake: committed})
+	review := ReviewRecord{
+		RecordMeta: RecordMeta{
+			SchemaVersion: CampaignSchemaVersion, ID: reviewID, Revision: 1,
+			CreatedAt: at, UpdatedAt: at, CreatedBy: "manager", UpdatedBy: "manager",
+			CorrelationID: correlation, Digest: stateTestDigest("2"),
+		},
+		CampaignID: "C-TEST", Reviewer: "manager", Authority: "manager",
+		IntakeID: committed.ID, IntakeRevision: committed.Revision, PacketDigest: envelope.Digest,
+		ReviewLoad: stateTestReviewLoad(reviewID, "C-TEST", envelope.Digest, 0, 0),
+	}
+	review.ReviewLoad.PacketOrdinal = ordinal
+	review.ReviewLoad.StartedAt = "2026-08-02T18:06:10Z"
+	review.ReviewLoad.CompletedAt = "2026-08-02T18:06:20Z"
+	review.ReviewLoad.DurationSeconds = 10
+	if err := SealReviewLoadReceipt(&review.ReviewLoad); err != nil {
+		t.Fatal(err)
+	}
+	reviewed := committed
+	reviewed.RecordMeta = lifecycleAdvanceMeta(reviewed.RecordMeta, at, "manager", correlation)
+	reviewed.Digest, reviewed.Status = stateTestDigest("3"), "reviewed"
+
+	applied, err := fixture.service.ManagerApply(context.Background(), ManagerApplyRequest{
+		Action: "review.submit", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: correlation, IdempotencyKey: idempotencyKey,
+		Rationale:             "The curator packet is accepted into the campaign record.",
+		ExpectedHeadRevision:  receipt.ResultingHead.Revision,
+		ExpectedHeadDigest:    receipt.ResultingHead.Digest,
+		ExpectedRecordDigests: map[string]string{committed.ID: committed.Digest},
+		Intake:                &reviewed, Review: &review,
+		ReviewPacket: &ReviewPacketSubmission{Envelope: envelope, Intake: committed},
+	})
+	if err != nil {
+		t.Fatalf("review intake %s: %v", intakeID, err)
+	}
+	return applied
+}
+
+// strandRunAsLegacyCompleted installs exactly the state this fix exists to
+// repair: a run completed while its only curator intake still carried an
+// unresolved span.
+//
+// validateAppliedRunCompletion refuses that transition now, so the state is no
+// longer reachable through run.complete at all - which is the point of that
+// guard. It is reproduced here the only way it can still arise, and the way it
+// actually arose in the field: canonical records that an engine build without
+// the guard already committed, adopted through the engine's own
+// reconcile.import recovery path.
+func strandRunAsLegacyCompleted(
+	t *testing.T,
+	fixture runPreparationFixture,
+	receipt StateTransactionReceipt,
+	at string,
+) StateTransactionReceipt {
+	t.Helper()
+	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := fixture.request.Runs[0].ID
+	returned := graph.Runs[runID]
+	if returned.Status != "returned" {
+		t.Fatalf("fixture run is %s, not returned", returned.Status)
+	}
+	completed := returned
+	completed.Status, completed.TerminalAt, completed.Digest = "completed", at, ""
+	completedValue, runBody, err := sealRunRecord(completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed = completedValue.(RunRecord)
+
+	work := graph.WorkItems[returned.PrimaryWorkItemID]
+	work.ActiveRunIDs, work.Digest = nil, ""
+	work.CompletedRunIDs = append(append([]string(nil), work.CompletedRunIDs...), runID)
+	workValue, workBody, err := sealWorkItemRecord(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work = workValue.(WorkItemRecord)
+
+	runPath := filepath.Join(fixture.root, "active", "test-campaign", "runs", runID, "run.json")
+	workPath := filepath.Join(fixture.root, "active", "test-campaign", "work-items", work.ID+".json")
+	if err := os.WriteFile(runPath, runBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workPath, workBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adopted, err := fixture.service.ManagerApply(context.Background(), ManagerApplyRequest{
+		Action: "reconcile.import", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: "corr-legacy-strand", IdempotencyKey: "idem-legacy-strand",
+		Rationale:            "Adopt a run an earlier engine build completed over unresolved coverage.",
+		ExpectedHeadRevision: receipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   receipt.ResultingHead.Digest,
+		ExpectedRecordDigests: map[string]string{
+			completed.ID: completed.Digest, work.ID: work.Digest,
+		},
+		Runs: []RunRecord{completed}, WorkItems: []WorkItemRecord{work},
+	})
+	if err != nil {
+		t.Fatalf("adopt the legacy completed run: %v", err)
+	}
+	return adopted
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+// TestSupplementaryCurationRepairsAStrandedCompletedRun is the end-to-end
+// regression for a campaign that could not close.
+//
+// A run whose intake left one span `unresolved` was reviewed and then
+// completed. Closure classifies it `missing-reviewed-intake` forever:
+// reviewedReportCoverage ignores any source with an unresolved span,
+// `completed` has no edge back to `returned`, review cannot create an intake,
+// no manager disposition seeds SourceRunCoverage, and curation refused any run
+// that was not returned. The repair is a second, clean intake over the same
+// frozen report - additive provenance that leaves every ratified conclusion
+// exactly where it was.
+func TestSupplementaryCurationRepairsAStrandedCompletedRun(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRunPreparationFixture(t)
+	source := returnNormalizationSourceRun(t, fixture)
+	runID := fixture.request.Runs[0].ID
+
+	dirty := completionTestIntake("I-0901", "corr-stranded-dirty", *source.run.Report, "unresolved")
+	dirtyReceipt, err := fixture.service.CurationSubmit(ctx, CurationSubmitRequest{
+		Actor: "knowledge-curator", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: dirty.CorrelationID, IdempotencyKey: "idem-stranded-dirty",
+		ExpectedHeadRevision: source.receipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   source.receipt.ResultingHead.Digest,
+		Intake:               dirty,
+	})
+	if err != nil {
+		t.Fatalf("submit the curator intake with an unresolved span: %v", err)
+	}
+	reviewReceipt := reviewCommittedIntake(t, fixture, dirtyReceipt,
+		"I-0901", "V-0901", "corr-stranded-dirty-review", "idem-stranded-dirty-review",
+		"2026-08-02T18:07:00Z", 1)
+
+	// The two guards are complementary, not overlapping: run.complete still
+	// refuses to create this situation, so the campaign under repair can only
+	// be one an engine without that guard already stranded.
+	if err := completeReturnedRun(t, fixture, reviewReceipt, "idem-stranded-complete"); err == nil {
+		t.Fatal("run.complete accepted a run whose only intake left a span unresolved")
+	} else if !strings.Contains(err.Error(), "I-0901 leaves 1 span(s) unresolved") {
+		t.Fatalf("run.complete refusal is not the coverage guard: %v", err)
+	}
+
+	strandedReceipt := strandRunAsLegacyCompleted(t, fixture, reviewReceipt, "2026-08-02T18:08:00Z")
+
+	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Runs[runID].Status != "completed" {
+		t.Fatalf("legacy fixture run is %s, not completed", graph.Runs[runID].Status)
+	}
+	stranded, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stranded.SourceRunCoverage[runID] != "missing-reviewed-intake" ||
+		!containsString(stranded.MissingDecisions, "run:"+runID+":coverage") {
+		t.Fatalf("the fixture is not stranded: %s", stranded.SourceRunCoverage[runID])
+	}
+
+	// Whatever the repair does, it must not touch what the manager already
+	// ratified. Compare the committed bytes, not a projection of them.
+	reviewPath := filepath.Join(fixture.root, "active", "test-campaign", "reviews", "V-0901.json")
+	dirtyIntakePath := filepath.Join(fixture.root, "active", "test-campaign", "intake", "I-0901.json")
+	priorReview := mustReadFile(t, reviewPath)
+	priorIntake := mustReadFile(t, dirtyIntakePath)
+
+	clean := completionTestIntake("I-0902", "corr-stranded-repair", *source.run.Report, "non-claim")
+	repairReceipt, err := fixture.service.CurationSubmit(ctx, CurationSubmitRequest{
+		Actor: "knowledge-curator", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: clean.CorrelationID, IdempotencyKey: "idem-stranded-repair",
+		ExpectedHeadRevision: strandedReceipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   strandedReceipt.ResultingHead.Digest,
+		Intake:               clean,
+	})
+	if err != nil {
+		t.Fatalf("a stranded completed run refused its only remaining repair: %v", err)
+	}
+	repairedReceipt := reviewCommittedIntake(t, fixture, repairReceipt,
+		"I-0902", "V-0902", "corr-stranded-repair-review", "idem-stranded-repair-review",
+		"2026-08-02T18:09:00Z", 2)
+
+	graph, err = fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.SourceRunCoverage[runID] != "reviewed-intake" ||
+		containsString(repaired.MissingDecisions, "run:"+runID+":coverage") {
+		t.Fatalf("the supplementary intake did not clear closure coverage: %#v", repaired)
+	}
+
+	// The prior conclusion is untouched: same bytes, same binding, same
+	// unresolved span. The repair added provenance; it retired nothing.
+	if string(mustReadFile(t, reviewPath)) != string(priorReview) {
+		t.Fatal("the ratified review record changed during the repair")
+	}
+	if string(mustReadFile(t, dirtyIntakePath)) != string(priorIntake) {
+		t.Fatal("the reviewed intake record changed during the repair")
+	}
+	survivor, present := graph.Intakes["I-0901"]
+	if !present || survivor.Status != "reviewed" {
+		t.Fatalf("the originally reviewed intake did not survive as reviewed: %+v", survivor)
+	}
+	unresolved := 0
+	for _, entry := range survivor.Coverage {
+		if entry.Disposition == "unresolved" {
+			unresolved++
+		}
+	}
+	if unresolved != 1 {
+		t.Fatalf("the original intake's unresolved span was rewritten: %d remain", unresolved)
+	}
+	if receipt, present := graph.Reviews["V-0901"]; !present ||
+		receipt.IntakeID != "I-0901" || receipt.IntakeRevision != 1 {
+		t.Fatalf("the original review no longer binds its intake revision: %+v", receipt)
+	}
+
+	// And the door closes behind the repair: the run is healthy again, so a
+	// further supplementary intake has nothing to supply.
+	surplus := completionTestIntake("I-0903", "corr-stranded-surplus", *source.run.Report, "non-claim")
+	_, surplusErr := fixture.service.CurationSubmit(ctx, CurationSubmitRequest{
+		Actor: "knowledge-curator", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: surplus.CorrelationID, IdempotencyKey: "idem-stranded-surplus",
+		ExpectedHeadRevision: repairedReceipt.ResultingHead.Revision,
+		ExpectedHeadDigest:   repairedReceipt.ResultingHead.Digest,
+		Intake:               surplus,
+	})
+	if surplusErr == nil {
+		t.Fatal("a healthy completed run accepted a supplementary intake")
+	}
+	for _, want := range []string{
+		runID, "is completed", "already covered by clean curator intake(s) I-0902", "overturn",
+	} {
+		if !strings.Contains(surplusErr.Error(), want) {
+			t.Fatalf("surplus refusal does not report %q: %v", want, surplusErr)
+		}
+	}
+}
+
+// admissibilityTestGraph builds the smallest graph that binds one run report to
+// a chosen set of curator intakes.
+func admissibilityTestGraph(status string, intakes ...IntakeRecord) (CampaignGraph, RunRecord) {
+	report := FileHandle{
+		Path:   "active/test-campaign/runs/R-20260802-0091/report.md",
+		SHA256: stateTestDigest("8"),
+	}
+	run := RunRecord{
+		RecordMeta: RecordMeta{ID: "R-20260802-0091"}, CampaignID: "C-TEST",
+		Status: status, Report: &report,
+	}
+	graph := NewCampaignGraph()
+	graph.Runs[run.ID] = run
+	for _, intake := range intakes {
+		graph.Intakes[intake.ID] = intake
+	}
+	return graph, run
+}
+
+func admissibilityTestIntake(id, status, disposition string) IntakeRecord {
+	report := FileHandle{
+		Path:   "active/test-campaign/runs/R-20260802-0091/report.md",
+		SHA256: stateTestDigest("8"),
+	}
+	return IntakeRecord{
+		RecordMeta: RecordMeta{ID: id}, CampaignID: "C-TEST", Status: status,
+		SourceRuns: []FileHandle{report},
+		Coverage: []CoverageEntry{{
+			SourceHandle: "path:" + report.Path + "#L1-L3", SourcePath: report.Path,
+			SourceSHA256: report.SHA256, StartLine: 1, EndLine: 3, SourceLineCount: 3,
+			Disposition: disposition,
+		}},
+	}
+}
+
+// TestCurationSourceRunAdmissionIsExactlyTheStrandedCase pins the predicate
+// itself, including every state that must stay refused. The relaxation is worth
+// only as much as its boundary: a completed run is admitted precisely when
+// closure has no clean intake to count and none can be produced any other way.
+func TestCurationSourceRunAdmissionIsExactlyTheStrandedCase(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		status  string
+		intakes []IntakeRecord
+		admit   bool
+		wants   []string
+	}{
+		{
+			name: "returned is unconditional", status: "returned", admit: true,
+			intakes: []IntakeRecord{admissibilityTestIntake("I-0001", "reviewed", "non-claim")},
+		},
+		{
+			name: "completed with no intake at all", status: "completed", admit: true,
+		},
+		{
+			name: "completed with only unresolved coverage", status: "completed", admit: true,
+			intakes: []IntakeRecord{admissibilityTestIntake("I-0001", "reviewed", "unresolved")},
+		},
+		{
+			name: "completed whose only clean intake is superseded", status: "completed", admit: true,
+			intakes: []IntakeRecord{
+				admissibilityTestIntake("I-0001", "superseded", "non-claim"),
+				admissibilityTestIntake("I-0002", "reviewed", "unresolved"),
+			},
+		},
+		{
+			name: "completed and already cleanly reviewed", status: "completed", admit: false,
+			intakes: []IntakeRecord{admissibilityTestIntake("I-0001", "reviewed", "non-claim")},
+			wants: []string{
+				"R-20260802-0091 is completed", "already covered by clean curator intake(s) I-0001",
+				"not stranded", "overturn it rather than curating the run again",
+			},
+		},
+		{
+			name: "completed with a clean repair already pending review", status: "completed", admit: false,
+			intakes: []IntakeRecord{
+				admissibilityTestIntake("I-0001", "reviewed", "unresolved"),
+				admissibilityTestIntake("I-0002", "submitted", "non-claim"),
+			},
+			wants: []string{
+				"already covered by clean curator intake(s) I-0002",
+				"I-0001 leaves 1 span(s) unresolved",
+				"review the clean intake that already covers it (I-0002 (submitted))",
+			},
+		},
+		{
+			name: "prepared", status: "prepared", admit: false,
+			wants: []string{"R-20260802-0091 is prepared", "return the run first"},
+		},
+		{
+			name: "running", status: "running", admit: false,
+			wants: []string{"R-20260802-0091 is running", "return the run first"},
+		},
+		{
+			name: "blocked", status: "blocked", admit: false,
+			wants: []string{"R-20260802-0091 is blocked", "delegate a fresh run instead"},
+		},
+		{
+			name: "invalidated", status: "invalidated", admit: false,
+			wants: []string{"R-20260802-0091 is invalidated", "delegate a fresh run instead"},
+		},
+		{
+			name: "aborted", status: "aborted", admit: false,
+			wants: []string{"R-20260802-0091 is aborted", "exempt from closure coverage"},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			graph, run := admissibilityTestGraph(testCase.status, testCase.intakes...)
+			err := validateCurationSourceRunAdmissible(graph, run)
+			if testCase.admit {
+				if err != nil {
+					t.Fatalf("a curatable source run was refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("an uncuratable source run was admitted")
+			}
+			for _, want := range testCase.wants {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("refusal does not report %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// TestCurationAdmissionAndCompletionGuardAreExactComplements proves the two
+// guards cannot drift apart or leave a run between them. Both ask
+// inspectRunReportIntakeCoverage the same question, so for every intake shape a
+// run can carry, exactly one of "run.complete accepts it" and "curation admits
+// a supplementary intake for it" holds.
+func TestCurationAdmissionAndCompletionGuardAreExactComplements(t *testing.T) {
+	shapes := [][]IntakeRecord{
+		{},
+		{admissibilityTestIntake("I-0001", "reviewed", "unresolved")},
+		{admissibilityTestIntake("I-0001", "submitted", "unresolved")},
+		{admissibilityTestIntake("I-0001", "reviewed", "non-claim")},
+		{admissibilityTestIntake("I-0001", "submitted", "non-claim")},
+		{admissibilityTestIntake("I-0001", "superseded", "non-claim")},
+		{
+			admissibilityTestIntake("I-0001", "reviewed", "unresolved"),
+			admissibilityTestIntake("I-0002", "submitted", "non-claim"),
+		},
+		{
+			admissibilityTestIntake("I-0001", "superseded", "non-claim"),
+			admissibilityTestIntake("I-0002", "reviewed", "unresolved"),
+		},
+	}
+	for _, intakes := range shapes {
+		returnedGraph, returnedRun := admissibilityTestGraph("returned", intakes...)
+		completable := validateRunReportIsCurated(returnedGraph, returnedRun) == nil
+
+		completedGraph, completedRun := admissibilityTestGraph("completed", intakes...)
+		curatable := validateCurationSourceRunAdmissible(completedGraph, completedRun) == nil
+
+		if completable == curatable {
+			ids := []string{}
+			for _, intake := range intakes {
+				ids = append(ids, intake.ID+"/"+intake.Status)
+			}
+			t.Fatalf("guards overlap or leave a gap for intakes %v: completable=%v curatable=%v",
+				ids, completable, curatable)
+		}
+	}
+}

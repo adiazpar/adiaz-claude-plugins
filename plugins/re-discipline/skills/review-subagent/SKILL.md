@@ -80,10 +80,21 @@ transition through `manager_apply` with expected revisions and an idempotency
 key. A blocked run must identify its blocker and resulting work item. Never
 mutate the frozen report to change its epistemic status.
 
-`returned` is the only state in which a curator intake may be submitted for a
-run, and nothing transitions back to it, so the engine refuses `completed` and
-`blocked` while the run's report has no clean intake. Curate first; the refusal
-names the run, the unresolved spans, and the dispositions that clear them.
+`returned` is the state in which a curator intake may be submitted for a run
+without qualification, and nothing transitions back to it, so the engine
+refuses `completed` and `blocked` while the run's report has no clean intake.
+Curate first; the refusal names the run, the unresolved spans, and the
+dispositions that clear them.
+
+If closure already reports `missing-reviewed-intake` for a run that is
+`completed`, the run was stranded before that guard existed and is repaired,
+not reopened. Submit a further curator intake over the same frozen report with
+every span disposed, then review it. The engine admits a completed run for
+curation only while it is stranded, so this cannot be used on a healthy run,
+and coverage is a union across reviewed intakes: the supplementary intake adds
+the coverage closure needs and changes nothing about the review already
+ratified over the earlier one. If that earlier conclusion is itself wrong, use
+`overturn` - a second intake never retires the first.
 
 Finish by calling `state(mode="resume", campaignId=...)` and present active
 work, unresolved blocks, due deferrals, pending intake, challenges, and next
