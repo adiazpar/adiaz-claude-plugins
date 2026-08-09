@@ -202,14 +202,33 @@ and every text field - must match exactly, and a mismatch names each differing
 field with both values.
 
 `run.complete` refuses `completed` and `blocked` for a returned run whose
-report has no clean curator intake. `returned` is the only state in which
-`curation_submit` accepts an intake for a run and no transition leads back to
-it, while closure requires a reviewed intake for every non-aborted run with a
-report and disregards any source that still carries an `unresolved` span.
-Completing early would therefore fix an unsatisfiable closure gate into the
-campaign, so the refusal happens at the transition that can still be repaired
-and names the run, the unresolved spans, and the dispositions that clear them.
-`invalidated` remains available as the manager's explicit void path.
+report has no clean curator intake. `returned` is the state in which
+`curation_submit` accepts an intake for a run unconditionally, and no
+transition leads back to it, while closure requires a reviewed intake for every
+non-aborted run with a report and disregards any source that still carries an
+`unresolved` span. Completing early would therefore fix an unsatisfiable
+closure gate into the campaign, so the refusal happens at the transition that
+can still be repaired and names the run, the unresolved spans, and the
+dispositions that clear them. `invalidated` remains available as the manager's
+explicit void path.
+
+`curation_submit` also accepts a source run that is already `completed`, but
+only while that run is stranded: only when no non-superseded intake covers its
+report with every span disposed. This is the exact complement of the
+`run.complete` guard above - no run can satisfy both - and it exists for
+campaigns stranded before that guard did. A completed run whose report already
+carries a clean intake is refused, whether that intake is reviewed (nothing to
+repair; use `overturn` if a conclusion is wrong) or still pending review
+(review it rather than adding a second repair). Every other run state is
+refused, and each refusal names the run, its state, and the remedy.
+
+The supplementary intake is purely additive. Reviewed report coverage is a
+union across reviewed intakes with unresolved spans computed per intake, so a
+second clean intake moves the run to `reviewed-intake` without altering,
+superseding, or invalidating the review already ratified over the dirty one.
+That second intake carries its own manager review, so the added coverage is
+ratified rather than asserted, and retiring a prior conclusion is still
+`overturn`'s job.
 
 ## Cache and context preservation
 

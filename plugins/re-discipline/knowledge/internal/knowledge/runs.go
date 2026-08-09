@@ -208,8 +208,8 @@ func validateAppliedRunReturn(previous CampaignGraph, request StateTransactionRe
 // validateAppliedRunCompletion refuses to move a run out of `returned` while
 // its frozen report has no clean curator intake.
 //
-// `returned` is the only run state in which curation_submit will accept an
-// intake over the run's report (validateCurationGraphBindings requires it), and
+// `returned` is the state in which curation_submit accepts an intake over a
+// run's report unconditionally (validateCurationSourceRunAdmissible), and
 // runTransitions has no edge back: completed and blocked reach only themselves
 // and invalidated. ComputeClosureCoverage, meanwhile, classifies every
 // non-aborted run with a report by reviewedReportCoverage, which ignores any
@@ -245,11 +245,35 @@ func validateAppliedRunCompletion(previous CampaignGraph, writes []preparedState
 	return nil
 }
 
-func validateRunReportIsCurated(previous CampaignGraph, run RunRecord) error {
-	sourceKey := coverageSourceKey(run.Report.Path, run.Report.SHA256)
+// runReportIntakeCoverage is the answer to one question asked by two guards
+// that must never disagree: which non-superseded curator intakes cover this
+// run's frozen report, and which of them still leave one of its spans
+// `unresolved`.
+//
+// run.complete refuses to leave `returned` unless Clean is non-empty
+// (validateRunReportIsCurated). curation_submit admits a supplementary intake
+// over an already-completed run only while Clean is empty
+// (validateCurationSourceRunAdmissible). The two predicates are exact
+// complements, so they share this one computation rather than each restating
+// it: no run can ever satisfy both, and none can fall between them.
+type runReportIntakeCoverage struct {
+	// Clean holds the sorted IDs of intakes that cover the report and dispose
+	// every one of its spans.
+	Clean []string
+	// Statuses maps every covering intake ID to its record status, so a refusal
+	// can say whether a clean intake is already reviewed or still pending.
+	Statuses map[string]string
+	// Dirty holds one rendered phrase per covering intake that still carries
+	// unresolved spans, naming the exact spans.
+	Dirty []string
+}
+
+func inspectRunReportIntakeCoverage(graph CampaignGraph, report FileHandle) runReportIntakeCoverage {
+	sourceKey := coverageSourceKey(report.Path, report.SHA256)
+	result := runReportIntakeCoverage{Statuses: map[string]string{}}
 	covering := []string{}
 	unresolvedByIntake := map[string][]string{}
-	for _, intake := range previous.Intakes {
+	for _, intake := range graph.Intakes {
 		if intake.Status == "superseded" {
 			continue
 		}
@@ -264,6 +288,7 @@ func validateRunReportIsCurated(previous CampaignGraph, run RunRecord) error {
 			continue
 		}
 		covering = append(covering, intake.ID)
+		result.Statuses[intake.ID] = intake.Status
 		for _, entry := range intake.Coverage {
 			if entry.Disposition != "unresolved" ||
 				coverageSourceKey(entry.SourcePath, entry.SourceSHA256) != sourceKey {
@@ -274,24 +299,28 @@ func validateRunReportIsCurated(previous CampaignGraph, run RunRecord) error {
 		}
 	}
 	sort.Strings(covering)
-	clean := []string{}
-	dirty := []string{}
 	for _, intakeID := range covering {
 		spans := unresolvedByIntake[intakeID]
 		if len(spans) == 0 {
-			clean = append(clean, intakeID)
+			result.Clean = append(result.Clean, intakeID)
 			continue
 		}
 		sort.Strings(spans)
-		dirty = append(dirty, fmt.Sprintf("%s leaves %d span(s) unresolved (%s)",
+		result.Dirty = append(result.Dirty, fmt.Sprintf("%s leaves %d span(s) unresolved (%s)",
 			intakeID, len(spans), strings.Join(spans, ", ")))
 	}
-	if len(clean) > 0 {
+	return result
+}
+
+func validateRunReportIsCurated(previous CampaignGraph, run RunRecord) error {
+	coverage := inspectRunReportIntakeCoverage(previous, *run.Report)
+	if len(coverage.Clean) > 0 {
 		return nil
 	}
 	cause := fmt.Sprintf("no curator intake covers its report %s", run.Report.Path)
-	if len(dirty) > 0 {
-		cause = "its only curator intake(s) still carry unresolved coverage: " + strings.Join(dirty, "; ")
+	if len(coverage.Dirty) > 0 {
+		cause = "its only curator intake(s) still carry unresolved coverage: " +
+			strings.Join(coverage.Dirty, "; ")
 	}
 	return fmt.Errorf(
 		"run %s cannot leave returned as %s: %s. Closure classifies every non-aborted run by "+

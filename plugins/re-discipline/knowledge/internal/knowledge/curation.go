@@ -246,12 +246,13 @@ func validateCandidateCoverageEvidence(packet CurationPacket) error {
 
 // validateCurationGraphBindings resolves every intake source to one canonical
 // run report and binds candidate evidence to the exact run that returned it.
-// requireReturned is true at curator submission and false when validating
+// atSubmission is true at curator submission, where the source run's state
+// gates whether an intake may be written at all, and false when validating
 // durable state after the source run has advanced to a terminal status.
 func validateCurationGraphBindings(
 	graph CampaignGraph,
 	packet CurationPacket,
-	requireReturned bool,
+	atSubmission bool,
 ) (map[string]string, error) {
 	if graph.Campaign == nil {
 		return nil, errors.New("curation source binding requires a campaign")
@@ -276,8 +277,10 @@ func validateCurationGraphBindings(
 		if source.Path != expectedPath {
 			return nil, fmt.Errorf("intake source %s is not canonical report path %s", source.Path, expectedPath)
 		}
-		if requireReturned && run.Status != "returned" {
-			return nil, fmt.Errorf("intake source run %s must be returned before curation", run.ID)
+		if atSubmission {
+			if err := validateCurationSourceRunAdmissible(graph, run); err != nil {
+				return nil, err
+			}
 		}
 		bindings[key] = run.ID
 	}
@@ -332,6 +335,102 @@ func validateCurationGraphBindings(
 		}
 	}
 	return bindings, nil
+}
+
+// validateCurationSourceRunAdmissible decides whether a curator may write a new
+// intake over one source run's frozen report.
+//
+// `returned` is the ordinary case and keeps its historical behaviour exactly:
+// the run has just come back, its report is frozen, and nothing has been
+// concluded about it yet.
+//
+// A `completed` run is admitted only while it is genuinely stranded. Closure
+// classifies every non-aborted run with a report by whether a reviewed curator
+// intake covers that report with no `unresolved` span (reviewedReportCoverage),
+// and `completed` has no transition back to `returned`. A run completed over an
+// intake that still carried an unresolved span therefore fixes
+// "missing-reviewed-intake" into the campaign with no way to clear it: curation
+// refused the run, review could not create an intake, and no manager override
+// seeds SourceRunCoverage. validateAppliedRunCompletion now refuses that
+// completion, but it cannot repair a campaign that was stranded before it
+// existed, and this is the only remaining route to a clean intake for those
+// runs.
+//
+// The admission is the exact complement of that completion guard: both ask
+// inspectRunReportIntakeCoverage the same question, and a completed run is
+// admitted here precisely when it could not have passed there. A completed run
+// whose report already carries a clean, non-superseded intake is still refused,
+// so this cannot be used to pile supplementary intakes onto healthy runs, nor
+// to add a second repair while one is already pending review. Every other run
+// state stays refused.
+//
+// A supplementary intake is purely additive. reviewedReportCoverage unions the
+// clean sources of every reviewed intake with no supersession or uniqueness
+// filter and computes unresolved spans per intake, so the new intake flips this
+// run to `reviewed-intake` without altering, superseding, or invalidating the
+// ratified review already recorded over the dirty one. Retiring a prior
+// conclusion remains the business of overturn.
+func validateCurationSourceRunAdmissible(graph CampaignGraph, run RunRecord) error {
+	if run.Status == "returned" {
+		return nil
+	}
+	if run.Status != "completed" || run.Report == nil {
+		return fmt.Errorf(
+			"intake source run %s is %s and cannot be curated: curation accepts a returned run, "+
+				"and a completed run only while its frozen report still has no clean curator intake "+
+				"for closure to count. Remedy: %s",
+			run.ID, run.Status, curationSourceRunRemedy(run))
+	}
+	coverage := inspectRunReportIntakeCoverage(graph, *run.Report)
+	if len(coverage.Clean) == 0 {
+		// Genuinely stranded: completed, and closure cannot be satisfied for
+		// this report by any intake that exists.
+		return nil
+	}
+	remedy := fmt.Sprintf(
+		"nothing needs repair here; if a prior conclusion over %s is wrong, overturn it rather than "+
+			"curating the run again", run.Report.Path)
+	pending := []string{}
+	for _, intakeID := range coverage.Clean {
+		if coverage.Statuses[intakeID] != "reviewed" {
+			pending = append(pending, fmt.Sprintf("%s (%s)", intakeID, coverage.Statuses[intakeID]))
+		}
+	}
+	if len(pending) == len(coverage.Clean) {
+		remedy = "review the clean intake that already covers it (" + strings.Join(pending, ", ") +
+			") instead of submitting another"
+	}
+	dirty := ""
+	if len(coverage.Dirty) > 0 {
+		dirty = fmt.Sprintf(" (%s, but that does not strand the run while a clean intake exists)",
+			strings.Join(coverage.Dirty, "; "))
+	}
+	return fmt.Errorf(
+		"intake source run %s is completed and its report %s is already covered by clean curator "+
+			"intake(s) %s%s, so it is not stranded: a completed run may be curated only to supply the "+
+			"clean coverage closure requires and cannot otherwise obtain. Remedy: %s",
+		run.ID, run.Report.Path, strings.Join(coverage.Clean, ", "), dirty, remedy)
+}
+
+func curationSourceRunRemedy(run RunRecord) string {
+	if run.Report == nil {
+		// Closure calls such a run `missing-report`, not
+		// `missing-reviewed-intake`; no intake can dispose spans of a report
+		// that was never frozen.
+		return "this run has no frozen report, so no intake can cover it; closure needs the report " +
+			"itself, not curation"
+	}
+	switch run.Status {
+	case "prepared", "running":
+		return "return the run first, so its report is frozen, then curate it"
+	case "blocked", "invalidated":
+		return "a run in this state carries no conclusion to repair; reopen the work item and " +
+			"delegate a fresh run instead"
+	case "aborted":
+		return "an aborted run is exempt from closure coverage and needs no intake"
+	default:
+		return "curate the run while it is returned"
+	}
 }
 
 // ValidateManagerReview binds an immutable manager receipt to one intake
