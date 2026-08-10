@@ -699,3 +699,65 @@ A release is ready only when all of the following pass:
 
 The repository workflow performs these checks without model calls, network
 model downloads, or access to a developer's native memory stores.
+
+## Cutting a release: the order is not optional
+
+```
+1. bump RuntimeVersion in knowledge/internal/knowledge/types.go
+2. .github/scripts/re-discipline-sync-version.py
+3. packager --output bin
+4. bin/re-discipline-knowledge benchmark --asset-root . --mode full --update-declared
+5. packager --output bin          # again
+6. packager --output bin --verify
+7. go test ./...                  # only now will it pass
+```
+
+Two circular-looking constraints force that sequence, and each announces itself
+as a failure that does not mention ordering:
+
+- **Step 4 needs step 3.** `--update-declared` runs the *packaged* binary, and a
+  binary built at the old version refuses the freshly synced manifest with
+  `model manifest runtime version mismatch`. The package has to be rebuilt at the
+  new version before the evidence can be re-measured.
+- **Step 5 needs step 4.** The declared profile evidence embeds a runtime
+  fingerprint derived from `RuntimeVersion`, and the shipped binaries embed the
+  evidence. Package before re-measuring and you ship binaries whose embedded
+  evidence is already stale; the Go suite then fails with `embedded packaged
+  profile evidence for hybrid-no-rerank-v1 is stale`.
+
+Both refusals are correct and neither names the ordering as the cause, so a
+maintainer has to already know the sequence to read them. That is why it is
+written here rather than learned twice.
+
+## What must not change
+
+These hold regardless of what a change is trying to make cheaper or easier.
+Every one of them exists because its absence has cost something real:
+
+- Compare-and-swap on the state head and on every record digest.
+- The event journal and its digest chain.
+- Truth projected only through closure.
+- Curators propose, managers ratify, drafters do neither.
+- Refusal over silent corruption.
+
+A saving that costs one of these is not a saving. When the two conflict, refuse
+and say why — an engine that quietly does the wrong thing is worth less than one
+that loudly does nothing.
+
+Two failure shapes have now bitten this engine more than once and are worth
+naming, because both were invisible to a large suite of individually correct
+rules:
+
+1. **A capability no caller can name is not a capability.** An action wired
+   through authorization, record kinds, and obligations but missing from the
+   exposed enum is unreachable. `TestManagerApplyExposesEveryEngineAction` and
+   `TestClosureApplyExposesEveryEngineAction` bind the surface to the engine.
+2. **A rule written in one of the two places that need it will drift.** Closure
+   coverage and the normalization queue each had their own answer to whether a
+   report can carry a claim, and closure demanded intakes for exactly the reports
+   the queue would never offer an item for. Domain predicates get one named
+   definition — `runIsClaimSource` is the model — and a test that fails when two
+   surfaces disagree.
+
+Ask of every new gate: *can satisfying it create new work that trips it again?*
+The closure convergence test exists because the answer was once yes.
