@@ -472,7 +472,16 @@ func findingClosureDisposition(finding FindingRecord) string {
 	if finding.Projection == "none" || finding.Projection == "campaign" {
 		return "destination-required"
 	}
-	if finding.Projection == "truth" && (finding.EvidenceGrade != "direct" || finding.Validity != "current" ||
+	// These are the preconditions prepareClosureFindingTransitions enforces at
+	// the project stage, and they have to be the same set. Coverage runs first,
+	// so a stricter rule here is not a stricter policy - it is a deadlock.
+	// Requiring "current" was exactly that: only a closure action may make a
+	// finding current, the only closure action that does so is the project
+	// stage, and coverage refuses to advance far enough to reach it. A campaign
+	// with any truth-bound finding could never close, because the gate demanded
+	// the state that passing the gate produces.
+	if finding.Projection == "truth" && (finding.EvidenceGrade != "direct" ||
+		!validOne(finding.Validity, "provisional", "current") ||
 		len(finding.Relations.Contradicts) != 0) {
 		return "truth-gate-failed"
 	}

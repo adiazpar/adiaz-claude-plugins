@@ -141,6 +141,53 @@ func TestClosurePlanAndCoverageAreCompleteAndDigestBound(t *testing.T) {
 	}
 }
 
+// The fixture above hands coverage a finding that is already current, which is a
+// state no campaign can actually be in before it closes: only a closure action
+// may make a finding current, and the only one that does is the project stage.
+// So the realistic input is the provisional one, and coverage has to pass it
+// through. A gate demanding "current" here deadlocks every campaign that has a
+// truth-bound finding - it asks for the state that clearing the gate produces.
+func TestClosureCoverageAcceptsAProvisionalTruthCandidate(t *testing.T) {
+	graph := closureTestGraph(t)
+	finding := graph.Findings["F-0001"]
+	finding.Validity, finding.Digest = "provisional", ""
+	finding.Digest, _ = CanonicalDigest(finding)
+	graph.Findings[finding.ID] = finding
+	coverage, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coverage.FindingCoverage["F-0001"] != "truth" {
+		t.Fatalf("provisional truth candidate was gated as %q", coverage.FindingCoverage["F-0001"])
+	}
+	if len(coverage.MissingDecisions) != 0 {
+		t.Fatalf("provisional truth candidate blocked closure: %#v", coverage.MissingDecisions)
+	}
+}
+
+// The other half of the same rule: widening the gate to provisional must not
+// wave through a validity that truth promotion would later refuse, or coverage
+// would report a clean campaign and the project stage would fail the archive.
+func TestClosureCoverageStillGatesAnUnpromotableTruthCandidate(t *testing.T) {
+	// "superseded" is left out deliberately: the graph refuses one without a
+	// replacement pointing back, so it cannot reach this gate unaccompanied.
+	for _, validity := range []string{"challenged", "historical"} {
+		graph := closureTestGraph(t)
+		finding := graph.Findings["F-0001"]
+		finding.Validity, finding.Digest = validity, ""
+		finding.Digest, _ = CanonicalDigest(finding)
+		graph.Findings[finding.ID] = finding
+		coverage, err := ComputeClosureCoverage(graph, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if coverage.FindingCoverage["F-0001"] != "truth-gate-failed" {
+			t.Fatalf("%s truth candidate was accepted as %q",
+				validity, coverage.FindingCoverage["F-0001"])
+		}
+	}
+}
+
 func TestClosureCoverageSurfacesMissingReviewAndConflict(t *testing.T) {
 	graph := closureTestGraph(t)
 	intake := graph.Intakes["I-0001"]
