@@ -263,6 +263,12 @@ func TestClosureReopenDiscardsOnlyDerivedPrivateStage(t *testing.T) {
 		result.Job.ArchiveDigest != "" || len(result.Job.ProjectionDigests) != 0 {
 		t.Fatalf("reopened closure retained derived projection state: %+v", result.Job)
 	}
+	// Reopen ends an attempt; it does not begin one. Only closure.restart may move
+	// the counter, and it is what distinguishes a re-plan from a resumption in the
+	// archived event journal.
+	if closureAttempt(*result.Job) != closureAttempt(*graph.ClosureJob) {
+		t.Fatalf("reopen moved the closure attempt counter: %+v", result.Job)
+	}
 	if _, err := os.Stat(stageRoot); !os.IsNotExist(err) {
 		t.Fatalf("reopen did not discard derived private staging: %v", err)
 	}
@@ -608,5 +614,375 @@ func TestClosureProjectPreparesTruthFindingPromotionWithoutPublishingIt(t *testi
 	}
 	if err := ValidateFindingTransition(&document.Record, promoted, "closure.project", "manager"); err != nil {
 		t.Fatalf("prepared truth transition violates the canonical state machine: %v", err)
+	}
+}
+
+// reopenClosureFixture takes the archive-stage fixture all the way to a reopened
+// closure job on an open campaign - the exact state that used to be terminal.
+func reopenClosureFixture(
+	t *testing.T, store *StateStore, service *Service, timestamp, key string,
+) CampaignGraph {
+	t.Helper()
+	graph, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClosureApply(context.Background(), ClosureApplyRequest{
+		Action: "reopen", Actor: "manager", CampaignSlug: graph.Campaign.Slug,
+		CampaignID: graph.Campaign.ID, CorrelationID: key, IdempotencyKey: key,
+		Rationale: "remediate before re-entering closure", Timestamp: timestamp,
+		ExpectedHeadRevision: head.Revision, ExpectedHeadDigest: head.Digest,
+		ExpectedRecordDigests: map[string]string{
+			graph.Campaign.ID:   graph.Campaign.Digest,
+			graph.ClosureJob.ID: graph.ClosureJob.Digest,
+		},
+	}); err != nil {
+		t.Fatalf("reopen closure: %v", err)
+	}
+	reopened, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Campaign.Status != "open" || reopened.ClosureJob.Status != "reopened" {
+		t.Fatalf("fixture did not reach the stranded state: %+v", reopened.ClosureJob)
+	}
+	return reopened
+}
+
+func closureRestartRequest(
+	t *testing.T, store *StateStore, graph CampaignGraph, timestamp, key string,
+) ClosureApplyRequest {
+	t.Helper()
+	head, err := store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ClosureApplyRequest{
+		Action: "restart", Actor: "manager", CampaignSlug: graph.Campaign.Slug,
+		CampaignID: graph.Campaign.ID, CorrelationID: key, IdempotencyKey: key,
+		Rationale: "re-enter closure after remediation", Timestamp: timestamp,
+		ClosureJobID:         graph.ClosureJob.ID,
+		ExpectedHeadRevision: head.Revision, ExpectedHeadDigest: head.Digest,
+		ExpectedClosurePlanRevision: graph.ClosurePlan.CampaignRevision,
+		ExpectedRecordDigests: map[string]string{
+			graph.Campaign.ID:   graph.Campaign.Digest,
+			graph.ClosureJob.ID: graph.ClosureJob.Digest,
+			"closure-plan":      graph.ClosurePlan.Digest,
+			"closure-coverage":  graph.ClosureCoverage.Digest,
+		},
+		ExpectedArtifactDigests: map[string]string{},
+		FileRetention:           map[string]string{}, ProjectionDestinations: map[string]string{},
+	}
+}
+
+// The headline. A campaign that took the documented remedy for a closure refusal
+// used to have no supported way back in: the reopened job stays on disk, start
+// refuses while it is there, and no canonical record has a delete path. Prove the
+// second door exists, that it re-plans against the campaign as it stands after
+// remediation, and that what comes out of it is an ordinary usable attempt.
+func TestClosureReopenIsNoLongerAOneWayDoor(t *testing.T) {
+	store, _, service, _ := prepareClosureArchiveFixture(t)
+	graph := reopenClosureFixture(t, store, service, "2026-08-02T18:11:00Z", "closure-reopen")
+	priorFreeze := graph.ClosureJob.FrozenCampaignRevision
+	priorPlanDigest := graph.ClosurePlan.Digest
+
+	head, err := store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	remediatedAt, err := time.Parse(time.RFC3339, "2026-08-02T18:12:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Now = func() time.Time { return remediatedAt }
+	if _, err := store.Apply(context.Background(),
+		stateTestCreateWorkRequest(head, "W-0002", "corr-remediate", "idem-remediate")); err != nil {
+		t.Fatalf("remediate the reopened campaign: %v", err)
+	}
+	graph, err = store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.ClosureApply(context.Background(),
+		closureRestartRequest(t, store, graph, "2026-08-02T18:13:00Z", "closure-restart"))
+	if err != nil {
+		t.Fatalf("restart closure: %v", err)
+	}
+	if result.Job == nil || result.Job.Stage != "inventory" || result.Job.Status != "running" ||
+		result.Job.Attempt != 2 {
+		t.Fatalf("restart did not re-enter as a second running attempt: %+v", result.Job)
+	}
+	if result.Job.FrozenCampaignRevision <= priorFreeze {
+		t.Fatalf("restart did not move the campaign freeze forward: %d from %d",
+			result.Job.FrozenCampaignRevision, priorFreeze)
+	}
+	if result.Job.StagingDigest != "" || result.Job.ArchiveDigest != "" ||
+		len(result.Job.TruthDigests) != 0 || len(result.Job.ProjectionDigests) != 0 {
+		t.Fatalf("restart carried derived proof from the abandoned attempt: %+v", result.Job)
+	}
+
+	restarted, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.Campaign.Status != "closing" || restarted.ClosureReceipt != nil {
+		t.Fatalf("restart did not return the campaign to closing: %+v", restarted.Campaign)
+	}
+	if restarted.ClosurePlan.Digest == priorPlanDigest ||
+		restarted.ClosurePlan.CampaignRevision != restarted.ClosureJob.FrozenCampaignRevision {
+		t.Fatalf("restart did not replace the closure plan: %+v", restarted.ClosurePlan)
+	}
+	if !containsString(restarted.ClosurePlan.RequiredWorkItemIDs, "W-0002") {
+		t.Fatalf("re-planned closure did not account for remediation work: %+v", restarted.ClosurePlan)
+	}
+
+	head, err = store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	advanced, err := service.ClosureApply(context.Background(), ClosureApplyRequest{
+		Action: "advance", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: "closure-restart-coverage", IdempotencyKey: "closure-restart-coverage",
+		Rationale: "advance the restarted attempt", Timestamp: "2026-08-02T18:14:00Z",
+		TargetStage:          "coverage",
+		ExpectedHeadRevision: head.Revision, ExpectedHeadDigest: head.Digest,
+		ExpectedRecordDigests: map[string]string{
+			restarted.ClosureJob.ID: restarted.ClosureJob.Digest,
+			"closure-coverage":      restarted.ClosureCoverage.Digest,
+			restarted.Campaign.ID:   restarted.Campaign.Digest,
+		},
+		ExpectedArtifactDigests: map[string]string{},
+		FileRetention:           map[string]string{}, ProjectionDestinations: map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("restarted closure was not advanceable: %v", err)
+	}
+	if advanced.Job == nil || advanced.Job.Stage != "coverage" || advanced.Job.Attempt != 2 {
+		t.Fatalf("advancing a restarted attempt lost its stage or attempt: %+v", advanced.Job)
+	}
+}
+
+// Every refusal here has to leave the campaign exactly where it was. A partially
+// applied restart would be worse than the dead end it replaces: the job would be
+// running against a plan that never landed.
+func TestClosureRestartRefusesWithoutExactPlanAndJobCompareAndSwap(t *testing.T) {
+	tests := []struct {
+		name   string
+		damage func(request *ClosureApplyRequest)
+	}{
+		{name: "stale expected plan revision", damage: func(request *ClosureApplyRequest) {
+			request.ExpectedClosurePlanRevision--
+		}},
+		{name: "wrong plan digest", damage: func(request *ClosureApplyRequest) {
+			request.ExpectedRecordDigests["closure-plan"] = stateTestDigest("9")
+		}},
+		{name: "wrong job digest", damage: func(request *ClosureApplyRequest) {
+			request.ExpectedRecordDigests[request.ClosureJobID] = stateTestDigest("9")
+		}},
+		{name: "wrong coverage digest", damage: func(request *ClosureApplyRequest) {
+			request.ExpectedRecordDigests["closure-coverage"] = stateTestDigest("9")
+		}},
+		{name: "wrong closure job id", damage: func(request *ClosureApplyRequest) {
+			request.ClosureJobID = "closure-some-other-job"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store, _, service, _ := prepareClosureArchiveFixture(t)
+			graph := reopenClosureFixture(t, store, service, "2026-08-02T18:11:00Z", "closure-reopen")
+			request := closureRestartRequest(t, store, graph, "2026-08-02T18:13:00Z", "closure-restart")
+			test.damage(&request)
+			if _, err := service.ClosureApply(context.Background(), request); err == nil {
+				t.Fatal("closure restart applied without an exact compare-and-swap")
+			}
+			after, err := store.LoadCampaignGraph("C-TEST")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Campaign.Status != "open" || after.ClosureJob.Status != "reopened" ||
+				after.ClosureJob.Revision != graph.ClosureJob.Revision ||
+				after.ClosurePlan.Digest != graph.ClosurePlan.Digest {
+				t.Fatalf("a refused restart moved canonical state: campaign=%s job=%+v",
+					after.Campaign.Status, after.ClosureJob)
+			}
+		})
+	}
+}
+
+// Restart ends one attempt and begins another; it may never discard a live one.
+// `reopened` is the only status it accepts, and reopen is the only door into it.
+func TestClosureRestartRefusesOnALiveOrFinalizedJob(t *testing.T) {
+	store, _, service, finalize := prepareClosureArchiveFixture(t)
+	live, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClosureApply(context.Background(),
+		closureRestartRequest(t, store, live, "2026-08-02T18:11:00Z", "closure-restart")); err == nil {
+		t.Fatal("closure restart discarded a live archive-stage attempt")
+	}
+	unchanged, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.ClosureJob.Digest != live.ClosureJob.Digest ||
+		unchanged.Campaign.Status != "closing" {
+		t.Fatalf("a refused restart disturbed a live closure attempt: %+v", unchanged.ClosureJob)
+	}
+
+	if _, err := service.ClosureApply(context.Background(), finalize); err != nil {
+		t.Fatalf("finalize closure: %v", err)
+	}
+	// `closed` is absorbing in campaignTransitions and finalize retires the whole
+	// active tree, so a finalized closure is unreachable by construction rather
+	// than by a status check restart would have to remember to perform.
+	if _, err := service.ClosureApply(context.Background(), ClosureApplyRequest{
+		Action: "restart", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: "closure-restart", IdempotencyKey: "closure-restart-final",
+		Rationale: "attempt to resurrect a finalized closure", Timestamp: "2026-08-02T18:20:00Z",
+		ClosureJobID: "closure-test", ExpectedHeadRevision: 1,
+		ExpectedHeadDigest: stateTestDigest("9"),
+	}); err == nil {
+		t.Fatal("closure restart resurrected a finalized campaign")
+	}
+}
+
+// Risk 2, and the single most important detail in this change.
+// applyClosureActiveFileInventory hard-errors on a disposition naming a missing
+// file. Inheriting such a row blindly would make every future restart of that
+// campaign refuse, with no supported way to withdraw it - a worse trap than the
+// one restart exists to remove. Declared rows still fail closed; only inherited
+// ones are pruned.
+func TestClosureRestartCarriesManagerDispositionsAndPrunesVanishedActiveFiles(t *testing.T) {
+	store, root, service, _ := prepareClosureArchiveFixture(t)
+	graph := reopenClosureFixture(t, store, service, "2026-08-02T18:11:00Z", "closure-reopen")
+
+	survivor := filepath.Join(root, "active", "test-campaign", "surviving-notes.md")
+	vanishing := filepath.Join(root, "active", "test-campaign", "vanishing-notes.md")
+	for _, absolute := range []string{survivor, vanishing} {
+		if err := os.WriteFile(absolute, []byte("untyped manager material\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	declared := closureRestartRequest(t, store, graph, "2026-08-02T18:13:00Z", "closure-restart")
+	declared.ActiveFileDispositions = map[string]string{
+		"surviving-notes.md": "retain", "vanishing-notes.md": "ephemeral",
+	}
+	first, err := service.ClosureApply(context.Background(), declared)
+	if err != nil {
+		t.Fatalf("restart with declared dispositions: %v", err)
+	}
+	if first.Coverage.ActiveFileDispositions["surviving-notes.md"] != "retain" ||
+		first.Coverage.ActiveFileDispositions["vanishing-notes.md"] != "ephemeral" ||
+		len(first.Coverage.MissingDecisions) != 0 {
+		t.Fatalf("declared dispositions did not type the unknown files: %+v", first.Coverage)
+	}
+
+	graph = reopenClosureFixture(t, store, service, "2026-08-02T18:15:00Z", "closure-reopen-again")
+	if err := os.Remove(vanishing); err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.ClosureApply(context.Background(),
+		closureRestartRequest(t, store, graph, "2026-08-02T18:17:00Z", "closure-restart-again"))
+	if err != nil {
+		t.Fatalf("restart refused because an inherited disposition named a deleted file: %v", err)
+	}
+	if second.Coverage.ActiveFileDispositions["surviving-notes.md"] != "retain" {
+		t.Fatalf("restart did not inherit the manager disposition for a file that still exists: %+v",
+			second.Coverage.ActiveFileDispositions)
+	}
+	if _, present := second.Coverage.ActiveFileDispositions["vanishing-notes.md"]; present {
+		t.Fatalf("restart inherited a disposition for a file that no longer exists: %+v",
+			second.Coverage.ActiveFileDispositions)
+	}
+	if len(second.Coverage.MissingDecisions) != 0 {
+		t.Fatalf("inheritance left the restarted attempt blocked: %+v", second.Coverage.MissingDecisions)
+	}
+	if second.Job.Attempt != 3 {
+		t.Fatalf("the second restart did not record a third attempt: %+v", second.Job)
+	}
+
+	// A declared row still fails closed. Inheritance is forgiving because the
+	// manager cannot withdraw a carried row; a request is the caller's own
+	// assertion in this transaction and must be exact.
+	graph = reopenClosureFixture(t, store, service, "2026-08-02T18:19:00Z", "closure-reopen-third")
+	bogus := closureRestartRequest(t, store, graph, "2026-08-02T18:21:00Z", "closure-restart-third")
+	bogus.ActiveFileDispositions = map[string]string{"vanishing-notes.md": "ephemeral"}
+	if _, err := service.ClosureApply(context.Background(), bogus); err == nil ||
+		!strings.Contains(err.Error(), "names a missing file") {
+		t.Fatalf("a declared disposition for a missing file was accepted: %v", err)
+	}
+}
+
+// A restarted job keeps its ID and therefore its staging key. Reopen sweeps the
+// private stage, but only best-effort after its commit, so a crash in that window
+// leaves the previous attempt's content-addressed objects sitting exactly where
+// the new attempt will write. Sweep again.
+func TestClosureRestartDiscardsStalePrivateStaging(t *testing.T) {
+	store, _, service, _ := prepareClosureArchiveFixture(t)
+	graph := reopenClosureFixture(t, store, service, "2026-08-02T18:11:00Z", "closure-reopen")
+	stageRoot := closureStagingRoot(service.Boundary, graph.Campaign.ID, graph.ClosureJob.ID)
+	if err := os.MkdirAll(filepath.Join(stageRoot, "objects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(stageRoot, "objects", "stale"), []byte("abandoned attempt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClosureApply(context.Background(),
+		closureRestartRequest(t, store, graph, "2026-08-02T18:13:00Z", "closure-restart")); err != nil {
+		t.Fatalf("restart closure: %v", err)
+	}
+	if _, err := os.Stat(stageRoot); !os.IsNotExist(err) {
+		t.Fatalf("restart reused a stale private stage: %v", err)
+	}
+}
+
+// This defect class is "the engine knew and would not say". The refusal a
+// stranded caller actually hits is start's, so start is where the remedy has to
+// be named.
+func TestClosureStartNamesRestartAsTheRemedy(t *testing.T) {
+	store, _, service, _ := prepareClosureArchiveFixture(t)
+	live, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ClosureApplyRequest{
+		Action: "start", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: "closure-restart-hint", IdempotencyKey: "closure-restart-hint",
+		Rationale: "start closure again", Timestamp: "2026-08-02T18:11:00Z",
+		ClosureJobID:         "closure-test",
+		ArchiveDestination:   "docs/history/campaigns/2026-08-02-test-campaign",
+		ExpectedHeadRevision: head.Revision, ExpectedHeadDigest: head.Digest,
+		ExpectedRecordDigests: map[string]string{live.Campaign.ID: live.Campaign.Digest},
+	}
+	_, err = service.ClosureApply(context.Background(), start)
+	if err == nil || strings.Contains(err.Error(), "restart") {
+		t.Fatalf("a live closure attempt was described as restartable: %v", err)
+	}
+
+	reopenClosureFixture(t, store, service, "2026-08-02T18:12:00Z", "closure-reopen")
+	reloaded, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err = store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	start.ExpectedHeadRevision, start.ExpectedHeadDigest = head.Revision, head.Digest
+	start.ExpectedRecordDigests = map[string]string{reloaded.Campaign.ID: reloaded.Campaign.Digest}
+	_, err = service.ClosureApply(context.Background(), start)
+	if err == nil || !strings.Contains(err.Error(), "\"restart\"") {
+		t.Fatalf("start refused a reopened campaign without naming the remedy: %v", err)
 	}
 }

@@ -25,7 +25,8 @@
     "stagingDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "coverage": {"$ref": "closure-coverage.schema.json"},
     "archiveDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "blockers": {"type": "array", "items": {"type": "string"}}
+    "blockers": {"type": "array", "items": {"type": "string"}},
+    "attempt": {"type": "integer", "minimum": 1}
   },
   "additionalProperties": false
 }

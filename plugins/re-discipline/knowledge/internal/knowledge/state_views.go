@@ -458,8 +458,22 @@ func compileClosureState(store *StateStore, campaignID string, asOf time.Time, v
 			"stage": job.Stage, "status": job.Status,
 			"frozenCampaignRevision": strconv.FormatInt(job.FrozenCampaignRevision, 10),
 			"projectionCount":        strconv.Itoa(len(job.ProjectionFindingIDs)),
+			"attempt":                strconv.FormatInt(closureAttempt(*job), 10),
 		},
 	})
+	if job.Status == "reopened" {
+		// The refusal that stranded campaigns was reachable from closure_apply
+		// action "start"; the caller that hits it reads this view next. Say the door
+		// out loud rather than making it inferable from the action enum.
+		view.Cards = append(view.Cards, ContextCard{
+			SchemaVersion: CampaignSchemaVersion, ID: "closure-restart-available",
+			CardType: "decision", Title: "Closure was reopened",
+			Claim: "Re-enter closure with closure_apply action \"restart\", which re-plans against the " +
+				"current campaign revision. Action \"start\" refuses while this job exists.",
+			SourceClass: "state", Handle: "closure:" + graph.Campaign.ID, ExpansionTokens: 250,
+		})
+		view.Status = "attention"
+	}
 	coverage := graph.ClosureCoverage
 	if coverage == nil {
 		coverage = job.Coverage

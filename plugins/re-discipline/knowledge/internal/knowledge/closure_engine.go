@@ -31,10 +31,24 @@ type ClosureApplyRequest struct {
 	ExpectedRecordDigests    map[string]string `json:"expectedRecordDigests,omitempty"`
 	ExpectedArtifactDigests  map[string]string `json:"expectedArtifactDigests,omitempty"`
 	ExpectedCoverageRevision int64             `json:"expectedCoverageRevision,omitempty"`
-	FileRetention            map[string]string `json:"fileRetention,omitempty"`
-	ActiveFileDispositions   map[string]string `json:"activeFileDispositions,omitempty"`
-	ExportedWorkItemIDs      []string          `json:"exportedWorkItemIds,omitempty"`
-	ProjectionDestinations   map[string]string `json:"projectionDestinations,omitempty"`
+	// ExpectedClosurePlanRevision is the caller's assertion of the campaignRevision
+	// carried by the plan it intends to replace. The digest compare-and-swap on
+	// ExpectedRecordDigests["closure-plan"] already makes the swap safe; this field
+	// exists so a restart cannot be issued by a caller that never read the plan it
+	// is destroying, and so the refusal can name the number found rather than
+	// returning a bare digest mismatch.
+	ExpectedClosurePlanRevision int64             `json:"expectedClosurePlanRevision,omitempty"`
+	FileRetention               map[string]string `json:"fileRetention,omitempty"`
+	ActiveFileDispositions      map[string]string `json:"activeFileDispositions,omitempty"`
+	ExportedWorkItemIDs         []string          `json:"exportedWorkItemIds,omitempty"`
+	ProjectionDestinations      map[string]string `json:"projectionDestinations,omitempty"`
+}
+
+// ClosureActions is the complete closure surface. mcp.go builds closure_apply's
+// action enum from this list; an engine transition that no caller can name is
+// not a capability.
+var ClosureActions = []string{
+	"start", "status", "advance", "reopen", "restart", "verify", "finalize",
 }
 
 type ClosureApplyResult struct {
@@ -54,7 +68,7 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 	if service == nil {
 		return ClosureApplyResult{}, errors.New("service is required")
 	}
-	if !validOne(request.Action, "start", "status", "advance", "reopen", "verify", "finalize") {
+	if !validOne(request.Action, ClosureActions...) {
 		return ClosureApplyResult{}, fmt.Errorf("unsupported closure action %q", request.Action)
 	}
 	if request.Action == "status" {
@@ -100,6 +114,8 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 		return service.advanceClosure(ctx, store, graph, request)
 	case "reopen":
 		return service.reopenClosure(ctx, store, graph, request)
+	case "restart":
+		return service.restartClosure(ctx, store, graph, request)
 	default:
 		return ClosureApplyResult{}, errors.New("unsupported closure transition")
 	}
@@ -111,8 +127,21 @@ func (service *Service) startClosure(
 	graph CampaignGraph,
 	request ClosureApplyRequest,
 ) (ClosureApplyResult, error) {
-	if graph.ClosureJob != nil || !validOne(graph.Campaign.Status, "open", "paused") {
-		return ClosureApplyResult{}, errors.New("closure can start only once on an open or paused campaign")
+	if graph.ClosureJob != nil {
+		// Name the remedy. Before restart existed this refusal was terminal for any
+		// campaign that had reopened: the reopened job stays on disk, start refuses
+		// while it is there, and no canonical record has a delete path. Callers
+		// hand-edited state to escape.
+		if graph.ClosureJob.Status == "reopened" {
+			return ClosureApplyResult{}, errors.New(
+				"this campaign has a reopened closure job; re-enter closure with action \"restart\", " +
+					"which re-plans against the current campaign revision")
+		}
+		return ClosureApplyResult{}, errors.New(
+			"closure has already started on this campaign; advance, verify, finalize, or reopen it")
+	}
+	if !validOne(graph.Campaign.Status, "open", "paused") {
+		return ClosureApplyResult{}, errors.New("closure can start only on an open or paused campaign")
 	}
 	if !correlationIDRE.MatchString(request.ClosureJobID) {
 		return ClosureApplyResult{}, errors.New("closure start requires a stable closureJobId")
@@ -934,6 +963,143 @@ func (service *Service) reopenClosure(
 	return sealClosureApplyResult(result)
 }
 
+// restartClosure re-enters closure after a reopen. It is deliberately modelled on
+// startClosure: nothing about the previous attempt is resumed, the stage returns
+// to `inventory`, and the plan and coverage are recomputed from the campaign as it
+// stands now. It keeps exactly two things from the previous attempt - the closure
+// job's identity, because a campaign has one closure record at one canonical path,
+// and the archive destination, because every durable evidence handle projected at
+// the `project` stage and the whole retired-finalization replay path are written
+// against it.
+func (service *Service) restartClosure(
+	ctx context.Context,
+	store *StateStore,
+	graph CampaignGraph,
+	request ClosureApplyRequest,
+) (ClosureApplyResult, error) {
+	previousJob, previousPlan := graph.ClosureJob, graph.ClosurePlan
+	if previousJob == nil || previousPlan == nil || graph.ClosureCoverage == nil {
+		return ClosureApplyResult{}, errors.New(
+			"closure restart requires the reopened job, plan, and coverage it replaces")
+	}
+	if previousJob.Status != "reopened" || graph.ClosureReceipt != nil ||
+		!validOne(graph.Campaign.Status, "open", "paused") {
+		return ClosureApplyResult{}, errors.New(
+			"closure restart requires a reopened closure job on an open or paused campaign")
+	}
+	if request.ClosureJobID != previousJob.ID {
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure restart must name the exact closure job it re-enters (%s)", previousJob.ID)
+	}
+	// Name the file and the number found. A terse refusal here would simply move
+	// the dead end rather than remove it: a caller who cannot tell which
+	// revision the canonical plan froze has no way to construct a request that
+	// would be accepted.
+	if request.ExpectedClosurePlanRevision != previousPlan.CampaignRevision {
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure restart expected plan campaign revision %d but active/%s/closure/plan.json froze %d",
+			request.ExpectedClosurePlanRevision, request.CampaignSlug, previousPlan.CampaignRevision)
+	}
+	if request.ArchiveDestination != "" &&
+		request.ArchiveDestination != previousJob.ArchiveDestination {
+		return ClosureApplyResult{}, errors.New(
+			"closure restart cannot repoint an existing closure job's archive destination")
+	}
+	if err := validateExportedDefermentIDs(graph, request.ExportedWorkItemIDs); err != nil {
+		return ClosureApplyResult{}, err
+	}
+	plan, err := BuildClosurePlan(graph, previousJob.ArchiveDestination)
+	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	prior, err := service.inheritedClosureCoverage(
+		graph.Campaign.ID, request.CampaignSlug, request, *graph.ClosureCoverage)
+	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	coverage, err := ComputeClosureCoverage(graph, &prior)
+	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	if err := service.applyClosureActiveFileInventory(
+		graph, request.CampaignSlug, prior.ActiveFileDispositions, &coverage,
+	); err != nil {
+		return ClosureApplyResult{}, err
+	}
+
+	campaign := *graph.Campaign
+	campaign.Revision++
+	campaign.UpdatedAt, campaign.UpdatedBy, campaign.CorrelationID, campaign.Digest =
+		request.Timestamp, request.Actor, request.CorrelationID, ""
+	campaign.Status, campaign.ClosingAt, campaign.PausedAt = "closing", request.Timestamp, ""
+
+	job := *previousJob
+	job.Revision++
+	job.UpdatedAt, job.UpdatedBy, job.CorrelationID, job.Digest =
+		request.Timestamp, request.Actor, request.CorrelationID, ""
+	job.Stage, job.Status = "inventory", "running"
+	job.Attempt = closureAttempt(*previousJob) + 1
+	job.FrozenCampaignRevision = plan.CampaignRevision
+	job.ProjectionFindingIDs = append([]string(nil), plan.ProjectionFindingIDs...)
+	job.Coverage = &coverage
+	job.TruthDigests, job.ProjectionDigests = map[string]string{}, map[string]string{}
+	job.StagingDigest, job.ArchiveDigest = "", ""
+	job.Blockers = closureCoverageBlockers(coverage)
+	if err := sealClosureJobForComparison(&job); err != nil {
+		return ClosureApplyResult{}, err
+	}
+	if err := ValidateClosureRestart(*previousJob, job); err != nil {
+		return ClosureApplyResult{}, err
+	}
+
+	coverageRevision := request.ExpectedCoverageRevision
+	if coverageRevision < 1 {
+		coverageRevision = 1
+	}
+	writes, err := closureWrites(request.CampaignSlug, request.CorrelationID, request.ExpectedRecordDigests,
+		[]closureWriteSpec{
+			{value: campaign, expectedRevision: graph.Campaign.Revision,
+				expectedDigest: request.ExpectedRecordDigests[graph.Campaign.ID]},
+			// A create spec is expectedRevision 0, and the journal errors with
+			// "record already exists" for one. Every record a restart touches is a
+			// true update, so every one of the four carries its exact prior
+			// revision and digest and closureWrites refuses a missing digest.
+			{value: plan, expectedRevision: previousPlan.CampaignRevision,
+				expectedDigest: request.ExpectedRecordDigests["closure-plan"]},
+			{value: job, expectedRevision: previousJob.Revision,
+				expectedDigest: request.ExpectedRecordDigests[previousJob.ID]},
+			{value: coverage, expectedRevision: coverageRevision,
+				expectedDigest: request.ExpectedRecordDigests["closure-coverage"]},
+		})
+	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	if _, err := service.queueClosureNormalization(graph, request.Timestamp); err != nil {
+		return ClosureApplyResult{}, fmt.Errorf("queue closure normalization: %w", err)
+	}
+	receipt, err := store.Apply(ctx, StateTransactionRequest{
+		CampaignSlug: request.CampaignSlug, CampaignID: request.CampaignID,
+		Actor: request.Actor, Authority: "manager", Action: "closure.restart",
+		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
+		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
+		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes,
+	})
+	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	// Reopen already discarded the previous attempt's private stage, and a
+	// restarted job keeps its ID, so it keeps the same staging key. Sweep again:
+	// if the process died between reopen's commit and its best-effort cleanup, the
+	// old content-addressed objects are still sitting under the key the new
+	// attempt will write to. Only an inert, unindexed cache is at risk here.
+	_ = discardClosureStaging(service.Boundary, graph.Campaign.ID, job.ID)
+	result := ClosureApplyResult{
+		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
+		Transaction: &receipt, Plan: &plan, Job: &job, Coverage: &coverage,
+	}
+	return sealClosureApplyResult(result)
+}
+
 type closureWriteSpec struct {
 	value            any
 	path             string
@@ -988,6 +1154,80 @@ func explicitClosureCoverage(campaignID string, request ClosureApplyRequest) Clo
 		prior.WorkItemCoverage[id] = "exported-backlog"
 	}
 	return prior
+}
+
+// inheritedClosureCoverage carries into a restarted attempt the two manager-owned
+// dispositions that cannot be inferred from record state - explicit file retention
+// and exported backlog - and nothing else. ComputeClosureCoverage re-derives every
+// other class from scratch and re-checks both of these against live records: a
+// retention decision is keyed to a run file whose run is immutable once terminal,
+// and an exported-backlog work item is honored only if it still carries a valid
+// export contract. So inheritance can never smuggle a stale approval past a gate.
+//
+// Demanding re-declaration would have been the stricter choice and the wrong one.
+// A long campaign accumulates hundreds of retention rows; a restart that required
+// all of them back in a single request would be a second way to strand exactly the
+// campaigns this transition exists to rescue.
+//
+// Inherited active-file dispositions are pruned to files that still exist; declared
+// ones are not. That asymmetry is deliberate. applyClosureActiveFileInventory fails
+// closed on a disposition naming a missing file, which is right for a caller's
+// assertion and wrong for an inheritance - one deleted scratch file would otherwise
+// make every future restart refuse, with no supported way to withdraw the row.
+// Inheritance here is also narrow in practice: knownActiveFileDispositions infers a
+// disposition for every canonical record and run file and takes precedence, so
+// carried rows only ever cover files the engine cannot type on its own.
+func (service *Service) inheritedClosureCoverage(
+	campaignID, slug string,
+	request ClosureApplyRequest,
+	previous ClosureCoverage,
+) (ClosureCoverage, error) {
+	if service == nil {
+		return ClosureCoverage{}, errors.New("closure coverage inheritance requires a service")
+	}
+	files, err := listActiveTreeFiles(service.Boundary, slug)
+	if err != nil {
+		return ClosureCoverage{}, err
+	}
+	present := make(map[string]bool, len(files))
+	for _, relative := range files {
+		present[relative] = true
+	}
+	prior := ClosureCoverage{
+		SchemaVersion: CampaignSchemaVersion, CampaignID: campaignID,
+		SourceRunCoverage: map[string]string{}, FindingCoverage: map[string]string{},
+		WorkItemCoverage: map[string]string{}, FileRetention: map[string]string{},
+		ActiveFileDispositions: map[string]string{},
+		UnresolvedConflicts:    []string{}, MissingDecisions: []string{},
+	}
+	for key, value := range previous.FileRetention {
+		if validExplicitRetention(value) {
+			prior.FileRetention[key] = value
+		}
+	}
+	for id, value := range previous.WorkItemCoverage {
+		if value == "exported-backlog" {
+			prior.WorkItemCoverage[id] = value
+		}
+	}
+	for relative, value := range previous.ActiveFileDispositions {
+		if present[relative] && validOne(value, "retain", "destroy-approved", "ephemeral") {
+			prior.ActiveFileDispositions[relative] = value
+		}
+	}
+	// The request overlays the inheritance last so a manager can revise a carried
+	// decision in the same transaction that re-enters closure, rather than having
+	// to reopen a second time to change one of them.
+	for key, value := range request.FileRetention {
+		prior.FileRetention[key] = value
+	}
+	for key, value := range request.ActiveFileDispositions {
+		prior.ActiveFileDispositions[key] = value
+	}
+	for _, id := range request.ExportedWorkItemIDs {
+		prior.WorkItemCoverage[id] = "exported-backlog"
+	}
+	return prior, nil
 }
 
 func closureCoverageBlockers(coverage ClosureCoverage) []string {

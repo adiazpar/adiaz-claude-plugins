@@ -342,3 +342,204 @@ func TestTruthProjectionRejectsChangedEvidence(t *testing.T) {
 		t.Fatal("truth projection accepted evidence whose digest changed")
 	}
 }
+
+// sealClosureRestartTestJob seals a job's digest without validating it, so a
+// table case can present a deliberately wrong job to ValidateClosureRestart and
+// watch that rule refuse it, rather than tripping over a stale digest first.
+func sealClosureRestartTestJob(t *testing.T, job ClosureJob) ClosureJob {
+	t.Helper()
+	job.Digest = ""
+	digest, err := CanonicalDigest(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Digest = digest
+	return job
+}
+
+func closureRestartTestJobs(t *testing.T) (ClosureJob, ClosureJob) {
+	t.Helper()
+	graph := closureTestGraph(t)
+	coverage, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := ClosureJob{
+		RecordMeta: closureTestMeta("closure-test-job"), CampaignID: "C-TEST",
+		Stage: "decide", Status: "reopened", FrozenCampaignRevision: 4,
+		ProjectionFindingIDs: []string{"F-0001"}, Coverage: &coverage,
+		ArchiveDestination: "docs/history/campaigns/2026-08-02-test",
+		TruthDigests:       map[string]string{}, ProjectionDigests: map[string]string{},
+	}
+	next := previous
+	next.Revision = 2
+	next.UpdatedAt = "2026-08-02T20:01:00Z"
+	next.Stage, next.Status = "inventory", "running"
+	next.FrozenCampaignRevision = 7
+	next.Attempt = 2
+	return previous, next
+}
+
+// Restart is the only rule in the engine permitted to move a closure freeze, so
+// it is also the only place a mistake can silently rebind a campaign onto a
+// different view of itself. Enumerate the refusals rather than trusting a single
+// happy path.
+func TestClosureRestartRequiresAReopenedJobAndAForwardFreeze(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(t *testing.T, previous, next *ClosureJob)
+		refused bool
+	}{
+		{name: "well-formed restart"},
+		{name: "a running attempt cannot be restarted", refused: true,
+			mutate: func(_ *testing.T, previous, _ *ClosureJob) { previous.Status = "running" }},
+		{name: "a blocked attempt cannot be restarted", refused: true,
+			mutate: func(_ *testing.T, previous, _ *ClosureJob) { previous.Status = "blocked" }},
+		{name: "a verified attempt cannot be restarted", refused: true,
+			mutate: func(_ *testing.T, previous, _ *ClosureJob) { previous.Status = "verified" }},
+		{name: "a completed attempt cannot be restarted", refused: true,
+			mutate: func(_ *testing.T, previous, _ *ClosureJob) {
+				previous.Stage, previous.Status = "finalize", "completed"
+			}},
+		{name: "an unchanged freeze is not a re-plan", refused: true,
+			mutate: func(_ *testing.T, previous, next *ClosureJob) {
+				next.FrozenCampaignRevision = previous.FrozenCampaignRevision
+			}},
+		{name: "a freeze cannot rewind", refused: true,
+			mutate: func(_ *testing.T, previous, next *ClosureJob) {
+				next.FrozenCampaignRevision = previous.FrozenCampaignRevision - 1
+			}},
+		{name: "an unrecorded attempt is refused", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.Attempt = 0 }},
+		{name: "skipping an attempt is refused", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.Attempt = 3 }},
+		{name: "the archive destination is pinned", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) {
+				next.ArchiveDestination = "docs/history/campaigns/2026-08-02-other"
+			}},
+		{name: "the closure job id is pinned", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.ID = "closure-other-job" }},
+		{name: "the campaign id is pinned", refused: true,
+			mutate: func(t *testing.T, _, next *ClosureJob) {
+				other := cloneClosureCoverage(*next.Coverage)
+				other.CampaignID = "C-OTHER"
+				if err := sealClosureCoverage(&other); err != nil {
+					t.Fatal(err)
+				}
+				next.CampaignID, next.Coverage = "C-OTHER", &other
+			}},
+		{name: "residual staging proof is refused", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.StagingDigest = stateTestDigest("1") }},
+		{name: "residual archive proof is refused", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.ArchiveDigest = stateTestDigest("2") }},
+		{name: "residual truth proof is refused", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) {
+				next.TruthDigests = map[string]string{"F-0001": stateTestDigest("3")}
+			}},
+		{name: "residual projection proof is refused", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) {
+				next.ProjectionDigests = map[string]string{"docs/truth/example.md": stateTestDigest("4")}
+			}},
+		{name: "restart must re-enter at inventory", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.Stage = "coverage" }},
+		{name: "restart must re-enter running, not blocked", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.Status = "blocked" }},
+		{name: "restart requires recomputed coverage", refused: true,
+			mutate: func(_ *testing.T, _, next *ClosureJob) { next.Coverage = nil }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			previous, next := closureRestartTestJobs(t)
+			if test.mutate != nil {
+				test.mutate(t, &previous, &next)
+			}
+			err := ValidateClosureRestart(
+				sealClosureRestartTestJob(t, previous), sealClosureRestartTestJob(t, next))
+			if test.refused && err == nil {
+				t.Fatal("closure restart accepted a job pair it must refuse")
+			}
+			if !test.refused && err != nil {
+				t.Fatalf("closure restart refused a well-formed re-entry: %v", err)
+			}
+		})
+	}
+}
+
+// The attempt counter is what tells a reader which plan a job is gated on. If an
+// ordinary stage edge could move it, a restart would stop being distinguishable
+// from a resumption both in the record and in the archived event journal.
+func TestClosureAdvancePinsTheFreezeAndTheAttempt(t *testing.T) {
+	graph := closureTestGraph(t)
+	coverage, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := sealClosureRestartTestJob(t, ClosureJob{
+		RecordMeta: closureTestMeta("closure-test-job"), CampaignID: "C-TEST",
+		Stage: "reconcile", Status: "running", FrozenCampaignRevision: 4,
+		ProjectionFindingIDs: []string{"F-0001"}, Coverage: &coverage,
+		ArchiveDestination: "docs/history/campaigns/2026-08-02-test",
+		TruthDigests:       map[string]string{},
+	})
+	next := previous
+	next.Revision, next.UpdatedAt, next.Stage = 2, "2026-08-02T20:01:00Z", "decide"
+	if err := ValidateClosureAdvance(previous, sealClosureRestartTestJob(t, next)); err != nil {
+		t.Fatalf("ordinary closure edge failed: %v", err)
+	}
+	moved := next
+	moved.Attempt = 2
+	if err := ValidateClosureAdvance(previous, sealClosureRestartTestJob(t, moved)); err == nil {
+		t.Fatal("an ordinary closure edge moved the attempt counter")
+	}
+	rebound := next
+	rebound.FrozenCampaignRevision = 5
+	if err := ValidateClosureAdvance(previous, sealClosureRestartTestJob(t, rebound)); err == nil {
+		t.Fatal("an ordinary closure edge moved the campaign freeze")
+	}
+}
+
+// Every closure job committed before restart existed carries no attempt field.
+// readCanonicalRecordValue re-encodes what it reads and rejects it when the
+// bytes differ, so if the new field ever encoded as an explicit zero those
+// records would stop verifying and every in-flight closure would be bricked.
+func TestClosureAttemptTreatsAnAbsentCounterAsTheFirstAttempt(t *testing.T) {
+	if closureAttempt(ClosureJob{}) != 1 || closureAttempt(ClosureJob{Attempt: 0}) != 1 {
+		t.Fatal("an absent attempt counter was not read as the first attempt")
+	}
+	if closureAttempt(ClosureJob{Attempt: 4}) != 4 {
+		t.Fatal("an explicit attempt counter was not read back")
+	}
+	graph := closureTestGraph(t)
+	coverage, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := sealClosureRestartTestJob(t, ClosureJob{
+		RecordMeta: closureTestMeta("closure-test-job"), CampaignID: "C-TEST",
+		Stage: "inventory", Status: "running", FrozenCampaignRevision: 1,
+		ProjectionFindingIDs: []string{"F-0001"}, Coverage: &coverage,
+		ArchiveDestination: "docs/history/campaigns/2026-08-02-test",
+		TruthDigests:       map[string]string{}, ProjectionDigests: map[string]string{},
+	})
+	body, err := canonicalJSON(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "\"attempt\"") {
+		t.Fatalf("a first-attempt closure job encoded an attempt field: %s", body)
+	}
+	var decoded ClosureJob
+	if err := decodeStrictJSON(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	reencoded, err := canonicalJSON(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(reencoded) != string(body) {
+		t.Fatalf("a pre-restart closure job did not re-encode to its committed bytes:\n%s\n%s", body, reencoded)
+	}
+	if resealed := sealClosureRestartTestJob(t, decoded); resealed.Digest != job.Digest {
+		t.Fatalf("a pre-restart closure job changed digest: %s want %s", resealed.Digest, job.Digest)
+	}
+}

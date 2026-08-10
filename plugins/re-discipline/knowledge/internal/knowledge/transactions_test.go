@@ -283,3 +283,99 @@ func TestStateStoreIgnoresDerivedCacheDeletion(t *testing.T) {
 		t.Fatalf("cache deletion affected canonical graph: %v", err)
 	}
 }
+
+// The journal, not the engine, is the last line here. ValidateClosureJob never
+// compares against a previous record, so before this rule any same-stage closure
+// job write could quietly re-point FrozenCampaignRevision under an ordinary
+// action and gate the campaign on records that no longer described it. Only
+// closure.restart may move that freeze, and only through ValidateClosureRestart.
+func TestOnlyClosureRestartMayRebindAClosureFreeze(t *testing.T) {
+	graph := closureTestGraph(t)
+	coverage, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := sealClosureRestartTestJob(t, ClosureJob{
+		RecordMeta: closureTestMeta("closure-test-job"), CampaignID: "C-TEST",
+		Stage: "coverage", Status: "running", FrozenCampaignRevision: 4,
+		ProjectionFindingIDs: []string{"F-0001"}, Coverage: &coverage,
+		ArchiveDestination: "docs/history/campaigns/2026-08-02-test",
+		TruthDigests:       map[string]string{}, ProjectionDigests: map[string]string{},
+	})
+	sameStage := prior
+	sameStage.Revision, sameStage.UpdatedAt = 2, "2026-08-02T20:01:00Z"
+	if err := validateRecordTransition(
+		prior, sealClosureRestartTestJob(t, sameStage), "closure.advance", "manager"); err != nil {
+		t.Fatalf("an ordinary same-stage closure write was refused: %v", err)
+	}
+	rebound := sameStage
+	rebound.FrozenCampaignRevision = 9
+	if err := validateRecordTransition(
+		prior, sealClosureRestartTestJob(t, rebound), "closure.advance", "manager"); err == nil {
+		t.Fatal("a same-stage closure write rebound the campaign freeze under closure.advance")
+	}
+	counted := sameStage
+	counted.Attempt = 2
+	if err := validateRecordTransition(
+		prior, sealClosureRestartTestJob(t, counted), "closure.advance", "manager"); err == nil {
+		t.Fatal("a same-stage closure write moved the attempt counter under closure.advance")
+	}
+	// The same rebind under closure.restart is refused for a different reason -
+	// the prior job is not reopened - which is exactly the point: restart routes
+	// to ValidateClosureRestart and nothing else may reach that door at all.
+	restart := prior
+	restart.Revision, restart.UpdatedAt = 2, "2026-08-02T20:01:00Z"
+	restart.Stage, restart.Status = "inventory", "running"
+	restart.FrozenCampaignRevision, restart.Attempt = 9, 2
+	if err := validateRecordTransition(
+		prior, sealClosureRestartTestJob(t, restart), "closure.restart", "manager"); err == nil {
+		t.Fatal("closure.restart re-entered a closure attempt that was never reopened")
+	}
+	reopened := prior
+	reopened.Status = "reopened"
+	reopened = sealClosureRestartTestJob(t, reopened)
+	if err := validateRecordTransition(
+		reopened, sealClosureRestartTestJob(t, restart), "closure.restart", "manager"); err != nil {
+		t.Fatalf("closure.restart refused a well-formed re-entry from a reopened job: %v", err)
+	}
+}
+
+// A closure plan is the frozen obligation of one attempt, so no action inside an
+// attempt may shrink it. Restart is not inside an attempt: it ends one and
+// freezes another, and it is the only action allowed to replace the plan.
+func TestClosurePlanIsImmutableOutsideRestart(t *testing.T) {
+	graph := closureTestGraph(t)
+	destination := "docs/history/campaigns/2026-08-02-test"
+	prior, err := BuildClosurePlan(graph, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forward := prior
+	forward.CampaignRevision = prior.CampaignRevision + 3
+	if err := sealClosurePlan(&forward); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRecordTransition(nil, prior, "closure.start", "manager"); err != nil {
+		t.Fatalf("a first closure plan was refused: %v", err)
+	}
+	for _, action := range []string{"closure.start", "closure.advance", "closure.project", "closure.finalize"} {
+		if err := validateRecordTransition(prior, forward, action, "manager"); err == nil {
+			t.Fatalf("action %s replaced an existing closure plan", action)
+		}
+	}
+	if err := validateRecordTransition(prior, forward, "closure.restart", "manager"); err != nil {
+		t.Fatalf("closure.restart could not re-plan: %v", err)
+	}
+	same := prior
+	if err := validateRecordTransition(prior, same, "closure.restart", "manager"); err == nil {
+		t.Fatal("closure.restart re-planned against the revision it already froze")
+	}
+	repointed := forward
+	repointed.ArchiveDestination = "docs/history/campaigns/2026-08-02-other"
+	if err := sealClosurePlan(&repointed); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRecordTransition(prior, repointed, "closure.restart", "manager"); err == nil {
+		t.Fatal("closure.restart repointed the campaign archive destination")
+	}
+}

@@ -529,12 +529,25 @@ func ValidateClosureCoverage(coverage ClosureCoverage) error {
 	return nil
 }
 
+// closureAttempt reads a job's attempt counter with 1 as the floor. The field is
+// `omitempty` and absent from every closure job written before restart existed;
+// those records must keep re-encoding to their exact committed bytes or
+// decodeCanonicalRecord rejects them as edited outside the workflow. So absent
+// means "first attempt", never "attempt zero".
+func closureAttempt(job ClosureJob) int64 {
+	if job.Attempt < 1 {
+		return 1
+	}
+	return job.Attempt
+}
+
 func ValidateClosureJob(job ClosureJob) error {
 	if err := validateRecordMeta(job.RecordMeta, correlationIDRE); err != nil {
 		return fmt.Errorf("closure job: %w", err)
 	}
-	if !campaignIDRE.MatchString(job.CampaignID) || job.FrozenCampaignRevision < 1 {
-		return errors.New("closure job campaign and frozen revision are required")
+	if !campaignIDRE.MatchString(job.CampaignID) || job.FrozenCampaignRevision < 1 ||
+		job.Attempt < 0 {
+		return errors.New("closure job campaign, frozen revision, and attempt are required")
 	}
 	if _, ok := closureStageIndex[job.Stage]; !ok {
 		return fmt.Errorf("unsupported closure stage %q", job.Stage)
@@ -590,8 +603,10 @@ func ValidateClosureAdvance(previous, next ClosureJob) error {
 		return err
 	}
 	if previous.CampaignID != next.CampaignID || previous.ID != next.ID ||
-		previous.FrozenCampaignRevision != next.FrozenCampaignRevision {
-		return errors.New("closure identity and frozen campaign revision are immutable")
+		previous.FrozenCampaignRevision != next.FrozenCampaignRevision ||
+		closureAttempt(previous) != closureAttempt(next) {
+		return errors.New(
+			"closure identity, frozen campaign revision, and attempt are immutable within an attempt")
 	}
 	from, to := closureStageIndex[previous.Stage], closureStageIndex[next.Stage]
 	if next.Status == "reopened" {
@@ -636,6 +651,73 @@ func ValidateClosureAdvance(previous, next ClosureJob) error {
 	}
 	if next.Stage == "finalize" && next.Status != "completed" {
 		return errors.New("final closure stage must be completed")
+	}
+	return nil
+}
+
+// ValidateClosureRestart is the only rule that may move a closure job's frozen
+// campaign revision, and it exists because reopen was a one-way door. Reopen
+// returns the campaign to `open` and leaves closure/job.json on disk; startClosure
+// refuses whenever any closure job exists; StateWrite has no delete and the only
+// removal path in the engine is the retired-tree sweep at finalize. A campaign
+// that took the documented remedy for a closure refusal could therefore never
+// re-enter closure through any supported surface, and the only escape found in
+// practice was hand-editing canonical state and re-sealing the state inventory -
+// which costs far more integrity than the immutability this rule relaxes.
+//
+// A restart is neither a resumption nor a second start. It is one explicit edge
+// from a reopened job back to `inventory` against the campaign as it stands now.
+// It must re-plan, because the reason a manager reopened is that the required
+// run, finding, and retention sets were wrong; a restart that kept the old freeze
+// would gate the campaign on records that no longer describe it. So the freeze
+// must move, and it must move forward: monotonicity means no restart can rewind
+// closure onto an earlier view of the campaign, and a replayed restart request
+// can never re-apply against a freeze it already consumed.
+//
+// What a restart may not do is discard proof. Every derived digest is required to
+// be empty here, but that is an assertion, not an erasure: reopen already cleared
+// them in its own transaction, and reopen is the only door into `reopened`. A
+// verified or archived attempt cannot be thrown away by a restart - only by an
+// explicit reopen, which is separately authorized, separately compare-and-swapped,
+// and separately visible in the event journal a finalized archive authenticates.
+func ValidateClosureRestart(previous, next ClosureJob) error {
+	if err := ValidateClosureJob(previous); err != nil {
+		return err
+	}
+	if err := ValidateClosureJob(next); err != nil {
+		return err
+	}
+	if previous.Status != "reopened" {
+		return errors.New("only a reopened closure job may restart; reopen the closing campaign first")
+	}
+	if previous.CampaignID != next.CampaignID || previous.ID != next.ID {
+		return errors.New("closure restart keeps its campaign and closure job identity")
+	}
+	// `running`, not `blocked`, even when the recomputed coverage carries
+	// blockers - startClosure sets `running` with Blockers populated for exactly
+	// the same state. Accepting `blocked` here would make a restarted attempt
+	// stricter than a first one on its very next edge, because
+	// ValidateClosureAdvance refuses to leave `blocked` while any blocker
+	// remains. A restart has to behave like a first attempt or the fix installs a
+	// second, subtler dead end in place of the one it removes.
+	if next.Stage != "inventory" || next.Status != "running" {
+		return errors.New("closure restart must re-enter at inventory as a running job")
+	}
+	if next.FrozenCampaignRevision <= previous.FrozenCampaignRevision {
+		return errors.New("closure restart must freeze a later campaign revision than the attempt it replaces")
+	}
+	if closureAttempt(next) != closureAttempt(previous)+1 {
+		return errors.New("closure restart must record exactly one further attempt")
+	}
+	if next.ArchiveDestination != previous.ArchiveDestination {
+		return errors.New("closure restart cannot repoint the campaign archive destination")
+	}
+	if next.StagingDigest != "" || next.ArchiveDigest != "" ||
+		len(next.TruthDigests) != 0 || len(next.ProjectionDigests) != 0 {
+		return errors.New("closure restart cannot carry derived projection, staging, or archive proof")
+	}
+	if next.Coverage == nil {
+		return errors.New("closure restart requires recomputed coverage")
 	}
 	return nil
 }

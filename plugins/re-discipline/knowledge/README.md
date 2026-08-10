@@ -96,7 +96,7 @@ public surface is exactly ten role-oriented operations:
 | `context_pack_materialize` | Preview an active-run or recruiting-run pack; after digest verification, directly publish recruiting packs only. Active-run publication belongs to `manager_apply` `run.prepare`. |
 | `manager_apply` | Apply typed campaign, work-item, run, review, finding, and decision transitions. |
 | `curation_submit` | Submit a curator intake batch and complete report-span coverage. |
-| `closure_apply` | Start, advance, verify, reopen, or finalize a resumable closure job. |
+| `closure_apply` | Start, advance, verify, reopen, restart, or finalize a resumable closure job. `restart` is the only re-entry after a reopen: it re-plans against the current campaign revision under an exact plan, job, coverage, and campaign compare-and-swap. |
 | `normalization_queue` | Inspect durable archive-normalization demand; create an exact path/digest/byte-bound manager request; or claim, acknowledge, and resolve one source-bound item with a verified curator-run, intake-coverage, and complete-review receipt. |
 | `migrate_project` | Preview, review, apply, resume, inspect, verify, and ratify the explicit 0.7-to-0.8 conversion. It is the sole legacy-state reader. |
 

@@ -143,3 +143,45 @@ func TestExactFindingReadAndGraphTraceShareHandles(t *testing.T) {
 		t.Fatalf("finding trace omitted provenance or exceeded budget: %#v", trace)
 	}
 }
+
+// A caller stranded by start's refusal reads the closure view next. The door out
+// has to be stated there, not left inferable from the action enum, and the
+// attempt counter has to be visible or a reader cannot tell a resumed attempt
+// from a re-planned one.
+func TestClosureStateViewOffersRestartToAReopenedCampaign(t *testing.T) {
+	store, _, service, _ := prepareClosureArchiveFixture(t)
+	closing, err := service.State(context.Background(), StateRequest{Mode: "closure", CampaignID: "C-TEST"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, card := range closing.Cards {
+		if card.ID == "closure-restart-available" {
+			t.Fatal("a live closure attempt was offered a restart")
+		}
+		if card.ID == "closure-test" && card.Metadata["attempt"] != "1" {
+			t.Fatalf("a first closure attempt was not reported as attempt 1: %#v", card.Metadata)
+		}
+	}
+
+	reopenClosureFixture(t, store, service, "2026-08-02T18:11:00Z", "closure-reopen")
+	reopened, err := service.State(context.Background(), StateRequest{Mode: "closure", CampaignID: "C-TEST"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	offered := false
+	for _, card := range reopened.Cards {
+		if card.ID != "closure-restart-available" {
+			continue
+		}
+		offered = true
+		if !strings.Contains(card.Claim, "restart") {
+			t.Fatalf("the reopened closure card does not name the restart action: %#v", card)
+		}
+	}
+	if !offered {
+		t.Fatalf("a reopened closure job was not offered the restart door: %#v", reopened.Cards)
+	}
+	if reopened.Status != "attention" {
+		t.Fatalf("a reopened closure job did not require attention: %#v", reopened)
+	}
+}

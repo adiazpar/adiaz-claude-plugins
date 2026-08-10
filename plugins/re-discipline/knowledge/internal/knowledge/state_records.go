@@ -306,6 +306,16 @@ type ClosureJob struct {
 	StagingDigest          string            `json:"stagingDigest,omitempty"`
 	ArchiveDigest          string            `json:"archiveDigest,omitempty"`
 	Blockers               []string          `json:"blockers,omitempty"`
+	// Attempt counts the closure attempts this job has made; a restart after a
+	// reopen begins the next one. `omitempty` here is load-bearing rather than
+	// cosmetic. readCanonicalRecordValue re-encodes every record it reads and
+	// rejects it when the bytes differ from what was committed, and every
+	// closure job written before restart existed carries no such field. With
+	// `omitempty` a zero value re-encodes to byte-identical content and an
+	// identical CanonicalDigest, so campaigns already in flight keep verifying.
+	// Read it through closureAttempt, never directly: absent means the first
+	// attempt, never attempt zero.
+	Attempt int64 `json:"attempt,omitempty"`
 }
 
 type ArchiveManifest struct {

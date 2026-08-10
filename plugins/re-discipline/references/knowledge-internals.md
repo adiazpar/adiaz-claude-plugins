@@ -27,7 +27,9 @@ publication leaves canonical state unchanged.
 - `manager_apply`: typed campaign, work, run, review, finding, and decision
   transitions;
 - `curation_submit`: intake, candidate findings, and coverage for granted runs;
-- `closure_apply`: start, advance, verify, reopen, and finalize closure;
+- `closure_apply`: start, advance, verify, reopen, restart, and finalize
+  closure; `restart` is the sole re-entry after a reopen and the sole rule that
+  may move a closure job's frozen campaign revision, always forward;
 - migration CLI operations: explicit preview-approved conversion only.
 
 CLI and MCP invoke the same engine requests and return the same semantic

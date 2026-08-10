@@ -1078,7 +1078,7 @@ func toolDefinitions() []map[string]any {
 	closureSchema["required"] = []string{"action", "campaignId"}
 	setSchemaProperties(closureSchema, map[string]any{
 		"projectRoot":          projectRoot,
-		"action":               enumSchema("Closure transition or bounded status projection.", "start", "status", "advance", "reopen", "verify", "finalize"),
+		"action":               enumSchema("Closure transition or bounded status projection.", ClosureActions...),
 		"actor":                stringSchema("Permitted manager identity for mutating actions.", 0, 128),
 		"campaignSlug":         stringSchema("Canonical campaign directory slug for mutating actions.", 0, 50),
 		"campaignId":           stringSchema("Canonical campaign ID.", 1, 64),
@@ -1088,6 +1088,11 @@ func toolDefinitions() []map[string]any {
 		"timestamp":            stringSchema("UTC RFC3339 timestamp for mutating actions.", 0, 64),
 		"expectedHeadRevision": integerSchemaDescription(0, 2147483647, "Exact state-head revision for mutating actions."),
 		"expectedHeadDigest":   map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact state-head digest for mutating actions."},
+		"expectedClosurePlanRevision": integerSchemaDescription(0, 2147483647,
+			"Exact campaignRevision of active/<slug>/closure/plan.json. Required by restart, "+
+				"which refuses unless it matches the canonical plan it replaces."),
+		"expectedCoverageRevision": integerSchemaDescription(0, 2147483647,
+			"Exact prior closure-coverage write revision for advance, verify, finalize, and restart."),
 		"activeFileDispositions": map[string]any{
 			"type": "object", "maxProperties": 10000,
 			"additionalProperties": enumSchema("Explicit disposition for an otherwise unknown active-tree file.",
@@ -1240,7 +1245,7 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name": "closure_apply", "title": "Apply resumable closure transition",
-			"description": "Return closure status or apply one explicit start, advance, verify, reopen, or finalize transition with coverage and projection gates.",
+			"description": "Return closure status or apply one explicit start, advance, verify, reopen, restart, or finalize transition with coverage and projection gates. restart re-enters closure after a reopen: it re-plans against the current campaign revision and requires the exact prior campaign, closure-plan, closure-job, and closure-coverage digests.",
 			"inputSchema": closureSchema,
 			"annotations": closureWrite,
 		},

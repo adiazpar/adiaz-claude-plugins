@@ -15,14 +15,41 @@ the result is not irrefutable or when any required disposition is missing.
 
 Call `closure_apply` with action `start`, the campaign revision, and an
 idempotency key, or call `state(mode="closure")` for an existing job. Advance,
-verify, reopen, and finalize through typed `closure_apply` actions. Entering
-`closing` freezes ordinary new runs; remediation requires an explicit manager
-transaction. That transaction is `manager_apply` with action
+verify, reopen, restart, and finalize through typed `closure_apply` actions.
+Entering `closing` freezes ordinary new runs; remediation requires an explicit
+manager transaction. That transaction is `manager_apply` with action
 `closure.remediation.run.create`, which takes the same payload as `run.prepare`
 and is the only way to open a run while a campaign is closing. Reach for it
 whenever a closure gate asks for work that needs a run, a normalization item
 most often. Do not reopen the campaign to get one: reopening abandons the
 closure attempt, it does not perform the work the attempt asked for.
+
+## Re-Enter After A Reopen
+
+`start` refuses while any closure job exists, so a reopened campaign re-enters
+through action `restart`, not through `start`. A restart is one explicit edge
+from the reopened job back to stage `inventory`: it re-plans against the
+campaign as it stands after remediation, freezes a later campaign revision, and
+records one further attempt. It keeps the closure job's identity and its archive
+destination, because one campaign has one archive tree.
+
+Send `closureJobId` for the exact job being re-entered,
+`expectedClosurePlanRevision` equal to the `campaignRevision` of
+`active/<slug>/closure/plan.json`, and the exact prior digests for the campaign,
+`closure-plan`, the closure job, and `closure-coverage`. Read the plan before
+you replace it; the restart is refused unless all of them match, and a refused
+restart changes nothing.
+
+Explicit file-retention and exported-backlog decisions carry into the restarted
+attempt, and anything supplied in the restart request overrides what was
+carried. Every other coverage class is recomputed from live records, so nothing
+inherited can carry a stale approval past a gate. Inherited active-file
+dispositions naming files that no longer exist are dropped; a disposition
+declared in the request must name a file that exists, and is refused otherwise.
+
+A restarted attempt may require less than the one it replaces. The plan is one
+attempt's obligation, not a campaign-wide ratchet, and nothing durable is
+published before `finalize`.
 
 ## Advance The Stages
 

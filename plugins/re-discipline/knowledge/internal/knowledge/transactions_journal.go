@@ -592,8 +592,27 @@ func validateRecordTransition(previous, next any, action, authority string) erro
 		}
 		return ValidateReviewTransition(prior, value)
 	case ClosurePlan:
-		if previous != nil {
-			return errors.New("closure plans are immutable")
+		if previous == nil {
+			return ValidateClosurePlan(value)
+		}
+		// A closure plan is the frozen set of records one attempt must account for,
+		// so it is immutable for the life of that attempt: nothing inside a running
+		// closure may quietly shrink what closure has to prove. A restart is not
+		// inside an attempt - it ends one and freezes another against the campaign as
+		// it stands after remediation - so it is the one action that may replace the
+		// plan, and only forward. The write that carries it is a compare-and-swap
+		// against the exact plan it replaces; see restartClosure. Without this, reopen
+		// was terminal, because a plan record has no delete path and closure.start
+		// refuses to overwrite one.
+		prior := previous.(ClosurePlan)
+		if action != "closure.restart" {
+			return errors.New("closure plans are immutable outside closure.restart")
+		}
+		if prior.CampaignID != value.CampaignID ||
+			prior.ArchiveDestination != value.ArchiveDestination ||
+			value.CampaignRevision <= prior.CampaignRevision {
+			return errors.New(
+				"closure restart plan must keep its campaign and archive destination and freeze a later revision")
 		}
 		return ValidateClosurePlan(value)
 	case ClosureJob:
@@ -606,6 +625,20 @@ func validateRecordTransition(previous, next any, action, authority string) erro
 		prior := previous.(ClosureJob)
 		if err := validateMetaTransition(prior.RecordMeta, value.RecordMeta); err != nil {
 			return err
+		}
+		if action == "closure.restart" {
+			return ValidateClosureRestart(prior, value)
+		}
+		// Every other action leaves the campaign freeze and the attempt counter alone.
+		// ValidateClosureAdvance says so for a stage edge, but the same-stage branch
+		// below reaches only ValidateClosureJob, which validates a job in isolation and
+		// would happily accept a silently re-pointed freeze. Say it once here, so the
+		// restart rule is the single place a freeze can move and cannot be bypassed by
+		// writing a job at its current stage under some other action.
+		if prior.CampaignID != value.CampaignID ||
+			prior.FrozenCampaignRevision != value.FrozenCampaignRevision ||
+			closureAttempt(prior) != closureAttempt(value) {
+			return errors.New("only closure.restart may rebind a closure job's campaign freeze or attempt")
 		}
 		if prior.Stage == value.Stage {
 			return ValidateClosureJob(value)

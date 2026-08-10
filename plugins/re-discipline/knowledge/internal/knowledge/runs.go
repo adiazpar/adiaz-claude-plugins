@@ -80,8 +80,14 @@ func ValidateCampaignTransition(previous *CampaignRecord, next CampaignRecord, a
 	if previous.Status != next.Status {
 		switch next.Status {
 		case "closing":
-			if action != "closure.start" {
-				return errors.New("campaign may enter closing only through closure.start")
+			// closure.restart is the second door into `closing`, and it exists for
+			// exactly one situation: the campaign already took closure.reopen, did
+			// the remediation the closure gate asked for, and now has to get back
+			// in. Before restart, closure.start was the only entry and it refuses
+			// while any closure job exists, so reopen stranded the campaign
+			// permanently.
+			if !validOne(action, "closure.start", "closure.restart") {
+				return errors.New("campaign may enter closing only through closure.start or closure.restart")
 			}
 		case "closed":
 			if action != "closure.finalize" {

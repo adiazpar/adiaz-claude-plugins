@@ -65,6 +65,44 @@ func TestManagerApplyExposesEveryEngineAction(t *testing.T) {
 	}
 }
 
+// The same binding for closure. closure.restart is the second door into
+// `closing` and the only supported escape from a reopened job; an engine
+// transition no caller can name is not a capability, and a caller that cannot
+// see expectedClosurePlanRevision in the schema cannot construct a restart the
+// engine will accept.
+func TestClosureApplyExposesEveryEngineAction(t *testing.T) {
+	var closureTool map[string]any
+	for _, tool := range toolDefinitions() {
+		if tool["name"] == "closure_apply" {
+			closureTool = tool
+			break
+		}
+	}
+	if closureTool == nil {
+		t.Fatal("closure_apply tool is missing")
+	}
+	input := asObject(t, closureTool["inputSchema"])
+	properties := asObject(t, input["properties"])
+	action := asObject(t, properties["action"])
+	exposed, ok := action["enum"].([]string)
+	if !ok {
+		t.Fatalf("closure_apply action enum is not a string list: %#v", action["enum"])
+	}
+	if len(exposed) != len(ClosureActions) {
+		t.Fatalf("closure_apply exposes %v but the engine honors %v", exposed, ClosureActions)
+	}
+	for index, value := range ClosureActions {
+		if exposed[index] != value {
+			t.Fatalf("closure_apply exposes %v but the engine honors %v", exposed, ClosureActions)
+		}
+	}
+	for _, name := range []string{"expectedClosurePlanRevision", "expectedCoverageRevision"} {
+		if _, present := properties[name]; !present {
+			t.Errorf("closure_apply schema omits %s, which restart refuses without", name)
+		}
+	}
+}
+
 // Every exposed transition must also tell the caller what records it expects,
 // or the caller learns the contract one terse refusal at a time.
 func TestEveryManagerActionCarriesASubmissionObligation(t *testing.T) {
