@@ -371,6 +371,43 @@ only thing standing between a plausible-sounding rule and a wrong one shipping.
 
 ---
 
+## 6.2 Cutting a release — the order is not optional
+
+Discovered twice by walking into it, so it is written down here rather than left
+in a session transcript.
+
+```
+1. bump RuntimeVersion in knowledge/internal/knowledge/types.go
+2. .github/scripts/re-discipline-sync-version.py
+3. packager --output bin
+4. bin/re-discipline-knowledge benchmark --asset-root . --mode full --update-declared
+5. packager --output bin          # again
+6. packager --output bin --verify
+7. go test ./...                  # only now will it pass
+```
+
+Two circular-looking constraints force it, and each announces itself as an
+unrelated failure:
+
+- **Step 4 needs step 3.** `--update-declared` runs the *packaged* binary, and a
+  binary built at the old version refuses the freshly synced manifest with
+  `model manifest runtime version mismatch`. So the package has to be rebuilt at
+  the new version before the evidence can be re-measured.
+- **Step 5 needs step 4.** The declared profile evidence embeds a runtime
+  fingerprint derived from `RuntimeVersion`, and the shipped binaries embed the
+  evidence. Package before re-measuring and you ship binaries whose embedded
+  evidence is already stale; the Go suite then fails with `embedded packaged
+  profile evidence for hybrid-no-rerank-v1 is stale`.
+
+Neither failure names the ordering as the cause, which is what makes this worth
+a section. Both are correct refusals doing their job — the cost is only that a
+maintainer has to already know the sequence to read them.
+
+**This belongs in `A1` of the repair vocabulary work**: each of those two
+refusals should name the step that precedes it.
+
+---
+
 ## 7. Sequencing
 
 1. **0.8.5** — repair vocabulary: restart a reopened closure job; amend coverage
