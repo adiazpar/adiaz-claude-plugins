@@ -333,17 +333,49 @@ func validateRunReportIsCurated(previous CampaignGraph, run RunRecord) error {
 		return nil
 	}
 	cause := fmt.Sprintf("no curator intake covers its report %s", run.Report.Path)
+	remedy := fmt.Sprintf(
+		"while the run is still returned, submit a curator intake over %s that disposes every span as "+
+			"candidate-finding, duplicate, non-claim, or out-of-scope, then complete the run",
+		run.Report.Path)
 	if len(coverage.Dirty) > 0 {
 		cause = "its only curator intake(s) still carry unresolved coverage: " +
 			strings.Join(coverage.Dirty, "; ")
+		// A dirty intake that is already `reviewed` has a cheaper remedy than a
+		// second curator packet. curation_submit cannot resubmit an intake a
+		// manager has ratified, so repairing it there means a whole new intake
+		// and a second review over candidates nobody re-read; the retirement
+		// changes the disposition and rationale of the named spans and nothing
+		// else, and the existing review keeps binding the record.
+		if reviewedDirtyCoverageIntakes(coverage) != "" {
+			remedy = fmt.Sprintf(
+				"the covering intake(s) %s are already reviewed, so the cheapest repair is "+
+					"manager_apply intake.coverage.retire, which re-dispositions exactly those unresolved "+
+					"spans as non-claim or out-of-scope under the review that already ratified them and "+
+					"touches no finding; otherwise, while the run is still returned, submit a further "+
+					"curator intake over %s that disposes every span",
+				reviewedDirtyCoverageIntakes(coverage), run.Report.Path)
+		}
 	}
 	return fmt.Errorf(
 		"run %s cannot leave returned as %s: %s. Closure classifies every non-aborted run by "+
 			"whether a reviewed curator intake covers its exact report, and an unresolved span does "+
 			"not count as coverage; no transition returns the run, and once it has left returned the "+
 			"only remaining route to that coverage is the stranded-run repair curation_submit "+
-			"reserves for runs that can no longer obtain it any other way. Remedy: while the run is "+
-			"still returned, submit a curator intake over %s that disposes every span as "+
-			"candidate-finding, duplicate, non-claim, or out-of-scope, then complete the run",
-		run.ID, run.Status, cause, run.Report.Path)
+			"reserves for runs that can no longer obtain it any other way. Remedy: %s",
+		run.ID, run.Status, cause, remedy)
+}
+
+// reviewedDirtyCoverageIntakes names the covering intakes that are both dirty
+// and already reviewed - the exact population for which a coverage retirement
+// is available and a supplementary curator intake is the expensive path.
+func reviewedDirtyCoverageIntakes(coverage runReportIntakeCoverage) string {
+	reviewed := []string{}
+	for intakeID, status := range coverage.Statuses {
+		if status != "reviewed" || containsString(coverage.Clean, intakeID) {
+			continue
+		}
+		reviewed = append(reviewed, intakeID)
+	}
+	sort.Strings(reviewed)
+	return strings.Join(reviewed, ", ")
 }

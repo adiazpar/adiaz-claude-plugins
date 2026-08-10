@@ -107,6 +107,7 @@ var managerActionKinds = map[string]map[string]bool{
 	"run.complete":                      {"run": true, "work": true, "finding": true},
 	"closure.remediation.run.create":    {"run": true, "work": true},
 	"review.submit":                     {"review": true, "intake": true, "finding": true, "work": true},
+	"intake.coverage.retire":            {"intake": true},
 	"finding.challenge":                 {"finding": true, "work": true},
 	"finding.update":                    {"finding": true, "work": true},
 	"decision.record":                   {"review": true, "intake": true, "finding": true, "work": true},
@@ -315,6 +316,39 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 		if err := ValidateManagerReviewOutcomes(packet, *request.Review, *request.Intake, outcomes); err != nil {
 			return err
 		}
+	case "intake.coverage.retire":
+		// The payload gate is deliberately narrow. Every substantive proof -
+		// that the amendment quotes what it displaced, that it reconstructs the
+		// exact submitted record, that the review it names really ratified this
+		// intake - needs canonical prior state and belongs in
+		// validateAppliedCoverageRetirement. What belongs here is the shape a
+		// caller can get wrong before the engine has even loaded the record it
+		// is amending, said once and plainly.
+		if request.Intake == nil {
+			return fmt.Errorf(
+				"manager action %s requires the next revision of the intake being amended: %s",
+				request.Action, managerActionObligation(request.Action))
+		}
+		if request.ReviewPacket != nil || request.RunPreparation != nil {
+			return errors.New(
+				"a coverage retirement is not a review and prepares no run; it carries neither a review " +
+					"packet nor a run preparation")
+		}
+		if request.Intake.Status != "reviewed" {
+			return fmt.Errorf(
+				"a coverage retirement amends a reviewed intake and leaves it reviewed; the submitted "+
+					"intake is %s", request.Intake.Status)
+		}
+		if len(request.Intake.Amendments) == 0 {
+			return errors.New(
+				"a coverage retirement must append one amendment naming every span it retires, the exact " +
+					"rationale each displaces, and the manager review it preserves")
+		}
+		if err := ValidateCoverageAmendmentShape(
+			request.Intake.Amendments[len(request.Intake.Amendments)-1],
+		); err != nil {
+			return err
+		}
 	case "finding.challenge":
 		if len(request.Findings) == 0 {
 			return errors.New("finding.challenge requires at least one finding")
@@ -354,6 +388,10 @@ var managerActionObligations = map[string]string{
 		"reviewed intake revision, and the exact reviewed packet. A standalone rationale is not a record; " +
 		"every transition already journals its rationale in the state event.",
 	"reconcile.import": "Submit the exact canonical records being reconciled.",
+	"intake.coverage.retire": "A retirement is a bookkeeping transaction over one reviewed intake: submit " +
+		"the next intake revision with the unresolved spans re-dispositioned and one appended amendment " +
+		"naming each retired span, the exact rationale it displaces, and the review it preserves. No " +
+		"finding, review, or run may be part of it.",
 }
 
 func managerActionObligation(action string) string {

@@ -90,14 +90,40 @@ Deletion requires explicit manager approval and a durable replacement for the
 artifact's value.
 
 `missing-reviewed-intake` on a run that is already `completed` or `invalidated`
-means its only intake left a span `unresolved`. Clear it through
-`review-subagent`: submit a further curator intake over the same frozen report
-with every span disposed and review it. Coverage is a union across reviewed
-intakes, so this supplies what closure requires without disturbing any review
-already ratified over the earlier intake. Do not attempt to reopen or re-return
-the run. An invalidated run that returned is not exempt: its report is still
-retained and may still be cited by a ratified finding, so closure accounts for
-it like any other run with a report.
+means its only intake left a span `unresolved`. Which repair applies depends on
+whether that intake has been reviewed.
+
+If the covering intake is already `reviewed` and its only defect is one or more
+`unresolved` spans, retire them in place with
+`manager_apply(action="intake.coverage.retire")`. Submit the next intake
+revision with those spans re-dispositioned as `non-claim` or `out-of-scope`, plus
+one appended `amendments` entry naming each retired span, the exact prior
+disposition and rationale it displaces, its new rationale, and the review ID that
+ratified the intake. No finding, review, run, or work record may be part of that
+transaction, and nothing else in the intake may change. The existing review keeps
+binding the record, so no candidate is re-ratified. Then re-run
+`closure_apply advance`: the retirement bumps the campaign revision while the job
+holds a frozen one, and coverage is only re-digested at the next stage
+transition.
+
+A retirement is one-way. There is no transition back to `unresolved`, and once
+the covering intake is clean `curation_submit` refuses a further supplementary
+intake over that report. Retire only spans you have actually judged.
+
+If the covering intake is not yet reviewed, or its defect is anything other than
+an unresolved span, clear it through `review-subagent` instead: submit a further
+curator intake over the same frozen report with every span disposed and review
+it. Coverage is a union across reviewed intakes, so this supplies what closure
+requires without disturbing any review already ratified over the earlier intake.
+
+Do not attempt to reopen or re-return the run. An invalidated run that returned
+is not exempt: its report is still retained and may still be cited by a ratified
+finding, so closure accounts for it like any other run with a report.
+
+Retiring a span to `out-of-scope` clears the closure coverage gate but does not
+satisfy a cross-campaign normalization resolution, which accepts only
+`candidate-finding`, `duplicate`, and `non-claim`. If the same report is also a
+queued normalization source, prefer `non-claim` where it is the honest judgment.
 
 `missing-report` means a run froze no report. Closure exempts a run that was
 `aborted`, and one that was `invalidated` before it ever returned, because

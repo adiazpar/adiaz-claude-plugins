@@ -143,7 +143,7 @@ func (graph CampaignGraph) Validate() error {
 			return fmt.Errorf("review %s: %w", id, err)
 		}
 		intake, ok := graph.Intakes[review.IntakeID]
-		if !ok || intake.Status != "reviewed" || intake.Revision != review.IntakeRevision+1 {
+		if !ok || intake.Status != "reviewed" || intakeReviewedRevision(intake) != review.IntakeRevision {
 			return fmt.Errorf("review %s does not bind the submitted revision immediately before the reviewed intake", id)
 		}
 		for _, decision := range review.Decisions {
@@ -255,7 +255,7 @@ func (graph CampaignGraph) Validate() error {
 func reviewBindsIntake(graph CampaignGraph, intake IntakeRecord) bool {
 	for _, review := range graph.Reviews {
 		if review.CampaignID != intake.CampaignID || review.IntakeID != intake.ID ||
-			review.IntakeRevision != intake.Revision-1 ||
+			review.IntakeRevision != intakeReviewedRevision(intake) ||
 			len(review.Decisions) != len(intake.CandidateFindingIDs) {
 			continue
 		}

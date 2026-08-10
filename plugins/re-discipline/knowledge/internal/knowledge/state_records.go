@@ -216,6 +216,44 @@ type CoverageEntry struct {
 	Rationale       string `json:"rationale,omitempty"`
 }
 
+// CoverageRetirement is one row of a coverage amendment: the exact span whose
+// judgment moved, quoting both sides of the move.
+//
+// The displaced values are quoted rather than implied because the amendment is
+// the sole authority for the change it makes, and an authority that says only
+// "this span is now non-claim" cannot be checked against anything. Quoting what
+// it displaced turns the entry into a claim the engine can refuse when it does
+// not match the persisted row, which is what stops an amendment from being
+// written over a row it never actually read.
+type CoverageRetirement struct {
+	SourceHandle    string `json:"sourceHandle"`
+	FromDisposition string `json:"fromDisposition"`
+	ToDisposition   string `json:"toDisposition"`
+	FromRationale   string `json:"fromRationale"`
+	ToRationale     string `json:"toRationale"`
+}
+
+// CoverageAmendment is one immutable entry in an intake's append-only coverage
+// retirement log. It names the review it preserves, the actor and correlation
+// that recorded it, and every span it moved.
+//
+// The log lives on the intake and not in a side-car record because the
+// engine's recurring failure mode is two records that describe the same fact
+// and then drift apart; runIsClaimSource exists only because closure and the
+// normalization queue each kept their own answer to one question. A side-car
+// would leave intake.Coverage asserting `unresolved` forever while something
+// else said otherwise, and every reader of intake.Coverage would have to
+// remember the overlay. The reader that forgets is the next bug of that class.
+type CoverageAmendment struct {
+	Revision      int64                `json:"revision"`
+	AmendedAt     string               `json:"amendedAt"`
+	AmendedBy     string               `json:"amendedBy"`
+	CorrelationID string               `json:"correlationId"`
+	ReviewID      string               `json:"reviewId"`
+	Rationale     string               `json:"rationale"`
+	Retirements   []CoverageRetirement `json:"retirements"`
+}
+
 type IntakeRecord struct {
 	RecordMeta
 	CampaignID          string            `json:"campaignId"`
@@ -231,6 +269,26 @@ type IntakeRecord struct {
 	Uncertainties       []string          `json:"uncertainties,omitempty"`
 	RequestedDecisions  []string          `json:"requestedDecisions,omitempty"`
 	Status              string            `json:"status"`
+	// Amendments is last, and its `omitempty` is load-bearing rather than
+	// stylistic. canonicalJSON is json.MarshalIndent in struct-field order, so
+	// an intake that has never been amended serializes to byte-identical output
+	// and keeps the digest it was sealed with. Without `omitempty` every intake
+	// ever committed would gain an `"amendments": null` line, every record
+	// digest in every campaign would change, and this bookkeeping transition
+	// would require a whole-corpus migration to ship.
+	Amendments []CoverageAmendment `json:"amendments,omitempty"`
+}
+
+// intakeReviewedRevision is the intake revision a manager review binds, and it
+// is the only place that arithmetic is written down. An intake is reviewed at
+// revision R; the review transaction advances it to R+1; every coverage
+// retirement after that advances it by one more without touching a single
+// candidate, decision, or byte of the review receipt. Subtracting the amendment
+// count is therefore not a fudge factor - it is the statement that a retirement
+// is not a new revision of the reviewed content, and ValidateIntake pins the
+// last amendment's revision to the record's own so the count cannot be padded.
+func intakeReviewedRevision(intake IntakeRecord) int64 {
+	return intake.Revision - 1 - int64(len(intake.Amendments))
 }
 
 type ReviewDecision struct {
@@ -850,6 +908,85 @@ func ValidateIntake(record IntakeRecord) error {
 		}
 		if nextLine != lineCount+1 {
 			return fmt.Errorf("coverage for %s ends at line %d, expected %d", source.Path, nextLine-1, lineCount)
+		}
+	}
+	return validateIntakeAmendmentLog(record)
+}
+
+// validateIntakeAmendmentLog is the shape half of the retirement rule, and it
+// runs on every load of every intake, where no prior revision is available to
+// compare against. It cannot prove that an amendment was applied faithfully -
+// validateAppliedCoverageRetirement does that at the transaction, by
+// reconstruction - but it can prove that the log the record carries is
+// internally consistent with the coverage the record now declares.
+//
+// The clause that pins the last amendment's revision to the record's own is
+// what turns intakeReviewedRevision from a hope into a theorem: without it, a
+// forged record could pad the log with entries and drive the reviewed revision
+// arbitrarily far backwards, which would make every review in the campaign
+// appear to bind an intake it never saw.
+//
+// Every entry - not only the last - must still describe the row the record
+// carries now. That follows from the permitted-change rule: only `unresolved`
+// may move, and it may move only to a terminal judgment, so a span can leave
+// `unresolved` exactly once and no later entry can move it again. Enforcing it
+// makes the whole log verifiable from the record alone. If the permitted pairs
+// in permittedCoverageRetirements are ever widened so that a span can move
+// twice, this check must be revisited - which is the point of writing it down
+// here rather than trusting the table to stay narrow silently.
+func validateIntakeAmendmentLog(record IntakeRecord) error {
+	if len(record.Amendments) == 0 {
+		return nil
+	}
+	if record.Status != "reviewed" {
+		return fmt.Errorf(
+			"intake %s carries coverage retirements but is %s; only a reviewed intake may be amended",
+			record.ID, record.Status)
+	}
+	if record.Revision <= int64(len(record.Amendments)) {
+		return fmt.Errorf(
+			"intake %s records %d coverage amendments at revision %d, which is more history than the record has",
+			record.ID, len(record.Amendments), record.Revision)
+	}
+	rows := make(map[string]CoverageEntry, len(record.Coverage))
+	for _, entry := range record.Coverage {
+		rows[entry.SourceHandle] = entry
+	}
+	retired := map[string]string{}
+	previousRevision := int64(0)
+	for index, amendment := range record.Amendments {
+		if err := ValidateCoverageAmendmentShape(amendment); err != nil {
+			return fmt.Errorf("intake %s amendment %d: %w", record.ID, index+1, err)
+		}
+		if amendment.Revision <= previousRevision {
+			return fmt.Errorf(
+				"intake %s amendment revisions must strictly increase; %d does not follow %d",
+				record.ID, amendment.Revision, previousRevision)
+		}
+		previousRevision = amendment.Revision
+		if index == len(record.Amendments)-1 && amendment.Revision != record.Revision {
+			return fmt.Errorf(
+				"intake %s last coverage amendment is recorded at revision %d, not the record's own revision %d",
+				record.ID, amendment.Revision, record.Revision)
+		}
+		for _, retirement := range amendment.Retirements {
+			if earlier, repeated := retired[retirement.SourceHandle]; repeated {
+				return fmt.Errorf(
+					"intake %s retires span %s twice; it was already retired to %s",
+					record.ID, retirement.SourceHandle, earlier)
+			}
+			retired[retirement.SourceHandle] = retirement.ToDisposition
+			row, present := rows[retirement.SourceHandle]
+			if !present {
+				return fmt.Errorf(
+					"intake %s retires span %s, which it does not cover",
+					record.ID, retirement.SourceHandle)
+			}
+			if row.Disposition != retirement.ToDisposition || row.Rationale != retirement.ToRationale {
+				return fmt.Errorf(
+					"intake %s coverage span %s does not carry the disposition and rationale its amendment recorded",
+					record.ID, retirement.SourceHandle)
+			}
 		}
 	}
 	return nil

@@ -438,6 +438,11 @@ func (store *StateStore) validateAndApplyWrites(request StateTransactionRequest,
 			return CampaignGraph{}, err
 		}
 	}
+	if request.Action == "intake.coverage.retire" {
+		if err := validateAppliedCoverageRetirement(graph, request, writes); err != nil {
+			return CampaignGraph{}, err
+		}
+	}
 	return next, nil
 }
 

@@ -1045,8 +1045,8 @@ func toolDefinitions() []map[string]any {
 		"action": enumSchema("Typed manager transition.",
 			"campaign.open", "campaign.update", "work.create", "work.update", "run.prepare", "run.start",
 			"run.return", "run.complete", "closure.remediation.run.create", "review.submit",
-			"finding.challenge", "finding.update", "decision.record", "reconcile.import",
-			"knowledge.archive-fallback.opt-in"),
+			"finding.challenge", "finding.update", "decision.record", "intake.coverage.retire",
+			"reconcile.import", "knowledge.archive-fallback.opt-in"),
 		"actor":                   stringSchema("Permitted manager identity recorded in the event.", 1, 128),
 		"campaignSlug":            stringSchema("Canonical campaign directory slug.", 3, 50),
 		"campaignId":              stringSchema("Canonical campaign ID bound by every submitted record.", 1, 64),
@@ -1056,6 +1056,7 @@ func toolDefinitions() []map[string]any {
 		"expectedHeadRevision":    integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before the transition."),
 		"expectedHeadDigest":      map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before the transition."},
 		"archiveFallbackDecision": archiveFallbackDecisionSchema,
+		"intake":                  managerIntakeSchema(),
 	})
 
 	curationSchema := reflectedToolSchema(curationSubmitToolInput{})
@@ -1262,6 +1263,48 @@ func toolDefinitions() []map[string]any {
 			"annotations": closureWrite,
 		},
 	}
+}
+
+// managerIntakeSchema is the reflected intake record with its amendment log
+// described rather than merely present.
+//
+// The reflected shape already carries `amendments`, because reflectedJSONSchema
+// walks the record's fields, but it renders `toDisposition` as an unconstrained
+// string. The set of dispositions a retirement may produce is the entire content
+// of the permitted-change rule, so a caller that can only discover it by
+// tripping a refusal has been told the least useful version of it. Publishing
+// the enum in the tool surface makes the narrowness of this transition visible
+// where callers actually look.
+func managerIntakeSchema() map[string]any {
+	schema := reflectedJSONSchema(reflect.TypeOf(IntakeRecord{}))
+	schema["description"] = "Canonical curator intake record written by the transition."
+	setSchemaProperties(schema, map[string]any{
+		"amendments": map[string]any{
+			"type": "array",
+			"description": "Append-only log of coverage retirements. Only manager_apply " +
+				"intake.coverage.retire may extend it, and only by exactly one entry per transaction.",
+			"items": objectSchema(map[string]any{
+				"revision":      integerSchemaDescription(2, 2147483647, "Intake revision this amendment is written at; equals the submitted record's revision."),
+				"amendedAt":     stringSchema("UTC RFC3339 time equal to the submitted record's updatedAt.", 1, 64),
+				"amendedBy":     stringSchema("Permitted manager identity; equals the transaction actor.", 1, 128),
+				"correlationId": stringSchema("Equals the transaction correlation ID.", 1, 128),
+				"reviewId":      map[string]any{"type": "string", "pattern": "^V-[0-9]{4,}$", "description": "Manager review that ratified this intake and continues to bind it."},
+				"rationale":     stringSchema("Why these spans are being retired now.", 1, 2000),
+				"retirements": map[string]any{
+					"type": "array", "minItems": 1,
+					"description": "One entry per span, quoting the exact values it displaces.",
+					"items": objectSchema(map[string]any{
+						"sourceHandle":    stringSchema("Exact path:<sourcePath>#L<start>-L<end> handle of an existing coverage row.", 1, 500),
+						"fromDisposition": map[string]any{"const": "unresolved", "description": "Only an unresolved span may be retired; it is the one disposition that records no judgment."},
+						"toDisposition":   enumSchema("Terminal judgment the span receives.", "non-claim", "out-of-scope"),
+						"fromRationale":   stringSchema("Byte-exact rationale the committed row carries now.", 0, 2000),
+						"toRationale":     stringSchema("Required new rationale for the judgment being recorded.", 1, 2000),
+					}, []string{"sourceHandle", "fromDisposition", "toDisposition", "fromRationale", "toRationale"}),
+				},
+			}, []string{"revision", "amendedAt", "amendedBy", "correlationId", "reviewId", "rationale", "retirements"}),
+		},
+	})
+	return schema
 }
 
 func reflectedToolSchema(value any) map[string]any {

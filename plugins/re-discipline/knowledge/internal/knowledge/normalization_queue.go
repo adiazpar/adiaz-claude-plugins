@@ -356,7 +356,7 @@ func normalizationCoverageDigest(
 
 func normalizationReviewComplete(review ReviewRecord, intake IntakeRecord) bool {
 	if review.CampaignID != intake.CampaignID || review.IntakeID != intake.ID ||
-		review.IntakeRevision != intake.Revision-1 ||
+		review.IntakeRevision != intakeReviewedRevision(intake) ||
 		len(review.Decisions) != len(intake.CandidateFindingIDs) ||
 		len(review.UnresolvedConflicts) != 0 {
 		return false
@@ -423,6 +423,20 @@ func (service *Service) verifyNormalizationResolution(
 		return NormalizationResolution{}, fmt.Errorf("normalization curator report: %w", err)
 	}
 
+	// This binds the submitted receipt to the intake's exact revision and digest,
+	// both of which a later coverage retirement moves. That is compare-and-swap,
+	// not a standing invariant, because this function runs only at submission:
+	// NormalizationQueueApply is its sole caller and calls it only for the
+	// `resolve` action, on the caller-supplied request.Resolution, immediately
+	// before ArchiveFallbackTracker.Transition seals a copy into the queue item.
+	// Nothing re-runs it on a persisted resolution afterwards -
+	// validateNormalizationSuggestion re-checks a stored resolution's own
+	// self-digest and its source-report path and digest only, and
+	// closureNormalizationBlockers reads the item's status and re-derives
+	// coverage from the live graph rather than from the stored receipt. So a
+	// retirement after the fact cannot invalidate a resolution that was valid
+	// when it was recorded; it can only make the next resolution submission
+	// quote the newer revision and digest.
 	intake, ok := graph.Intakes[submitted.IntakeID]
 	if !ok || intake.Status != "reviewed" || intake.Revision != submitted.IntakeRevision ||
 		intake.Digest != submitted.IntakeDigest || !reviewBindsIntake(graph, intake) {

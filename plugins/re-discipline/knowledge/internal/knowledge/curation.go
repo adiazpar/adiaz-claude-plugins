@@ -431,6 +431,17 @@ func validateCurationSourceRunAdmissible(graph CampaignGraph, run RunRecord) err
 	if len(coverage.Dirty) > 0 {
 		dirty = fmt.Sprintf(" (%s, but that does not strand the run while a clean intake exists)",
 			strings.Join(coverage.Dirty, "; "))
+		// A reviewed dirty intake is not repairable here and never was: an
+		// intake a manager has ratified has no edge back to `submitted`, so
+		// curation can only ever add a new one beside it. Saying so, and naming
+		// the transition that does edit it in place, keeps a caller from
+		// reading this refusal as "submit the supplementary intake differently".
+		if reviewed := reviewedDirtyCoverageIntakes(coverage); reviewed != "" {
+			dirty += fmt.Sprintf(
+				". %s are already reviewed, so curation cannot revise them at all; their unresolved "+
+					"spans are re-dispositioned in place through manager_apply intake.coverage.retire",
+				reviewed)
+		}
 	}
 	return fmt.Errorf(
 		"intake source run %s is %s and its report %s is already covered by clean curator "+

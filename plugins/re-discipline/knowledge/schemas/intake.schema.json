@@ -26,7 +26,8 @@
     "uncertainties": {"type": "array", "items": {"type": "string"}},
     "requestedDecisions": {"type": "array", "items": {"type": "string"}},
     "triage": {"type": "object", "additionalProperties": {"enum": ["routine", "attention"]}},
-    "status": {"enum": ["draft", "submitted", "reviewed", "superseded"]}
+    "status": {"enum": ["draft", "submitted", "reviewed", "superseded"]},
+    "amendments": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/amendment"}}
   },
   "$defs": {
     "fileHandle": {
@@ -48,6 +49,32 @@
         "disposition": {"enum": ["candidate-finding", "duplicate", "non-claim", "unresolved", "out-of-scope"]},
         "targetId": {"type": "string"},
         "rationale": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "amendment": {
+      "type": "object",
+      "required": ["revision", "amendedAt", "amendedBy", "correlationId", "reviewId", "rationale", "retirements"],
+      "properties": {
+        "revision": {"type": "integer", "minimum": 2},
+        "amendedAt": {"type": "string", "format": "date-time"},
+        "amendedBy": {"type": "string", "minLength": 1},
+        "correlationId": {"type": "string", "minLength": 1},
+        "reviewId": {"type": "string", "pattern": "^V-[0-9]{4,}$"},
+        "rationale": {"type": "string", "minLength": 1},
+        "retirements": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/retirement"}}
+      },
+      "additionalProperties": false
+    },
+    "retirement": {
+      "type": "object",
+      "required": ["sourceHandle", "fromDisposition", "toDisposition", "fromRationale", "toRationale"],
+      "properties": {
+        "sourceHandle": {"type": "string", "pattern": "^path:.+#L[1-9][0-9]*-L[1-9][0-9]*$"},
+        "fromDisposition": {"const": "unresolved"},
+        "toDisposition": {"enum": ["non-claim", "out-of-scope"]},
+        "fromRationale": {"type": "string"},
+        "toRationale": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
     }

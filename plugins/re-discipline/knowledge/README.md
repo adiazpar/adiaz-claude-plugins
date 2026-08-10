@@ -94,7 +94,7 @@ public surface is exactly ten role-oriented operations:
 | `read` | Expand one exact record, finding, evidence, report, path, chunk, or URI handle. |
 | `trace` | Follow evidence, dependency, contradiction, supersession, run, and projection edges. |
 | `context_pack_materialize` | Preview an active-run or recruiting-run pack; after digest verification, directly publish recruiting packs only. Active-run publication belongs to `manager_apply` `run.prepare`. |
-| `manager_apply` | Apply typed campaign, work-item, run, review, finding, and decision transitions. |
+| `manager_apply` | Apply typed campaign, work-item, run, review, finding, decision, and coverage-retirement transitions. |
 | `curation_submit` | Submit a curator intake batch and complete report-span coverage. |
 | `closure_apply` | Start, advance, verify, reopen, restart, or finalize a resumable closure job. `restart` is the only re-entry after a reopen: it re-plans against the current campaign revision under an exact plan, job, coverage, and campaign compare-and-swap. |
 | `normalization_queue` | Inspect durable archive-normalization demand; create an exact path/digest/byte-bound manager request; or claim, acknowledge, and resolve one source-bound item with a verified curator-run, intake-coverage, and complete-review receipt. |
@@ -212,6 +212,47 @@ can still be repaired and names the run, the unresolved spans, and the
 dispositions that clear them. `invalidated` remains available as the manager's
 explicit void path, because it is the only other exit from `returned` and
 refusing it too would leave a dirty run with no exit at all.
+
+`intake.coverage.retire` is the one transition that edits a reviewed intake in
+place, and it exists because there was no small edit. Changing one coverage
+row's `disposition` and `rationale` - touching no finding, adding and removing
+no candidate - otherwise required a full curator packet, and because a curator
+may not resubmit an already-ratified finding, that dragged every candidate in
+the intake back through a re-ratification nobody re-read.
+
+The permitted change is deliberately one edge, expressed as a table of allowed
+ordered pairs rather than as a list of forbidden ones: a span may move from
+`unresolved` to `non-claim` or `out-of-scope`, and nothing else may move at all.
+`candidate-finding` and `duplicate` are the only dispositions carrying a
+`targetId`, so moving a row into or out of either changes which report bytes a
+ratified claim rests on; `non-claim` and `out-of-scope` are terminal judgments,
+and retracting one is `overturn`'s business. `unresolved` is the only
+disposition that is not a judgment, and the only one closure treats as blocking,
+which makes retiring it the only coverage edit that neither retracts nor
+re-sources anything. The transition is therefore monotone in report coverage: it
+can move a source from uncovered to covered and never the reverse.
+
+One transaction writes one intake and nothing else. It advances the intake by
+one revision, keeps it `reviewed`, and appends exactly one immutable amendment
+naming every retired span, the exact prior disposition and rationale it
+displaces, and the manager review it preserves. Everything the amendment does
+not name must be byte-identical, and that is enforced by reconstruction rather
+than by diffing: the engine applies the amendment to the committed record and
+requires the submission to equal the result exactly, so the amendment is the
+sole authority for the change and there is no unexamined field left to smuggle
+one through.
+
+The revision does bump - `validateMetaTransition` requires it and the journal
+treats `(revision, digest)` as one identity - so the review binding is carried by
+the amendment count rather than by the revision alone. The reviewed revision of
+an intake is `revision - 1 - len(amendments)`, written down once as
+`intakeReviewedRevision` and used by all three predicates that bind a review to
+its intake. The count cannot be padded: the record validator pins the last
+amendment's revision to the record's own, requires the revisions to strictly
+increase, and requires every retired span to still carry the disposition and
+rationale its amendment recorded. A retirement is one-way; there is no
+transition that returns a span to `unresolved`, and once the covering intake is
+clean `curation_submit` refuses a further supplementary intake over that report.
 
 Invalidation withdraws the run, not the evidence it already produced. The
 report handle stays frozen, the report stays in the closure plan's retained

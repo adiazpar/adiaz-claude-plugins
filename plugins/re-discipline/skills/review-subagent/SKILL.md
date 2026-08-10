@@ -41,6 +41,20 @@ complete a run while every intake over its report leaves one. Resolve the span
 into `candidate-finding`, `duplicate`, `non-claim`, or `out-of-scope`, or submit
 a further intake that does, before completing the run.
 
+If the intake carrying the unresolved span has already been reviewed, do not
+build a second curator packet for it. `reviewed` has no edge back to
+`submitted`, so a curator cannot revise it, and a supplementary intake re-opens
+every candidate in it. Use `manager_apply(action="intake.coverage.retire")`
+instead: submit the next intake revision with those spans re-dispositioned as
+`non-claim` or `out-of-scope`, plus one appended `amendments` entry naming each
+retired span, the exact prior disposition and rationale it displaces, the new
+rationale, and the review ID that ratified the intake. That transaction writes
+one intake and nothing else - no finding, review, run, or work record - and
+everything the amendment does not name must be byte-identical to the committed
+record. Only `unresolved` may move, and only to `non-claim` or `out-of-scope`;
+every other disposition change is either evidence work or an `overturn`. The
+move is one-way, and it closes the supplementary-intake route for that report.
+
 Submit one `manager_apply(action="review.submit")` transaction bound to the
 persisted canonical intake revision, exact candidate revisions and digests,
 exact evidence handles, and packet digest. Echo `reviewPacket.intake` from the
