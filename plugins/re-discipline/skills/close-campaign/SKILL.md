@@ -17,7 +17,12 @@ Call `closure_apply` with action `start`, the campaign revision, and an
 idempotency key, or call `state(mode="closure")` for an existing job. Advance,
 verify, reopen, and finalize through typed `closure_apply` actions. Entering
 `closing` freezes ordinary new runs; remediation requires an explicit manager
-transaction.
+transaction. That transaction is `manager_apply` with action
+`closure.remediation.run.create`, which takes the same payload as `run.prepare`
+and is the only way to open a run while a campaign is closing. Reach for it
+whenever a closure gate asks for work that needs a run, a normalization item
+most often. Do not reopen the campaign to get one: reopening abandons the
+closure attempt, it does not perform the work the attempt asked for.
 
 ## Advance The Stages
 
