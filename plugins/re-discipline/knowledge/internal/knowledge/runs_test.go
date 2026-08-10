@@ -72,10 +72,7 @@ func TestRunReturnAutomaticallyQueuesBoundCurationWork(t *testing.T) {
 		CampaignSlug: "test-campaign", CorrelationID: "corr-test",
 		Runs: []RunRecord{returned}, WorkItems: []WorkItemRecord{primary},
 	}
-	augmented, err := augmentRunReturnCuration(request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	augmented := augmentRunReturnCuration(request)
 	if len(augmented.WorkItems) != 2 {
 		t.Fatalf("run.return did not create one curation work item: %d", len(augmented.WorkItems))
 	}
@@ -111,10 +108,7 @@ func TestCuratorReturnDoesNotRecursivelyQueueCuration(t *testing.T) {
 		Action: "run.return", Actor: "manager", CorrelationID: "corr-test",
 		Runs: []RunRecord{returned}, WorkItems: []WorkItemRecord{stateTestWorkItem("W-0001")},
 	}
-	augmented, err := augmentRunReturnCuration(request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	augmented := augmentRunReturnCuration(request)
 	if len(augmented.WorkItems) != 1 || len(augmented.Runs[0].SpawnedWorkItemIDs) != 0 {
 		t.Fatal("curator return recursively queued another curator")
 	}

@@ -139,19 +139,23 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 	}
 	allowedKinds, ok := managerActionKinds[request.Action]
 	if !ok {
+		// The one refusal that can never be aggregated with anything, because
+		// every payload rule below is selected by the action. An unknown action
+		// has no rules to be judged against, so there is nothing else to say.
 		return StateTransactionReceipt{}, fmt.Errorf(
 			"unsupported manager action %q; manager_apply accepts %s",
 			request.Action, strings.Join(SupportedManagerActions(), ", "))
 	}
-	if strings.TrimSpace(request.Actor) == "" {
-		return StateTransactionReceipt{}, errors.New(
-			"manager_apply requires actor: the identity journaled with the transition. It must " +
-				"already appear in the campaign's permittedManagers, which state mode=orient " +
-				"returns and manager_apply campaign.update is the only transition that changes")
-	}
-	request, completionErr := completeRunPreparationHandles(request)
-	if completionErr != nil {
-		return StateTransactionReceipt{}, completionErr
+	// One pass, every violation the request alone reveals, before any write.
+	// The returned request carries the two engine-owned derivations - the run
+	// launch handles a caller may omit, and the curation work item a returned
+	// run implies - which is why it replaces the caller's copy from here on.
+	// See mutations_shape.go.
+	request, shapeErr := validateManagerRequestShape(request, allowedKinds, service.Configuration)
+	if shapeErr != nil {
+		return StateTransactionReceipt{}, withFirstStateViolation(
+			"manager_apply "+request.Action, shapeErr,
+			service.firstManagerStateViolation(ctx, request))
 	}
 	store := NewStateStoreWithBoundary(service.Boundary)
 	if err := store.Recover(ctx); err != nil {
@@ -167,15 +171,13 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 	} else if replayed {
 		return receipt, nil
 	}
+	// From here down every check needs canonical state, so every one of them
+	// still fails fast. Once the campaign does not resolve or the actor has no
+	// authority over it, the answers to the rules below are not evidence about
+	// the request - they are evidence about a premise that has already been
+	// shown false.
 	var graph CampaignGraph
-	if request.Action == "campaign.open" {
-		// Four separate preconditions used to collapse into one sentence, so a
-		// caller that got three of them right learned only that something was
-		// wrong. Say which one failed and what value would satisfy it.
-		if err := validateCampaignOpenPayload(request); err != nil {
-			return StateTransactionReceipt{}, err
-		}
-	} else {
+	if request.Action != "campaign.open" {
 		var err error
 		graph, err = store.LoadCampaignGraph(request.CampaignID)
 		if err != nil {
@@ -189,16 +191,6 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 				request.Actor, graph.Campaign.ID,
 				strings.Join(graph.Campaign.PermittedManagers, ", "))
 		}
-	}
-	if request.Action == "run.return" {
-		var err error
-		request, err = augmentRunReturnCuration(request)
-		if err != nil {
-			return StateTransactionReceipt{}, err
-		}
-	}
-	if err := validateManagerActionPayload(request, allowedKinds, service.Configuration); err != nil {
-		return StateTransactionReceipt{}, err
 	}
 	// Mandatory scoped context is never droppable from a context pack, so a
 	// record that cannot fit one bricks every later run for its campaign.
@@ -252,36 +244,14 @@ func SupportedManagerActions() []string {
 	return actions
 }
 
-// validateCampaignOpenPayload splits the one precondition campaign.open used to
-// state as a single sentence into the four it actually is. campaign.open is the
-// first call a caller ever makes against this engine, so it is the worst place
-// to answer "no" without saying which half of the payload was wrong.
+// validateCampaignOpenPayload reports every campaign.open precondition the
+// request fails, not the first. It is retained as a named entry point because
+// campaign.open's payload rules are the one set that is worth exercising
+// directly in a test; the aggregation lives in collectCampaignOpenPayload.
 func validateCampaignOpenPayload(request ManagerApplyRequest) error {
-	if request.Campaign == nil {
-		return errors.New(
-			"campaign.open requires campaign: the new campaign record at revision 1. " +
-				managerActionObligation("campaign.open"))
-	}
-	if request.Campaign.Status != "open" {
-		return fmt.Errorf(
-			"campaign.open requires campaign.status \"open\"; the submitted campaign is %q. A "+
-				"campaign reaches closing only through closure_apply start and closed only "+
-				"through closure_apply finalize",
-			request.Campaign.Status)
-	}
-	if len(request.WorkItems) == 0 {
-		return errors.New(
-			"campaign.open requires at least one work item: the campaign's root work. A campaign " +
-				"with no work item has nothing a run can be prepared against")
-	}
-	if !containsString(request.Campaign.PermittedManagers, request.Actor) {
-		return fmt.Errorf(
-			"campaign.open actor %q must appear in the submitted campaign.permittedManagers %s; "+
-				"a manager cannot open a campaign it is not permitted to manage. Remedy: add %q "+
-				"to permittedManagers in the same submitted campaign record",
-			request.Actor, strings.Join(request.Campaign.PermittedManagers, ", "), request.Actor)
-	}
-	return nil
+	set := newRefusalSet("manager_apply campaign.open")
+	collectCampaignOpenPayload(set, request)
+	return set.result()
 }
 
 // managerActionsAcceptingKind names every action that may write one record
@@ -301,242 +271,15 @@ func managerActionsAcceptingKind(kind string) string {
 	return strings.Join(actions, ", ")
 }
 
+// validateManagerActionPayload reports every per-action payload rule the
+// request fails. It is the aggregating entry point kept for direct testing; the
+// rules themselves live in collectManagerActionPayload in mutations_shape.go,
+// where the reason each one may or may not be evaluated out of order is
+// recorded next to it.
 func validateManagerActionPayload(request ManagerApplyRequest, allowed map[string]bool, configuration Configuration) error {
-	archiveAction := request.Action == "knowledge.archive-fallback.opt-in"
-	if request.ArchiveFallbackDecision != nil && !archiveAction {
-		return fmt.Errorf(
-			"manager action %s cannot carry archiveFallbackDecision; only "+
-				"knowledge.archive-fallback.opt-in accepts it. Remedy: drop the field, or "+
-				"re-issue as knowledge.archive-fallback.opt-in carrying only the decision",
-			request.Action)
-	}
-	if archiveAction && request.ArchiveFallbackDecision == nil {
-		// Every field here is named, and none of them is discoverable through
-		// the MCP surface: the candidate is a normalized-vs-raw benchmark
-		// report under .re-discipline/knowledge/measurements/, and no tool
-		// lists those. Naming the file is the most this refusal can honestly
-		// do; see the note in the schema for what would close the gap.
-		return errors.New(
-			"knowledge.archive-fallback.opt-in requires archiveFallbackDecision with " +
-				"candidateRunId, candidateReportDigest, candidateContentDigest, ratifiedAt, " +
-				"and expectedSettingsDigest. The candidate is a passing normalized-vs-raw " +
-				"measurement at .re-discipline/knowledge/measurements/normalized-vs-raw/" +
-				"<candidateRunId>/report.json, and expectedSettingsDigest is the exact current " +
-				"byte digest of .re-discipline/knowledge/policy.jsonc")
-	}
-	preparationAction := validOne(request.Action, "run.prepare", "closure.remediation.run.create")
-	if request.RunPreparation != nil && !preparationAction {
-		return fmt.Errorf(
-			"manager action %s cannot carry runPreparation; only run.prepare and "+
-				"closure.remediation.run.create launch a run. Remedy: drop the field, or "+
-				"re-issue as run.prepare",
-			request.Action)
-	}
-	kinds := map[string]int{
-		"campaign": boolCount(request.Campaign != nil), "work": len(request.WorkItems),
-		"run": len(request.Runs), "finding": len(request.Findings),
-		"intake": boolCount(request.Intake != nil), "review": boolCount(request.Review != nil),
-	}
-	total := 0
-	// Iterate a fixed order rather than the map's: a request that carries two
-	// disallowed kinds must refuse with the same message every time, or two
-	// identical retries look like two different failures.
-	for _, kind := range []string{"campaign", "work", "run", "finding", "intake", "review"} {
-		count := kinds[kind]
-		if count > 0 && !allowed[kind] {
-			return fmt.Errorf(
-				"manager action %s cannot write %s records; it accepts %s. %s records are "+
-					"written by %s",
-				request.Action, kind, describeAllowedRecordKinds(allowed), kind,
-				managerActionsAcceptingKind(kind))
-		}
-		total += count
-	}
-	if total == 0 && !archiveAction {
-		// A rationale is transaction metadata journaled with every transition;
-		// it is not itself a record. Naming the accepted kinds and the concrete
-		// obligation keeps a caller from concluding that the action is broken.
-		return fmt.Errorf(
-			"manager action %s contains no typed records; it accepts %s. %s",
-			request.Action, describeAllowedRecordKinds(allowed),
-			managerActionObligation(request.Action))
-	}
-	switch request.Action {
-	case "campaign.update":
-		if request.Campaign == nil {
-			return errors.New(
-				"campaign.update requires campaign: " + managerActionObligation("campaign.update"))
-		}
-	case "work.create", "work.update":
-		if len(request.WorkItems) == 0 {
-			return fmt.Errorf(
-				"%s requires workItems: %s", request.Action, managerActionObligation(request.Action))
-		}
-	case "knowledge.archive-fallback.opt-in":
-		if total != 0 || request.RunPreparation != nil || request.ReviewPacket != nil {
-			return errors.New(
-				"knowledge.archive-fallback.opt-in may carry only archiveFallbackDecision; it " +
-					"ratifies a retrieval policy and writes no campaign record. Remedy: drop " +
-					"every typed record, runPreparation, and reviewPacket from this request and " +
-					"submit any record changes as their own transitions")
-		}
-	case "run.prepare", "run.start", "run.return", "run.complete", "closure.remediation.run.create":
-		if len(request.Runs) != 1 || len(request.WorkItems) == 0 {
-			return fmt.Errorf(
-				"%s requires exactly one run and at least one work item; it carries %d run(s) "+
-					"and %d work item(s). %s",
-				request.Action, len(request.Runs), len(request.WorkItems),
-				managerActionObligation(request.Action))
-		}
-		primaryIncluded := false
-		for _, work := range request.WorkItems {
-			primaryIncluded = primaryIncluded || work.ID == request.Runs[0].PrimaryWorkItemID
-		}
-		if !primaryIncluded {
-			return fmt.Errorf(
-				"%s must publish the next revision of work item %s, the run's primaryWorkItemId; "+
-					"a run transition and the work item it advances are one transaction so the "+
-					"work item can never lag the run. state mode=work workItemId=%s returns the "+
-					"current revision and digest",
-				request.Action, request.Runs[0].PrimaryWorkItemID, request.Runs[0].PrimaryWorkItemID)
-		}
-		expectedStatus := map[string]string{
-			"run.prepare": "prepared", "run.start": "running", "run.return": "returned",
-			"closure.remediation.run.create": "prepared",
-		}[request.Action]
-		if request.Action != "run.complete" && request.Runs[0].Status != expectedStatus {
-			return fmt.Errorf(
-				"%s must submit the run at status %q; it is %q. The run lifecycle is "+
-					"prepared (run.prepare) -> running (run.start) -> returned (run.return) -> "+
-					"completed, blocked, aborted, or invalidated (run.complete). Remedy: set the "+
-					"run's status to %q, or issue the transition that owns %q",
-				request.Action, expectedStatus, request.Runs[0].Status,
-				expectedStatus, request.Runs[0].Status)
-		}
-		if request.Action == "run.complete" &&
-			!validOne(request.Runs[0].Status, "completed", "blocked", "aborted", "invalidated") {
-			return fmt.Errorf(
-				"run.complete must submit the run at a terminal status - completed, blocked, "+
-					"aborted, or invalidated - and it is %q. Remedy: set one of the four, or "+
-					"issue the transition that owns %q",
-				request.Runs[0].Status, request.Runs[0].Status)
-		}
-		if preparationAction && request.Runs[0].Role != "manager" && request.RunPreparation == nil {
-			return fmt.Errorf(
-				"%s of a %s run requires runPreparation: the brief text and the immutable "+
-					"context pack. Compile the pack with context_pack_materialize action=preview "+
-					"against target kind=active-run for this campaign, work item, and run, and "+
-					"submit the previewed pack unchanged; the run record's brief and contextPack "+
-					"handles may be omitted and the engine derives them",
-				request.Action, request.Runs[0].Role)
-		}
-	case "review.submit", "decision.record":
-		if request.Review == nil || request.Intake == nil || request.ReviewPacket == nil {
-			return fmt.Errorf(
-				"manager action %s requires review, resulting intake, and the exact reviewed packet: %s",
-				request.Action, managerActionObligation(request.Action))
-		}
-		packet := request.ReviewPacket.Packet()
-		if err := ValidateReviewPacketEnvelope(request.ReviewPacket.Envelope, packet); err != nil {
-			return err
-		}
-		if err := ValidateManagerReview("manager", packet, *request.Review); err != nil {
-			return err
-		}
-		if request.Review.PacketDigest != request.ReviewPacket.Envelope.Digest {
-			return fmt.Errorf(
-				"review.packetDigest is %s but the submitted reviewPacket.envelope.digest is %s; "+
-					"the receipt must name the exact packet that was read. Remedy: set "+
-					"review.packetDigest to %s",
-				request.Review.PacketDigest, request.ReviewPacket.Envelope.Digest,
-				request.ReviewPacket.Envelope.Digest)
-		}
-		if !configuration.Valid {
-			return errors.New(
-				"manager review requires valid review-load configuration; the project's " +
-					".re-discipline/knowledge/policy.jsonc did not parse into a usable " +
-					"reviewLoad bootstrap, so the engine cannot check that this review was " +
-					"measured under a declared load. Remedy: repair or restore policy.jsonc " +
-					"(re-discipline init-project reinstalls the canonical file) and re-submit; " +
-					"no state was written")
-		}
-		if err := ValidateReviewLoadBinding(request.Review.ReviewLoad, *request.Review,
-			packet, configuration.Bootstrap.ReviewLoad); err != nil {
-			return err
-		}
-		if err := ValidateReviewLoadTemporalBinding(
-			request.Review.ReviewLoad, request.ReviewPacket.Envelope.CreatedAt, *request.Review,
-		); err != nil {
-			return err
-		}
-		if request.Intake.ID != request.Review.IntakeID || request.Intake.Revision != request.Review.IntakeRevision+1 ||
-			request.Intake.Status != "reviewed" {
-			return fmt.Errorf(
-				"review submission must advance the reviewed intake in the same transaction: the "+
-					"submitted intake must be id %s at revision %d with status \"reviewed\", and "+
-					"it is id %s at revision %d with status %q. The review receipt and the intake "+
-					"revision it produces are one write because a receipt that outlives its "+
-					"intake revision cannot be told from one that was never applied",
-				request.Review.IntakeID, request.Review.IntakeRevision+1,
-				request.Intake.ID, request.Intake.Revision, request.Intake.Status)
-		}
-		outcomes := make([]FindingDocument, 0, len(request.Findings))
-		for _, finding := range request.Findings {
-			outcomes = append(outcomes, finding.Document())
-		}
-		if err := ValidateManagerReviewOutcomes(packet, *request.Review, *request.Intake, outcomes); err != nil {
-			return err
-		}
-	case "intake.coverage.retire":
-		// The payload gate is deliberately narrow. Every substantive proof -
-		// that the amendment quotes what it displaced, that it reconstructs the
-		// exact submitted record, that the review it names really ratified this
-		// intake - needs canonical prior state and belongs in
-		// validateAppliedCoverageRetirement. What belongs here is the shape a
-		// caller can get wrong before the engine has even loaded the record it
-		// is amending, said once and plainly.
-		if request.Intake == nil {
-			return fmt.Errorf(
-				"manager action %s requires the next revision of the intake being amended: %s",
-				request.Action, managerActionObligation(request.Action))
-		}
-		if request.ReviewPacket != nil || request.RunPreparation != nil {
-			return errors.New(
-				"a coverage retirement is not a review and prepares no run; it carries neither a review " +
-					"packet nor a run preparation")
-		}
-		if request.Intake.Status != "reviewed" {
-			return fmt.Errorf(
-				"a coverage retirement amends a reviewed intake and leaves it reviewed; the submitted "+
-					"intake is %s", request.Intake.Status)
-		}
-		if len(request.Intake.Amendments) == 0 {
-			return errors.New(
-				"a coverage retirement must append one amendment naming every span it retires, the exact " +
-					"rationale each displaces, and the manager review it preserves")
-		}
-		if err := ValidateCoverageAmendmentShape(
-			request.Intake.Amendments[len(request.Intake.Amendments)-1],
-		); err != nil {
-			return err
-		}
-	case "finding.challenge":
-		if len(request.Findings) == 0 {
-			return errors.New(
-				"finding.challenge requires findings: " + managerActionObligation("finding.challenge"))
-		}
-		for _, finding := range request.Findings {
-			if finding.Record.Validity != "challenged" {
-				return fmt.Errorf(
-					"finding.challenge may publish only findings whose validity is \"challenged\"; "+
-						"finding %s is %q. Remedy: set validity to \"challenged\" on this "+
-						"revision, or use manager_apply finding.update for a revision that is "+
-						"not a challenge",
-					finding.Record.ID, finding.Record.Validity)
-			}
-		}
-	}
-	return nil
+	set := newRefusalSet("manager_apply " + request.Action)
+	collectManagerActionPayload(set, request, allowed, configuration)
+	return set.result()
 }
 
 // managerActionObligations states, for each typed manager transition, the
@@ -688,39 +431,12 @@ func (service *Service) prepareManagerRunArtifacts(
 			strings.Join(mismatches, "; "),
 			request.CampaignID, run.PrimaryWorkItemID, run.ID)
 	}
-	expectedRole := "drafter"
-	if run.Role == "manager" {
-		expectedRole = "manager"
-	}
-	if preparation.ContextPack.Role != expectedRole {
-		return nil, fmt.Errorf("run role %s requires a %s context pack", run.Role, expectedRole)
-	}
-	if !EqualWriteGrants(run.WriteGrants, preparation.ContextPack.WriteGrants) {
-		return nil, errors.New(
-			"the run record's writeGrants and the context pack's writeGrants differ; the pack " +
-				"seals the grants into the brief the drafter reads, so the two can never " +
-				"disagree. Remedy: recompile the pack with context_pack_materialize " +
-				"action=preview passing exactly the writeGrants the run record carries")
-	}
-	campaignHandle := "record:active/" + request.CampaignSlug + "/campaign.json"
-	workHandle := "record:active/" + request.CampaignSlug + "/work-items/" + run.PrimaryWorkItemID + ".json"
-	missingHandles := []string{}
-	if !containsString(preparation.ContextPack.RequiredHandles, campaignHandle) {
-		missingHandles = append(missingHandles, campaignHandle)
-	}
-	if !containsString(preparation.ContextPack.RequiredHandles, workHandle) {
-		missingHandles = append(missingHandles, workHandle)
-	}
-	if len(missingHandles) != 0 {
-		return nil, fmt.Errorf(
-			"run preparation context pack omits required handle(s) %s; a run's pack must always "+
-				"carry its own campaign and work item so the drafter cannot be launched without "+
-				"the record defining its task. Remedy: recompile with "+
-				"context_pack_materialize action=preview against target kind=active-run "+
-				"campaignId=%s workItemId=%s runId=%s, which adds both handles",
-			strings.Join(missingHandles, " and "),
-			request.CampaignID, run.PrimaryWorkItemID, run.ID)
-	}
+	// The pack's role, its write grants, and the two handles it must always
+	// carry are facts about the submitted pack and the submitted run, so they
+	// are checked in collectManagerLaunchShape alongside every other shape
+	// violation rather than one per round trip here. What stays is what needs
+	// canonical state: the scope binding above, and the generation and
+	// retrieval-profile binding below.
 
 	generation, _, selected, _, err := service.ensure(ctx)
 	if err != nil {
@@ -991,30 +707,40 @@ func canonicalRunBrief(value string, grants []WriteGrant) ([]byte, error) {
 	return []byte(value), nil
 }
 
-func augmentRunReturnCuration(request ManagerApplyRequest) (ManagerApplyRequest, error) {
-	if len(request.Runs) != 1 {
-		return request, errors.New("run.return requires exactly one returned run")
+// augmentRunReturnCuration appends the curation work a returned run implies.
+//
+// It used to refuse three ways: no single run, no frozen report, and a caller
+// that submitted the system-owned queue id itself. All three are ordinary shape
+// rules about the submitted request and they now live with the rest of them in
+// collectManagerRunPayload, which reports them alongside everything else wrong
+// with the same request instead of one per round trip. What is left is a pure
+// transformation, so it cannot fail and does not return an error: on a request
+// whose shape has not been established it declines to transform and leaves the
+// refusal to the validator that owns it.
+func augmentRunReturnCuration(request ManagerApplyRequest) ManagerApplyRequest {
+	if request.Action != "run.return" || len(request.Runs) != 1 {
+		return request
 	}
 	run := request.Runs[0]
 	if run.Status != "returned" || run.Report == nil {
-		return request, errors.New("run.return requires a returned run with a frozen report handle")
+		return request
 	}
 	// A curator return is the normalization transaction itself. Queueing a
 	// curator to curate that curator would recurse forever; CurationSubmit binds
 	// its report directly to the resulting intake instead.
 	if run.Role == "curator" {
-		return request, nil
+		return request
 	}
 	queue := continuousCurationWork(run, request.Actor, request.CorrelationID)
 	for _, work := range request.WorkItems {
 		if work.ID == queue.ID {
-			return request, fmt.Errorf("run.return curation queue id %s is system-owned", queue.ID)
+			return request
 		}
 	}
 	request.WorkItems = append(append([]WorkItemRecord(nil), request.WorkItems...), queue)
 	run.SpawnedWorkItemIDs = SortedUnique(append(run.SpawnedWorkItemIDs, queue.ID))
 	request.Runs = []RunRecord{run}
-	return request, nil
+	return request
 }
 
 func continuousCurationWorkID(runID string) string {
@@ -1048,6 +774,76 @@ func continuousCurationWork(run RunRecord, actor, correlationID string) WorkItem
 	}
 }
 
+// managerRecordValues lists, in a fixed order, every typed record a manager
+// transition would write.
+//
+// It exists as its own function because two passes walk the same list for
+// different reasons: the shape validator, to report everything wrong with all
+// of them at once, and buildManagerWrites, to derive the writes that are
+// actually committed. Two hand-maintained copies of this order would eventually
+// disagree, and the disagreement would show up as a violation reported for a
+// record that the write path never looked at.
+func managerRecordValues(request ManagerApplyRequest) []any {
+	values := []any{}
+	if request.Campaign != nil {
+		values = append(values, *request.Campaign)
+	}
+	for _, value := range request.WorkItems {
+		values = append(values, value)
+	}
+	for _, value := range request.Runs {
+		values = append(values, value)
+	}
+	for _, value := range request.Findings {
+		values = append(values, value.Document())
+	}
+	if request.Intake != nil {
+		values = append(values, *request.Intake)
+	}
+	if request.Review != nil {
+		values = append(values, *request.Review)
+	}
+	return values
+}
+
+// managerRecordWrite derives the single StateWrite one submitted record
+// produces, including the compare-and-swap expectation that guards it.
+//
+// Every input is the caller's: the record itself, the request's campaign and
+// correlation ids, and the expectedRecordDigests map. Nothing here reads
+// canonical state, which is what lets the shape validator run it over every
+// record before the engine has loaded anything, and report all of the failures
+// rather than the first.
+func managerRecordWrite(request ManagerApplyRequest, value any) (StateWrite, error) {
+	id, revision, _, campaignID, correlationID, err := stateRecordIdentity(value, 0, request.CorrelationID)
+	if err != nil {
+		return StateWrite{}, err
+	}
+	if campaignID != request.CampaignID ||
+		(request.Action != "reconcile.import" && correlationID != request.CorrelationID) {
+		return StateWrite{}, fmt.Errorf(
+			"record %s does not bind the requested campaign and correlation", id)
+	}
+	path, err := stateRecordPath(request.CampaignSlug, value)
+	if err != nil {
+		return StateWrite{}, err
+	}
+	expectedRevision := revision - 1
+	expectedDigest := ""
+	if request.Action == "reconcile.import" {
+		expectedRevision = revision
+	}
+	if expectedRevision > 0 {
+		expectedDigest = request.ExpectedRecordDigests[id]
+		if !digestRE.MatchString(expectedDigest) {
+			return StateWrite{}, missingExpectedDigestError("manager_apply", id, expectedRevision, path)
+		}
+	}
+	return StateWrite{
+		Path: path, ExpectedRevision: expectedRevision, ExpectedDigest: expectedDigest, Record: value,
+	}, nil
+}
+
 func buildManagerWrites(
 	boundary Boundary,
 	request ManagerApplyRequest,
@@ -1060,59 +856,24 @@ func buildManagerWrites(
 		}
 		artifactByPath[artifact.Path] = artifact
 	}
-	values := []any{}
-	if request.Campaign != nil {
-		values = append(values, *request.Campaign)
-	}
-	for _, value := range request.WorkItems {
-		values = append(values, value)
-	}
+	// Handle verification reads bytes off disk to prove a submitted digest, so
+	// it is state, not shape, and it stays here failing fast.
 	for _, value := range request.Runs {
 		if err := verifyRunHandles(boundary, request.CampaignSlug, value, artifactByPath); err != nil {
 			return nil, "", err
 		}
-		values = append(values, value)
 	}
-	for _, value := range request.Findings {
-		values = append(values, value.Document())
-	}
-	if request.Intake != nil {
-		values = append(values, *request.Intake)
-	}
-	if request.Review != nil {
-		values = append(values, *request.Review)
-	}
+	values := managerRecordValues(request)
 	writes := make([]StateWrite, 0, len(values))
 	reviewHandle := ""
 	for _, value := range values {
-		id, revision, _, campaignID, correlationID, err := stateRecordIdentity(value, 0, request.CorrelationID)
+		write, err := managerRecordWrite(request, value)
 		if err != nil {
 			return nil, "", err
 		}
-		if campaignID != request.CampaignID ||
-			(request.Action != "reconcile.import" && correlationID != request.CorrelationID) {
-			return nil, "", fmt.Errorf("record %s does not bind the requested campaign and correlation", id)
-		}
-		path, err := stateRecordPath(request.CampaignSlug, value)
-		if err != nil {
-			return nil, "", err
-		}
-		expectedRevision := revision - 1
-		expectedDigest := ""
-		if request.Action == "reconcile.import" {
-			expectedRevision = revision
-		}
-		if expectedRevision > 0 {
-			expectedDigest = request.ExpectedRecordDigests[id]
-			if !digestRE.MatchString(expectedDigest) {
-				return nil, "", missingExpectedDigestError("manager_apply", id, expectedRevision, path)
-			}
-		}
-		writes = append(writes, StateWrite{
-			Path: path, ExpectedRevision: expectedRevision, ExpectedDigest: expectedDigest, Record: value,
-		})
+		writes = append(writes, write)
 		if _, ok := value.(ReviewRecord); ok {
-			reviewHandle = "record:" + path
+			reviewHandle = "record:" + write.Path
 		}
 	}
 	return writes, reviewHandle, nil
@@ -1153,24 +914,13 @@ func (service *Service) curationSubmit(ctx context.Context, request CurationSubm
 	if service == nil {
 		return StateTransactionReceipt{}, errors.New("service is required")
 	}
-	packet := CurationPacket{Intake: request.Intake, Rows: append([]CurationRow(nil), request.Rows...)}
-	for _, candidate := range request.Candidates {
-		document := candidate.Document()
-		expectedPath, pathErr := stateRecordPath(request.CampaignSlug, document)
-		if pathErr != nil {
-			return StateTransactionReceipt{}, pathErr
-		}
-		if document.Record.Path != expectedPath {
-			return StateTransactionReceipt{}, fmt.Errorf(
-				"candidate %s path must be canonical %s", document.Record.ID, expectedPath)
-		}
-		packet.Candidates = append(packet.Candidates, document)
-	}
-	if err := ValidateCurationPacket("curator", packet); err != nil {
-		return StateTransactionReceipt{}, err
-	}
-	if request.CampaignID != request.Intake.CampaignID || request.CorrelationID != request.Intake.CorrelationID {
-		return StateTransactionReceipt{}, errors.New("curation intake does not bind the requested campaign and correlation")
+	// One pass, every violation the packet alone reveals, before any write.
+	// See validateCurationRequestShape in mutations_shape.go; the packet it
+	// returns is the same one the rules below were judged against, so the
+	// engine never re-derives it from records it has already refused.
+	packet, shapeErr := validateCurationRequestShape(request)
+	if shapeErr != nil {
+		return StateTransactionReceipt{}, shapeErr
 	}
 	store := NewStateStoreWithBoundary(service.Boundary)
 	if err := store.Recover(ctx); err != nil {
@@ -1215,14 +965,7 @@ func (service *Service) curationSubmit(ctx context.Context, request CurationSubm
 	if err := verifyCanonicalIntakeCoverage(service.Boundary, request.Intake); err != nil {
 		return StateTransactionReceipt{}, err
 	}
-	if len(request.WorkItems) != 0 {
-		return StateTransactionReceipt{}, errors.New(
-			"curators may propose spawned work-item ids in intake but only manager review may create work records")
-	}
-	values := []any{request.Intake}
-	for _, candidate := range request.Candidates {
-		values = append(values, candidate.Document())
-	}
+	values := curationRecordValues(request)
 	if request.CuratorRun != nil {
 		canonical, bindingErr := validateReturnedCuratorRunBinding(graph, request.Actor, *request.CuratorRun)
 		if bindingErr != nil {
@@ -1234,27 +977,11 @@ func (service *Service) curationSubmit(ctx context.Context, request CurationSubm
 	}
 	writes := []StateWrite{}
 	for _, value := range values {
-		id, revision, _, campaignID, correlationID, err := stateRecordIdentity(value, 0, request.CorrelationID)
+		write, err := curationRecordWrite(request, value)
 		if err != nil {
 			return StateTransactionReceipt{}, err
 		}
-		if campaignID != request.CampaignID || correlationID != request.CorrelationID {
-			return StateTransactionReceipt{}, fmt.Errorf("curation record %s has mismatched campaign or correlation", id)
-		}
-		path, err := stateRecordPath(request.CampaignSlug, value)
-		if err != nil {
-			return StateTransactionReceipt{}, err
-		}
-		expected := revision - 1
-		digest := ""
-		if expected > 0 {
-			digest = request.ExpectedRecordDigests[id]
-			if !digestRE.MatchString(digest) {
-				return StateTransactionReceipt{}, missingExpectedDigestError(
-					"curation_submit", id, expected, path)
-			}
-		}
-		writes = append(writes, StateWrite{Path: path, ExpectedRevision: expected, ExpectedDigest: digest, Record: value})
+		writes = append(writes, write)
 	}
 	return store.Apply(ctx, StateTransactionRequest{
 		CampaignSlug: request.CampaignSlug, CampaignID: request.CampaignID,

@@ -113,37 +113,21 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 		result := ClosureApplyResult{SchemaVersion: CampaignSchemaVersion, Action: request.Action, State: &view}
 		return sealClosureApplyResult(result)
 	}
-	// Name the fields that are actually missing. This gate covers six of them,
-	// and answering with the list rather than the union is the difference
-	// between one retry and six.
-	missing := []string{}
-	for _, field := range []struct{ name, value string }{
-		{"actor", request.Actor}, {"campaignId", request.CampaignID},
-		{"campaignSlug", request.CampaignSlug}, {"correlationId", request.CorrelationID},
-		{"idempotencyKey", request.IdempotencyKey},
-	} {
-		if field.value == "" {
-			missing = append(missing, field.name)
-		}
+	// Name the fields that are actually missing - all of them, including the two
+	// start-only ones that used to be checked several calls deeper with the
+	// campaign-status and existing-job gates between them. See
+	// collectClosureRequestShape in mutations_shape.go.
+	shape := newRefusalSet("closure_apply " + request.Action)
+	collectClosureRequestShape(shape, request)
+	if err := shape.result(); err != nil {
+		return ClosureApplyResult{}, err
 	}
-	if !digestRE.MatchString(request.ExpectedHeadDigest) {
-		missing = append(missing, "expectedHeadDigest (sha256:<64 hex>)")
-	}
-	if len(missing) != 0 {
-		return ClosureApplyResult{}, fmt.Errorf(
-			"closure %s is a mutation and requires %s. state mode=orient returns the campaign id, "+
-				"slug, and the current head revision and digest; correlationId and "+
-				"idempotencyKey are caller-chosen and must be stable across retries of this "+
-				"same transition",
-			request.Action, strings.Join(missing, ", "))
-	}
+	// Parsed rather than carried out of the shape pass: the pass proved this
+	// exact string is a UTC RFC3339 instant, so the parse cannot fail here, and
+	// threading a time.Time out of a validator would let the two drift.
 	timestamp, err := time.Parse(time.RFC3339Nano, request.Timestamp)
-	if err != nil || timestamp.Location() != time.UTC {
-		return ClosureApplyResult{}, fmt.Errorf(
-			"closure %s requires timestamp as a UTC RFC3339 instant, for example "+
-				"2026-01-31T14:05:00Z; it is %q. The engine never invents a closure time because "+
-				"the receipt it seals is the campaign's durable record of when it closed",
-			request.Action, request.Timestamp)
+	if err != nil {
+		return ClosureApplyResult{}, err
 	}
 	store := NewStateStoreWithBoundary(service.Boundary)
 	store.Now = func() time.Time { return timestamp }

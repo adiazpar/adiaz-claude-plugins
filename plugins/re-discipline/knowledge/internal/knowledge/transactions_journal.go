@@ -106,20 +106,12 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		return receipt, nil
 	}
 	if head.Revision != prepared.Request.ExpectedHeadRevision || head.Digest != prepared.Request.ExpectedHeadDigest {
-		// This is the single most frequent refusal in the engine, and until it
-		// named the way forward it read as a dead end rather than as "somebody
-		// else went first". Say what the caller must re-read, and say that
-		// nothing was written, because the second question after a conflict is
-		// always whether a partial write landed.
-		return StateTransactionReceipt{}, fmt.Errorf(
-			"%w: expected head %d/%s, found %d/%s. Canonical state moved between the read that "+
-				"produced those expectations and this call, so nothing was written. Remedy: "+
-				"state mode=delta campaignId=%s sinceEventId=<the eventHead you last read> "+
-				"shows exactly what changed; then re-read the affected records, rebuild "+
-				"expectedHeadRevision, expectedHeadDigest, and every expectedRecordDigests "+
-				"entry, and re-issue",
-			ErrStateConflict, prepared.Request.ExpectedHeadRevision, prepared.Request.ExpectedHeadDigest,
-			head.Revision, head.Digest, prepared.Request.CampaignID)
+		// The wording lives in staleHeadConflict because the aggregate shape
+		// pass raises the same conflict earlier, and a caller that meets it
+		// twice must meet the same sentence twice. See refusal_aggregate.go.
+		return StateTransactionReceipt{}, staleHeadConflict(
+			prepared.Request.ExpectedHeadRevision, prepared.Request.ExpectedHeadDigest,
+			head, prepared.Request.CampaignID)
 	}
 	if err := store.validateArtifactExpectations(prepared.Artifacts); err != nil {
 		return StateTransactionReceipt{}, err
