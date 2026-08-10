@@ -341,7 +341,10 @@ server_health() {
   runtime="$plugin_root/knowledge/bin/re-discipline-knowledge"
   if [ ! -f "$manifest" ] || [ ! -x "$runtime" ]; then printf 'runtime unavailable\n'; return; fi
   version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1)
-  if [ "$version" != 0.8.0 ]; then printf 'runtime version mismatch\n'; return; fi
+  # The contract line, not the patch level. A hook that pins the exact patch
+  # reports a mismatch on every release it did not itself change, which is the
+  # same trap that stranded the published version behind its source.
+  case "$version" in 0.8|0.8.*) ;; *) printf 'runtime version mismatch\n'; return;; esac
   if "$runtime" preflight --asset-root "$plugin_root/knowledge" --project-root "$root" >/dev/null 2>&1; then
     printf 'preflight passed\n'
   else

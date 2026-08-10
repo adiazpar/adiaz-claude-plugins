@@ -239,7 +239,10 @@ function Get-ServerHealth {
     }
     try { $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json }
     catch { return 'runtime manifest invalid' }
-    if ([string]$manifest.runtime.version -ne '0.8.0') { return 'runtime version mismatch' }
+    # The contract line, not the patch level. A hook that pins the exact patch
+    # reports a mismatch on every release it did not itself change, which is the
+    # same trap that stranded the published version behind its source.
+    if ([string]$manifest.runtime.version -notmatch '^0\.8(?:\.|$)') { return 'runtime version mismatch' }
     try {
         $null = & $runtimePath preflight --asset-root (Join-Path $pluginRoot 'knowledge') --project-root $Root 2>$null
         if ($LASTEXITCODE -eq 0) { return 'preflight passed' }
