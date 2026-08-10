@@ -257,6 +257,17 @@ func validateAppliedRunCompletion(previous CampaignGraph, writes []preparedState
 		if !validOne(run.Status, "completed", "blocked") || run.Report == nil {
 			continue
 		}
+		// A curator report is where normalization is recorded, not where a claim
+		// enters, so it is not a claim source and closure classifies it
+		// `not-a-claim-source` without asking for coverage. This guard has to make
+		// the same exemption, or the two disagree about the same run: closure lets
+		// a curator run through and run.complete does not, stranding it at
+		// `returned` and demanding an intake over the receipt. That is exactly the
+		// recursion closure documents itself avoiding - each lap adds a report
+		// that needs its own curator run, so it never converges.
+		if !runIsClaimSource(run) {
+			continue
+		}
 		if err := validateRunReportIsCurated(previous, run); err != nil {
 			return err
 		}

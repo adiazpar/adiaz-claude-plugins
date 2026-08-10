@@ -232,20 +232,61 @@ func ValidateCurationPacket(role string, packet CurationPacket) error {
 	return nil
 }
 
-func coverageEvidenceKey(path, sha256 string, startLine, endLine int, objectKey string) string {
-	return fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%s", path, sha256, startLine, endLine, objectKey)
+// coverageEvidenceKey identifies the exact bytes a span covers: the source
+// report's content digest and the line range within it. Path and object handle
+// are deliberately excluded.
+//
+// They record where the bytes currently sit, and closure moves that on purpose.
+// The project stage rewrites every finding's evidence from active/<slug>/... to
+// the archive destination while intake coverage keeps naming the active path,
+// and then hands that projected graph to ComputeClosureCoverage, which
+// validates it. Keyed on path, the two halves of the same fact stopped matching
+// the moment closure performed the rewrite it exists to perform, so no campaign
+// whose findings cite its own run reports could leave the project stage.
+//
+// Keying on the digest is the stronger check rather than a weaker one. A path is
+// a location and closure rewrites it; a content digest is identity. Two spans
+// agreeing on digest and line range cover the same bytes wherever they live, and
+// a candidate that cited different bytes still fails.
+func coverageEvidenceKey(sha256 string, startLine, endLine int) string {
+	return fmt.Sprintf("%s\x00%d\x00%d", sha256, startLine, endLine)
 }
 
 func coverageEntryEvidenceKey(entry CoverageEntry) string {
-	return coverageEvidenceKey(
-		entry.SourcePath, entry.SourceSHA256, entry.StartLine, entry.EndLine, entry.SourceHandle,
-	)
+	return coverageEvidenceKey(entry.SourceSHA256, entry.StartLine, entry.EndLine)
 }
 
 func evidenceReferenceCoverageKey(evidence EvidenceReference) string {
-	return coverageEvidenceKey(
-		evidence.Path, evidence.SHA256, evidence.StartLine, evidence.EndLine, evidence.ObjectKey,
-	)
+	return coverageEvidenceKey(evidence.SHA256, evidence.StartLine, evidence.EndLine)
+}
+
+// validateEvidenceHandleAgrees checks one evidence reference against itself: a
+// line-form `path:` handle has to name the same path and the same line range as
+// the fields beside it.
+//
+// This used to be caught only as a side effect, because the coverage key
+// concatenated the handle with the line numbers, so a handle that disagreed
+// produced a key that matched nothing. That made a self-inconsistent reference
+// report as evidence escaping its span, which named the wrong defect, and it
+// stopped being caught at all once the key dropped the path closure rewrites.
+// It is a real invariant, so it is now checked directly and says what is wrong.
+//
+// Only the `#L` form is checked. Byte-range handles and archive-pinned git refs
+// carry their own shapes and are validated where they are parsed.
+func validateEvidenceHandleAgrees(findingID string, evidence EvidenceReference) error {
+	if !strings.HasPrefix(evidence.ObjectKey, "path:") ||
+		!strings.Contains(evidence.ObjectKey, "#L") {
+		return nil
+	}
+	want := fmt.Sprintf("path:%s#L%d-L%d", evidence.Path, evidence.StartLine, evidence.EndLine)
+	if evidence.ObjectKey != want {
+		return fmt.Errorf(
+			"candidate finding %s has an evidence handle %q that disagrees with the reference "+
+				"beside it; for %s lines %d-%d the handle is %q",
+			findingID, evidence.ObjectKey, evidence.Path,
+			evidence.StartLine, evidence.EndLine, want)
+	}
+	return nil
 }
 
 func validateCandidateCoverageEvidence(packet CurationPacket) error {
@@ -268,6 +309,9 @@ func validateCandidateCoverageEvidence(packet CurationPacket) error {
 			return fmt.Errorf("candidate finding %s has no exact coverage evidence", candidate.Record.ID)
 		}
 		for _, evidence := range candidate.Record.Evidence {
+			if err := validateEvidenceHandleAgrees(candidate.Record.ID, evidence); err != nil {
+				return err
+			}
 			key := evidenceReferenceCoverageKey(evidence)
 			if remaining[key] == 0 {
 				return fmt.Errorf("candidate finding %s has evidence outside its exact coverage spans", candidate.Record.ID)

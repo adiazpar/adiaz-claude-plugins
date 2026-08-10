@@ -564,10 +564,20 @@ func (service *Service) verifyNormalizationResolution(
 		return NormalizationResolution{}, errors.New(
 			"normalization resolution does not bind an exact canonical reviewed intake")
 	}
-	if len(intake.Conflicts) != 0 || len(intake.Uncertainties) != 0 ||
-		len(intake.RequestedDecisions) != 0 {
+	// Conflicts and requested decisions name work with somewhere to go: a
+	// conflict is discharged by overturn, a requested decision by a manager
+	// recording one. An uncertainty is not work. It is a recorded limit - the
+	// curator naming what the evidence does not establish - and the engine has
+	// no transition that empties the field, by design: findings carry the same
+	// text forward as knownLimits precisely so it survives.
+	//
+	// So requiring it empty was not a standard, it was a refusal to resolve any
+	// honestly curated intake, and it fell hardest on the careful ones. Closure
+	// coverage never read the field either, so the two gates disagreed about
+	// whether the same reviewed intake was finished.
+	if len(intake.Conflicts) != 0 || len(intake.RequestedDecisions) != 0 {
 		return NormalizationResolution{}, errors.New(
-			"normalization intake retains unresolved conflicts, uncertainties, or decisions")
+			"normalization intake retains unresolved conflicts or requested decisions")
 	}
 	if err := verifyCanonicalIntakeCoverage(service.Boundary, intake); err != nil {
 		return NormalizationResolution{}, err

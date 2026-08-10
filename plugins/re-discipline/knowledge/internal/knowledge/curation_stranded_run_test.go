@@ -940,3 +940,31 @@ func TestCurationAdmissionAndCompletionGuardAreExactComplements(t *testing.T) {
 		}
 	}
 }
+
+// A curator report records how the record was triaged, not what is true of the
+// system under study, so closure classifies it `not-a-claim-source` and never
+// asks for coverage over it. run.complete has to make the same exemption. When
+// it did not, a curator run could be returned and then never completed: the
+// only exit demanded an intake over the receipt, and curating that receipt
+// produces another one. Closure documents avoiding exactly that recursion.
+func TestRunCompletionExemptsCuratorReportsLikeClosureDoes(t *testing.T) {
+	for _, test := range []struct {
+		role        string
+		completable bool
+	}{
+		{role: "curator", completable: true},
+		{role: "investigator", completable: false},
+	} {
+		graph, run := admissibilityTestGraph("returned")
+		run.Role = test.role
+		graph.Runs[run.ID] = run
+
+		completed := run
+		completed.Status = "completed"
+		err := validateAppliedRunCompletion(graph, []preparedStateWrite{{Record: completed}})
+		if (err == nil) != test.completable {
+			t.Fatalf("%s run with no covering intake: completable=%v err=%v",
+				test.role, err == nil, err)
+		}
+	}
+}

@@ -268,9 +268,23 @@ func TestCurationPacketRequiresAnExhaustiveNonOverlappingSourcePartition(t *test
 }
 
 func TestCurationPacketBindsCandidateEvidenceToExactTargetedSpans(t *testing.T) {
+	// A handle that disagrees with the line numbers beside it is a
+	// self-inconsistent reference, which is a different defect from evidence
+	// escaping its span and now reports as itself.
 	packet := testCurationPacket(t)
 	packet.Candidates[0].Record.Evidence[0].ObjectKey =
 		"path:active/resource-registration/runs/R-20260802-0042/report.md#L2-L2"
+	if err := ValidateCurationPacket("curator", packet); err == nil ||
+		!strings.Contains(err.Error(), "disagrees with the reference beside it") {
+		t.Fatalf("self-inconsistent evidence handle was accepted: %v", err)
+	}
+
+	// Evidence genuinely outside the targeted span still reports as that.
+	packet = testCurationPacket(t)
+	packet.Candidates[0].Record.Evidence[0].StartLine = 97
+	packet.Candidates[0].Record.Evidence[0].EndLine = 98
+	packet.Candidates[0].Record.Evidence[0].ObjectKey = fmt.Sprintf(
+		"path:%s#L97-L98", packet.Candidates[0].Record.Evidence[0].Path)
 	if err := ValidateCurationPacket("curator", packet); err == nil ||
 		!strings.Contains(err.Error(), "evidence outside its exact coverage spans") {
 		t.Fatalf("candidate evidence was allowed to escape its targeted span: %v", err)

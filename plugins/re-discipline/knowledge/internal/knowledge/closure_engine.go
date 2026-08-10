@@ -448,6 +448,7 @@ func (service *Service) advanceClosure(
 		prior.WorkItemCoverage[id] = "exported-backlog"
 	}
 	workingGraph := graph
+	projected := false
 	extraWrites := []closureWriteSpec{}
 	promotionWrites := []closureWriteSpec{}
 	if target == "project" {
@@ -457,14 +458,28 @@ func (service *Service) advanceClosure(
 		}
 		workingGraph = projectedGraph
 		promotionWrites = projectionFindingWrites
+		projected = true
 	} else if from >= closureStageIndex["project"] {
 		projectedGraph, _, stagingErr := service.stagedClosureGraph(graph)
 		if stagingErr != nil {
 			return ClosureApplyResult{}, stagingErr
 		}
 		workingGraph = projectedGraph
+		projected = true
 	}
-	coverage, err := ComputeClosureCoverage(workingGraph, &prior)
+	// The canonical graph is the one the coherence invariants are about, so it is
+	// validated here; the projection built from it is classified without being
+	// re-validated. See computeClosureCoverageProjected.
+	var coverage ClosureCoverage
+	var err error
+	if projected {
+		if err = graph.Validate(); err != nil {
+			return ClosureApplyResult{}, err
+		}
+		coverage, err = computeClosureCoverageProjected(workingGraph, &prior)
+	} else {
+		coverage, err = ComputeClosureCoverage(workingGraph, &prior)
+	}
 	if err != nil {
 		return ClosureApplyResult{}, err
 	}

@@ -15,7 +15,7 @@ const (
 	// The one definition of the published version. The packager, the package
 	// audit, and .github/scripts/re-discipline-sync-version.py all derive
 	// from this; a release is this line plus a manifest sync.
-	RuntimeVersion = "0.8.9"
+	RuntimeVersion = "0.8.10"
 	ParserVersion  = "markdown-finding-v2-identifier-v1"
 	// Bumped for the per-chunk document prelude, then again for the opening
 	// chunk of an unreviewed drafter report. index.go forces a full rebuild

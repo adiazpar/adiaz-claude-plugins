@@ -188,6 +188,38 @@ func TestClosureCoverageStillGatesAnUnpromotableTruthCandidate(t *testing.T) {
 	}
 }
 
+// Closure's project stage promotes a truth candidate to current and advances its
+// revision, which moves a ratified finding one step further from the review that
+// ratified it. The receipt does not stop existing because the record it ratified
+// moved forward, so the graph has to keep validating - otherwise the engine's own
+// committed output fails its next load, mid-archive.
+func TestReviewReceiptSurvivesTheRevisionClosurePromotionAdds(t *testing.T) {
+	graph := closureTestGraph(t)
+	promoted := graph.Findings["F-0001"]
+	promoted.Revision++ // what prepareClosureFindingTransitions writes
+	promoted.Validity, promoted.Digest = "current", ""
+	promoted.Digest, _ = CanonicalDigest(promoted)
+	graph.Findings[promoted.ID] = promoted
+	if err := graph.Validate(); err != nil {
+		t.Fatalf("review receipt stopped binding after truth promotion: %v", err)
+	}
+
+	// The invariant that remains: a review cannot cite a revision that never
+	// existed, because it could not have read one.
+	ahead := graph.Reviews["V-0001"]
+	ahead.Decisions = []ReviewDecision{{
+		FindingID: "F-0001", FindingRevision: promoted.Revision + 1,
+		Action: "ratify", Rationale: "Direct evidence resolves it",
+	}}
+	ahead.Digest = ""
+	ahead.Digest, _ = CanonicalDigest(ahead)
+	graph.Reviews[ahead.ID] = ahead
+	if err := graph.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "which the finding never reached") {
+		t.Fatalf("review bound a revision ahead of the finding: %v", err)
+	}
+}
+
 func TestClosureCoverageSurfacesMissingReviewAndConflict(t *testing.T) {
 	graph := closureTestGraph(t)
 	intake := graph.Intakes["I-0001"]

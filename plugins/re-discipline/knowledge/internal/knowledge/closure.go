@@ -226,6 +226,35 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 	if err := graph.Validate(); err != nil {
 		return ClosureCoverage{}, err
 	}
+	return computeClosureCoverage(graph, prior)
+}
+
+// computeClosureCoverageProjected classifies a graph the engine has just
+// projected rather than one read from disk.
+//
+// CampaignGraph.Validate answers "is this canonical state coherent right now",
+// and a projected graph is deliberately not that. The project stage promotes
+// truth candidates to current, advances their revisions, and rebases their
+// evidence onto the archive destination - all of it correct, and all of it
+// disagreeing with the canonical intakes and reviews sitting beside it, which
+// closure does not rewrite. Validating it anyway made closure refuse its own
+// output: first as evidence outside its coverage spans, then as a review no
+// longer binding the revision it ratified.
+//
+// The caller validates the canonical graph it projected from, which is the
+// graph those invariants are about. Coverage is then computed over the
+// projection, which is what the stage gates need to see.
+func computeClosureCoverageProjected(
+	graph CampaignGraph,
+	prior *ClosureCoverage,
+) (ClosureCoverage, error) {
+	return computeClosureCoverage(graph, prior)
+}
+
+func computeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (ClosureCoverage, error) {
+	if graph.Campaign == nil {
+		return ClosureCoverage{}, errors.New("closure coverage requires a canonical campaign")
+	}
 	coverage := ClosureCoverage{
 		SchemaVersion: CampaignSchemaVersion, CampaignID: graph.Campaign.ID,
 		SourceRunCoverage: map[string]string{}, FindingCoverage: map[string]string{},

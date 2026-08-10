@@ -148,8 +148,26 @@ func (graph CampaignGraph) Validate() error {
 		}
 		for _, decision := range review.Decisions {
 			finding, ok := graph.Findings[decision.FindingID]
-			if !ok || (decision.FindingRevision != finding.Revision && decision.FindingRevision != finding.Revision-1) {
-				return fmt.Errorf("review %s does not bind finding %s revision", id, decision.FindingID)
+			// A review names a revision that existed when it was written, so it
+			// can never name a future one. It used to have to name the current
+			// revision or the one before it, which held only while a ratify was
+			// the last thing to touch the finding.
+			//
+			// Closure breaks that: the project stage promotes a truth candidate
+			// to current and advances its revision again, so the ratifying review
+			// falls one outside the window and the engine's own committed output
+			// stopped validating. Every campaign that promoted anything to truth
+			// would fail its next graph load, including the archive it was in the
+			// middle of writing.
+			//
+			// What the check can honestly enforce is that the decision refers to
+			// a revision the finding actually reached. Later legitimate revisions
+			// are governed by ValidateFindingTransition and by the authority
+			// rules on the transitions that produce them.
+			if !ok || decision.FindingRevision < 1 || decision.FindingRevision > finding.Revision {
+				return fmt.Errorf(
+					"review %s binds finding %s at revision %d, which the finding never reached (current %d)",
+					id, decision.FindingID, decision.FindingRevision, finding.Revision)
 			}
 		}
 	}
@@ -335,8 +353,13 @@ func (graph CampaignGraph) hasFindingDecision(finding FindingRecord, action stri
 			continue
 		}
 		for _, decision := range review.Decisions {
+			// Same window as the review-binding check above, and widened for the
+			// same reason: closure's truth promotion advances a ratified
+			// finding's revision, and a receipt does not stop existing because
+			// the record it ratified moved forward afterwards. A decision still
+			// cannot name a revision the finding never reached.
 			if decision.FindingID == finding.ID && decision.Action == action &&
-				(decision.FindingRevision == finding.Revision || decision.FindingRevision == finding.Revision-1) {
+				decision.FindingRevision >= 1 && decision.FindingRevision <= finding.Revision {
 				return true
 			}
 		}
