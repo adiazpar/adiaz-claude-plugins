@@ -760,8 +760,13 @@ func TestManagerActionSurfaceCarriesTheRetirement(t *testing.T) {
 	if managerTool == nil {
 		t.Fatal("manager_apply tool is missing")
 	}
-	properties := asObject(t, asObject(t, managerTool["inputSchema"])["properties"])
-	intake := asObject(t, asObject(t, properties["intake"])["properties"])
+	input := asObject(t, managerTool["inputSchema"])
+	properties := asObject(t, input["properties"])
+	// The intake record is published once under $defs and referenced from every
+	// site that accepts one, so follow the pointer a real caller would follow.
+	// Asserting through the reference rather than around it is the point: it
+	// proves the enum reaches the schema callers actually resolve.
+	intake := asObject(t, resolveSchemaRef(t, input, properties["intake"])["properties"])
 	amendments, present := intake["amendments"]
 	if !present {
 		t.Fatal("the manager_apply intake schema omits the amendment log")

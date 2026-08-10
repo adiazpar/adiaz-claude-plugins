@@ -877,10 +877,10 @@ func TestClosureRestartCarriesManagerDispositionsAndPrunesVanishedActiveFiles(t 
 	if err != nil {
 		t.Fatalf("restart with declared dispositions: %v", err)
 	}
-	if first.Coverage.ActiveFileDispositions["surviving-notes.md"] != "retain" ||
-		first.Coverage.ActiveFileDispositions["vanishing-notes.md"] != "ephemeral" ||
-		len(first.Coverage.MissingDecisions) != 0 {
-		t.Fatalf("declared dispositions did not type the unknown files: %+v", first.Coverage)
+	if first.Job.Coverage.ActiveFileDispositions["surviving-notes.md"] != "retain" ||
+		first.Job.Coverage.ActiveFileDispositions["vanishing-notes.md"] != "ephemeral" ||
+		len(first.Job.Coverage.MissingDecisions) != 0 {
+		t.Fatalf("declared dispositions did not type the unknown files: %+v", first.Job.Coverage)
 	}
 
 	graph = reopenClosureFixture(t, store, service, "2026-08-02T18:15:00Z", "closure-reopen-again")
@@ -892,16 +892,16 @@ func TestClosureRestartCarriesManagerDispositionsAndPrunesVanishedActiveFiles(t 
 	if err != nil {
 		t.Fatalf("restart refused because an inherited disposition named a deleted file: %v", err)
 	}
-	if second.Coverage.ActiveFileDispositions["surviving-notes.md"] != "retain" {
+	if second.Job.Coverage.ActiveFileDispositions["surviving-notes.md"] != "retain" {
 		t.Fatalf("restart did not inherit the manager disposition for a file that still exists: %+v",
-			second.Coverage.ActiveFileDispositions)
+			second.Job.Coverage.ActiveFileDispositions)
 	}
-	if _, present := second.Coverage.ActiveFileDispositions["vanishing-notes.md"]; present {
+	if _, present := second.Job.Coverage.ActiveFileDispositions["vanishing-notes.md"]; present {
 		t.Fatalf("restart inherited a disposition for a file that no longer exists: %+v",
-			second.Coverage.ActiveFileDispositions)
+			second.Job.Coverage.ActiveFileDispositions)
 	}
-	if len(second.Coverage.MissingDecisions) != 0 {
-		t.Fatalf("inheritance left the restarted attempt blocked: %+v", second.Coverage.MissingDecisions)
+	if len(second.Job.Coverage.MissingDecisions) != 0 {
+		t.Fatalf("inheritance left the restarted attempt blocked: %+v", second.Job.Coverage.MissingDecisions)
 	}
 	if second.Job.Attempt != 3 {
 		t.Fatalf("the second restart did not record a third attempt: %+v", second.Job)

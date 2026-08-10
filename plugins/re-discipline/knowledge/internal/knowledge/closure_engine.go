@@ -58,10 +58,18 @@ type ClosureApplyResult struct {
 	Transaction   *StateTransactionReceipt `json:"transaction,omitempty"`
 	Plan          *ClosurePlan             `json:"plan,omitempty"`
 	Job           *ClosureJob              `json:"job,omitempty"`
-	Coverage      *ClosureCoverage         `json:"coverage,omitempty"`
-	Receipt       *ClosureReceipt          `json:"receipt,omitempty"`
-	Archive       *ArchiveManifest         `json:"archive,omitempty"`
-	Digest        string                   `json:"digest"`
+	// Coverage is deliberately absent, and this comment is here so it stays
+	// absent. It used to sit at this level as well as on Job, so every mutating
+	// closure response serialized the same map twice -- including a complete
+	// activeFileDispositions, which runs to dozens of entries on a real
+	// campaign. Job.Coverage is the canonical copy: it is a field of the
+	// closure job record itself, sealed into that record's digest and written
+	// to disk, whereas this one was pure response echo. Every construction site
+	// set the two from the same value, so nothing was lost by dropping it.
+	// Read coverage from result.Job.Coverage.
+	Receipt *ClosureReceipt  `json:"receipt,omitempty"`
+	Archive *ArchiveManifest `json:"archive,omitempty"`
+	Digest  string           `json:"digest"`
 }
 
 func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRequest) (ClosureApplyResult, error) {
@@ -203,7 +211,7 @@ func (service *Service) startClosure(
 	}
 	result := ClosureApplyResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
-		Transaction: &receipt, Plan: &plan, Job: &job, Coverage: &coverage,
+		Transaction: &receipt, Plan: &plan, Job: &job,
 	}
 	return sealClosureApplyResult(result)
 }
@@ -422,7 +430,7 @@ func (service *Service) advanceClosure(
 	}
 	result := ClosureApplyResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
-		Transaction: &receipt, Plan: graph.ClosurePlan, Job: &next, Coverage: &coverage,
+		Transaction: &receipt, Plan: graph.ClosurePlan, Job: &next,
 		Receipt: finalReceipt, Archive: archive,
 	}
 	return sealClosureApplyResult(result)
@@ -958,7 +966,7 @@ func (service *Service) reopenClosure(
 	_ = discardClosureStaging(service.Boundary, graph.Campaign.ID, graph.ClosureJob.ID)
 	result := ClosureApplyResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
-		Transaction: &receipt, Plan: graph.ClosurePlan, Job: &job, Coverage: graph.ClosureCoverage,
+		Transaction: &receipt, Plan: graph.ClosurePlan, Job: &job,
 	}
 	return sealClosureApplyResult(result)
 }
@@ -1095,7 +1103,7 @@ func (service *Service) restartClosure(
 	_ = discardClosureStaging(service.Boundary, graph.Campaign.ID, job.ID)
 	result := ClosureApplyResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action,
-		Transaction: &receipt, Plan: &plan, Job: &job, Coverage: &coverage,
+		Transaction: &receipt, Plan: &plan, Job: &job,
 	}
 	return sealClosureApplyResult(result)
 }

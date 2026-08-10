@@ -1056,8 +1056,9 @@ func toolDefinitions() []map[string]any {
 		"expectedHeadRevision":    integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before the transition."),
 		"expectedHeadDigest":      map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before the transition."},
 		"archiveFallbackDecision": archiveFallbackDecisionSchema,
-		"intake":                  managerIntakeSchema(),
 	})
+	hoistManagerRecordDefinitions(managerSchema)
+	describeRunLaunchHandles(managerSchema)
 
 	curationSchema := reflectedToolSchema(curationSubmitToolInput{})
 	curatorRunSchema := reflectedJSONSchema(reflect.TypeOf(RunRecord{}))
@@ -1263,6 +1264,113 @@ func toolDefinitions() []map[string]any {
 			"annotations": closureWrite,
 		},
 	}
+}
+
+// Canonical $defs keys for the record schemas manager_apply accepts at more
+// than one place in its input. The names are part of the published tool
+// surface, so they are constants rather than generated strings: a caller that
+// resolves "#/$defs/intakeRecord" today must resolve the same pointer after any
+// later edit to this file.
+const (
+	intakeRecordDefinition      = "intakeRecord"
+	findingSubmissionDefinition = "findingSubmission"
+)
+
+// schemaDefinitionRef is a JSON Schema pointer into the enclosing tool's own
+// $defs block. Draft 2020-12 resolves "#/$defs/<name>" against the schema
+// document root, which for an MCP tool is its inputSchema -- so a $ref is only
+// ever valid inside the tool whose $defs carries the definition. There is no
+// shared document across tools, which is why an identical record type inlined
+// by two different tools cannot be de-duplicated this way.
+func schemaDefinitionRef(name string) map[string]any {
+	return map[string]any{"$ref": "#/$defs/" + name}
+}
+
+// hoistManagerRecordDefinitions replaces manager_apply's repeated record
+// schemas with references to a single definition each.
+//
+// manager_apply accepts one flat union of every record type its fourteen
+// actions can carry, so a record reachable from two actions was inlined twice:
+// IntakeRecord as both the top-level `intake` (for intake.coverage.retire) and
+// `reviewPacket.intake` (for review.submit), and FindingSubmission as both
+// `findings` and `reviewPacket.candidates`. Every caller paid for all four
+// copies before doing any work, and the two intake copies had drifted --
+// only the top-level one described the amendment log. Naming each record once
+// removes the duplication and the drift together: both intake sites now
+// publish the permitted-retirement enum, because there is only one intake
+// schema to publish.
+//
+// This is a transport change only. A $ref resolves to exactly the schema it
+// replaces, so the accepted request shape is byte-for-byte what it was.
+func hoistManagerRecordDefinitions(schema map[string]any) {
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	schema["$defs"] = map[string]any{
+		intakeRecordDefinition:      managerIntakeSchema(),
+		findingSubmissionDefinition: reflectedJSONSchema(reflect.TypeOf(FindingSubmission{})),
+	}
+	findingArray := func(description string) map[string]any {
+		return map[string]any{
+			"type": "array", "description": description,
+			"items": schemaDefinitionRef(findingSubmissionDefinition),
+		}
+	}
+	setSchemaProperties(schema, map[string]any{
+		"intake":   schemaDefinitionRef(intakeRecordDefinition),
+		"findings": findingArray("Normalized candidate findings carried by this transition."),
+	})
+	reviewPacket, ok := properties["reviewPacket"].(map[string]any)
+	if !ok {
+		return
+	}
+	setSchemaProperties(reviewPacket, map[string]any{
+		"intake":     schemaDefinitionRef(intakeRecordDefinition),
+		"candidates": findingArray("Normalized candidate findings the review packet ratifies."),
+	})
+}
+
+// describeRunLaunchHandles publishes the one thing about run.prepare a caller
+// cannot infer from the reflected shape: both launch handles are optional, and
+// omitting them is the normal path.
+//
+// The engine derives and seals brief.md and context-pack.json itself -- the
+// brief digest even covers a write-grant block the engine appends after the
+// caller hands the brief over -- so a caller who supplies these is predicting
+// server output, which is possible only by reimplementing this package's
+// canonicalization. The engine has accepted omitted handles since 0.8.4, but a
+// caller reading the tool surface had no way to discover it: `omitempty`
+// renders as an absent entry in `required` and nothing more. Say it where
+// callers look, so the affordance is reachable without first tripping a
+// refusal.
+func describeRunLaunchHandles(schema map[string]any) {
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	runs, ok := properties["runs"].(map[string]any)
+	if !ok {
+		return
+	}
+	item, ok := runs["items"].(map[string]any)
+	if !ok {
+		return
+	}
+	launchHandle := func(artifact string) map[string]any {
+		handle := objectSchema(map[string]any{
+			"path":   map[string]any{"type": "string"},
+			"sha256": map[string]any{"type": "string"},
+		}, []string{"path", "sha256"})
+		handle["description"] = "Omit it: the engine writes " + artifact +
+			" and derives this handle. Supply it only to assert a digest you computed independently; " +
+			"it is then compared byte for byte and any mismatch refused."
+		return handle
+	}
+	setSchemaProperties(item, map[string]any{
+		"brief":       launchHandle("brief.md, including the write-grant block it appends,"),
+		"contextPack": launchHandle("canonical context-pack.json"),
+	})
 }
 
 // managerIntakeSchema is the reflected intake record with its amendment log

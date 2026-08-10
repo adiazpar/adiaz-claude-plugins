@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,29 @@ func asObject(t *testing.T, value any) map[string]any {
 		t.Fatalf("value is not an object: %#v", value)
 	}
 	return object
+}
+
+// resolveSchemaRef follows a "#/$defs/<name>" pointer into the enclosing tool
+// schema's own $defs block, the way a schema consumer does. A node that is not
+// a reference is returned unchanged, so callers can traverse a schema without
+// caring whether a given record happens to be inlined or hoisted.
+func resolveSchemaRef(t *testing.T, root map[string]any, value any) map[string]any {
+	t.Helper()
+	node := asObject(t, value)
+	reference, ok := node["$ref"].(string)
+	if !ok {
+		return node
+	}
+	const prefix = "#/$defs/"
+	if !strings.HasPrefix(reference, prefix) {
+		t.Fatalf("schema reference %q is not a same-document $defs pointer", reference)
+	}
+	definitions := asObject(t, root["$defs"])
+	resolved, present := definitions[strings.TrimPrefix(reference, prefix)]
+	if !present {
+		t.Fatalf("schema reference %q does not resolve; $defs has %v", reference, definitions)
+	}
+	return asObject(t, resolved)
 }
 
 func asArray(t *testing.T, value any) []any {
@@ -164,6 +188,131 @@ func managedFileURI(t *testing.T, path string) string {
 		slash = "/" + slash
 	}
 	return (&url.URL{Scheme: "file", Path: slash}).String()
+}
+
+// toolSchemaBudgets caps each tool's share of the discovery payload.
+//
+// The 64 KiB total in TestAdversarialMCPToolSchemasAndAuthoritySurface is a
+// portability ceiling, not a cost control: one tool can quietly grow to 40% of
+// discovery and the total still passes. manager_apply did exactly that -- it
+// inlines the record schemas of fourteen actions, and every caller pays for all
+// of them before doing any work, whether it is opening a campaign or retiring a
+// coverage span. A per-tool ceiling makes that growth a deliberate edit: adding
+// a field to a record now either fits the budget or forces whoever added it to
+// raise a number and say why in the commit.
+//
+// Each ceiling sits just above where its tool actually lands, so the headroom
+// is for a field or two, not for another record type. Raising one is a normal
+// thing to do -- silently drifting past it is not.
+var toolSchemaBudgets = map[string]int{
+	"state":                    1350,
+	"read":                     1600,
+	"trace":                    1700,
+	"query":                    2950,
+	"normalization_queue":      3200,
+	"closure_apply":            3400,
+	"context_pack_materialize": 3750,
+	"migrate_project":          8800,
+	"curation_submit":          9600,
+	"manager_apply":            23600,
+}
+
+func TestMCPToolDiscoveryStaysWithinPerToolBudgets(t *testing.T) {
+	definitions := toolDefinitions()
+	measured := map[string]int{}
+	total := 0
+	for _, definition := range definitions {
+		name, _ := definition["name"].(string)
+		encoded, err := json.Marshal(definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		measured[name] = len(encoded)
+		total += len(encoded)
+	}
+	// Log every tool every run, largest first, so the number a maintainer needs
+	// in order to judge a schema change is visible without instrumenting
+	// anything.
+	names := make([]string, 0, len(measured))
+	for name := range measured {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool { return measured[names[i]] > measured[names[j]] })
+	for _, name := range names {
+		budget, present := toolSchemaBudgets[name]
+		if !present {
+			t.Errorf("tool %s has no schema budget; add one to toolSchemaBudgets", name)
+			continue
+		}
+		t.Logf("%-24s %6d bytes  (budget %6d, %3d%% of discovery)",
+			name, measured[name], budget, measured[name]*100/total)
+		if measured[name] > budget {
+			t.Errorf(
+				"%s schema is %d bytes, over its %d-byte budget. Every caller pays this "+
+					"before doing any work. Shrink it -- hoist repeated record schemas into "+
+					"$defs -- or raise the budget deliberately and say why.",
+				name, measured[name], budget)
+		}
+	}
+	for name := range toolSchemaBudgets {
+		if _, present := measured[name]; !present {
+			t.Errorf("toolSchemaBudgets caps %s, which is no longer a tool", name)
+		}
+	}
+	t.Logf("discovery payload total: %d bytes", total)
+}
+
+// TestMCPToolSchemaReferencesResolve guards the de-duplication that keeps
+// manager_apply inside its budget. A $ref that does not resolve is worse than
+// the duplication it replaced: the caller cannot discover the record shape at
+// all, and nothing else in the suite would notice.
+func TestMCPToolSchemaReferencesResolve(t *testing.T) {
+	for _, definition := range toolDefinitions() {
+		name, _ := definition["name"].(string)
+		encoded, err := json.Marshal(definition["inputSchema"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var root map[string]any
+		if err := json.Unmarshal(encoded, &root); err != nil {
+			t.Fatal(err)
+		}
+		definitions, _ := root["$defs"].(map[string]any)
+		used := map[string]bool{}
+		var walk func(node any)
+		walk = func(node any) {
+			switch typed := node.(type) {
+			case map[string]any:
+				if reference, ok := typed["$ref"].(string); ok {
+					const prefix = "#/$defs/"
+					if !strings.HasPrefix(reference, prefix) {
+						t.Errorf("%s uses non-portable schema reference %q", name, reference)
+						return
+					}
+					key := strings.TrimPrefix(reference, prefix)
+					if _, present := definitions[key]; !present {
+						t.Errorf("%s references %q but $defs defines %v", name, reference, definitions)
+						return
+					}
+					used[key] = true
+					return
+				}
+				for _, item := range typed {
+					walk(item)
+				}
+			case []any:
+				for _, item := range typed {
+					walk(item)
+				}
+			}
+		}
+		walk(root)
+		for key := range definitions {
+			if !used[key] {
+				t.Errorf("%s defines $defs/%s but never references it", name, key)
+			}
+		}
+	}
 }
 
 func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
