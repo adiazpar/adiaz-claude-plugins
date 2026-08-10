@@ -373,6 +373,18 @@ type ClosureJob struct {
 	// identical CanonicalDigest, so campaigns already in flight keep verifying.
 	// Read it through closureAttempt, never directly: absent means the first
 	// attempt, never attempt zero.
+	//
+	// The compatibility runs one way only, and the asymmetry is deliberate. A
+	// record that already exists keeps loading, but a record this engine writes
+	// after a restart does not load on an engine that predates the field:
+	// decodeStrictJSON calls DisallowUnknownFields, so `attempt` is fatal to an
+	// older decoder and takes the whole campaign graph down with it. A campaign
+	// that has restarted closure is therefore pinned to the engine version that
+	// restarted it, and rolling that binary back means restoring the job record
+	// too. The alternative - a decoder that tolerates fields it does not know -
+	// would forfeit the canonical-bytes guarantee every other integrity rule
+	// here rests on, so the pinning is the cheaper of the two. See
+	// TestTheAttemptFieldIsForwardCompatibleAndNotBackwardReadable.
 	Attempt int64 `json:"attempt,omitempty"`
 }
 

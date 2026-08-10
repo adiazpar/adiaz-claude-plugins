@@ -990,8 +990,34 @@ func (service *Service) restartClosure(
 		return ClosureApplyResult{}, errors.New(
 			"closure restart requires the reopened job, plan, and coverage it replaces")
 	}
-	if previousJob.Status != "reopened" || graph.ClosureReceipt != nil ||
-		!validOne(graph.Campaign.Status, "open", "paused") {
+	// A closure receipt is the proof that a campaign was finalized, and finalizing
+	// retires the whole active tree, so in practice restart never meets one: the
+	// loader cannot even build such a graph. CampaignGraph.Validate requires a
+	// receipt to come with a `closed` campaign and a `completed` closure job,
+	// while restart requires a `reopened` job on an `open` or `paused` campaign,
+	// and LoadCampaignGraph validates before it returns - so every graph that
+	// reaches ClosureApply already satisfies this clause.
+	//
+	// It is kept, stated separately, and tested directly anyway. This function
+	// takes a CampaignGraph as an argument rather than loading one, so the
+	// invariant that makes the clause redundant lives in a different file from the
+	// code that depends on it; a future caller that assembles a graph in memory,
+	// or a future relaxation of the receipt rule in Validate, would silently hand
+	// restart a finalized campaign to re-plan. Restarting on a receipt would
+	// re-open closure over records the archive already froze and the campaign no
+	// longer owns, which is unrecoverable rather than merely wrong. The refusal is
+	// its own clause so that a caller who somehow reaches it is told which of the
+	// three preconditions failed instead of being sent to look at the job status.
+	if graph.ClosureReceipt != nil {
+		return ClosureApplyResult{}, fmt.Errorf(
+			"campaign %s already carries closure receipt for job %s: closure was finalized and its "+
+				"records were archived to %s, so there is no active attempt to re-enter. Restart "+
+				"re-plans a reopened attempt; a finalized campaign is reopened only by opening a new "+
+				"campaign against the archived one",
+			graph.Campaign.ID, graph.ClosureReceipt.ClosureJobID,
+			graph.ClosureReceipt.ArchiveDestination)
+	}
+	if previousJob.Status != "reopened" || !validOne(graph.Campaign.Status, "open", "paused") {
 		return ClosureApplyResult{}, errors.New(
 			"closure restart requires a reopened closure job on an open or paused campaign")
 	}

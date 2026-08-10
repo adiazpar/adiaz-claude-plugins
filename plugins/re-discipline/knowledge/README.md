@@ -213,6 +213,22 @@ dispositions that clear them. `invalidated` remains available as the manager's
 explicit void path, because it is the only other exit from `returned` and
 refusing it too would leave a dirty run with no exit at all.
 
+`review.submit` and `decision.record` refuse to advance an intake to `reviewed`
+while any of its coverage spans is still `unresolved`, and the refusal names
+every such span. An unresolved disposition is a recorded absence of judgment,
+and closure counts no source report that carries one, so ratifying such a packet
+fixes `missing-reviewed-intake` into the campaign with nothing warning of it
+until the closure gate refuses - weeks later, in front of somebody who never
+read the report. Ratification is the last moment at which the person deciding
+still holds the packet. The rule sits on the transition into `reviewed` and
+deliberately not in the record validator: record validation runs on every load,
+so the same rule stated there would stop every already-ratified intake carrying
+an unresolved span from decoding, and take its whole campaign graph with it.
+`curation_submit` still records `unresolved` freely - a curator who cannot say
+"I could not decide this" would say `non-claim` instead, and the record would
+lose the only honest thing it had - and the `reviewed` to `reviewed` edge stays
+open, because that is the repair path below.
+
 `intake.coverage.retire` is the one transition that edits a reviewed intake in
 place, and it exists because there was no small edit. Changing one coverage
 row's `disposition` and `rationale` - touching no finding, adding and removing
@@ -231,6 +247,16 @@ disposition that is not a judgment, and the only one closure treats as blocking,
 which makes retiring it the only coverage edit that neither retracts nor
 re-sources anything. The transition is therefore monotone in report coverage: it
 can move a source from uncovered to covered and never the reverse.
+
+Both destinations satisfy both gates. Closure coverage always counted
+`out-of-scope` as covered, but the cross-campaign normalization resolution once
+accepted only `candidate-finding`, `duplicate`, and `non-claim`, so a span
+retired to `out-of-scope` cleared closure coverage while still blocking the
+normalize stage over the same report. `out-of-scope` is terminal in exactly the
+sense `non-claim` is - the span was read, it was decided, and the decision was
+that it yields nothing the shared record should carry - and the resolution now
+accepts it. `unresolved` remains outside both gates, because it is the one
+disposition that decides nothing.
 
 One transaction writes one intake and nothing else. It advances the intake by
 one revision, keeps it `reviewed`, and appends exactly one immutable amendment

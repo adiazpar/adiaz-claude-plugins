@@ -109,10 +109,20 @@ func returnNormalizationSourceRun(
 	return normalizationSourceFixture{run: graph.Runs[runID], receipt: returnedReceipt}
 }
 
-func completeReviewedNonClaimNormalization(
+// completeTerminallyJudgedNormalization drives one source report all the way to
+// a sealed normalization resolution receipt, with every span of the report given
+// the caller's chosen terminal disposition.
+//
+// The disposition is a parameter because `non-claim` and `out-of-scope` are the
+// same kind of answer - the manager read the span and decided it contributes
+// nothing to the shared record - and the resolution path must not be able to
+// tell them apart. It could once, and that difference stranded campaigns at the
+// normalize stage.
+func completeTerminallyJudgedNormalization(
 	t *testing.T,
 	fixture runPreparationFixture,
 	source normalizationSourceFixture,
+	disposition string,
 ) (NormalizationSuggestion, NormalizationResolution) {
 	t.Helper()
 	ctx := context.Background()
@@ -267,7 +277,8 @@ func completeReviewedNonClaimNormalization(
 		Coverage: []CoverageEntry{{
 			SourceHandle: "path:" + source.run.Report.Path + "#L1-L3",
 			SourcePath:   source.run.Report.Path, SourceSHA256: source.run.Report.SHA256,
-			StartLine: 1, EndLine: 3, SourceLineCount: 3, Disposition: "non-claim",
+			StartLine: 1, EndLine: 3, SourceLineCount: 3, Disposition: disposition,
+			Rationale: terminalCoverageRationale(disposition),
 		}},
 		Triage: map[string]string{}, Status: "submitted",
 	}
@@ -310,7 +321,15 @@ func completeReviewedNonClaimNormalization(
 		reviewedIntake.RecordMeta, "2026-08-02T18:07:00Z", "manager", review.CorrelationID)
 	reviewedIntake.Digest = stateTestDigest("3")
 	reviewedIntake.Status = "reviewed"
-	reviewReceipt, err := fixture.service.ManagerApply(ctx, ManagerApplyRequest{
+	if len(unresolvedCoverageHandles(reviewedIntake)) > 0 {
+		// ValidateIntakeTransition refuses to ratify an intake that still declares
+		// unjudged spans, so an `unresolved` fixture can only be adopted as the
+		// legacy record such a campaign now is. That is exactly the population the
+		// disposition gate below still has to refuse, so the fixture has to be able
+		// to reach it.
+		installLegacyRatifiedIntake(t, fixture, curationReceipt,
+			review.CorrelationID, "idem-normalization-review", reviewedIntake, review, nil)
+	} else if _, err := fixture.service.ManagerApply(ctx, ManagerApplyRequest{
 		Action: "review.submit", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
 		CorrelationID: review.CorrelationID, IdempotencyKey: "idem-normalization-review",
 		ExpectedHeadRevision: curationReceipt.ResultingHead.Revision,
@@ -320,11 +339,9 @@ func completeReviewedNonClaimNormalization(
 		},
 		Intake: &reviewedIntake, Review: &review,
 		ReviewPacket: &ReviewPacketSubmission{Envelope: envelope, Intake: intake},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
-	_ = reviewReceipt
 	graph, err = fixture.store.LoadCampaignGraph("C-TEST")
 	if err != nil {
 		t.Fatal(err)
@@ -336,6 +353,9 @@ func completeReviewedNonClaimNormalization(
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Both terminal dispositions mean "this report yields no claim", so both seal
+	// the same queue-item disposition. `reviewed-non-claim` is the wire value for
+	// that outcome, not a statement that every span said `non-claim`.
 	resolution := NormalizationResolution{
 		SchemaVersion: CampaignSchemaVersion, Disposition: "reviewed-non-claim",
 		SourceReport: *source.run.Report, CuratorRunID: canonicalCurator.ID,
@@ -515,7 +535,7 @@ func TestClosureNormalizationGateRequiresStructuredQueueResolution(t *testing.T)
 	if err != nil || len(queued) != 1 {
 		t.Fatalf("queue closure normalization: queued=%#v err=%v", queued, err)
 	}
-	item, resolution := completeReviewedNonClaimNormalization(t, fixture, source)
+	item, resolution := completeTerminallyJudgedNormalization(t, fixture, source, "non-claim")
 	if !containsString(item.Triggers, normalizationTriggerClosure) {
 		t.Fatalf("manager request discarded the prior closure trigger: %#v", item)
 	}
@@ -558,7 +578,7 @@ func TestClosureNormalizationGateRequiresStructuredQueueResolution(t *testing.T)
 func TestNormalizationResolutionRequiresCanonicalCuratorCoverageAndReviewProof(t *testing.T) {
 	fixture := newRunPreparationFixture(t)
 	source := returnNormalizationSourceRun(t, fixture)
-	queued, resolution := completeReviewedNonClaimNormalization(t, fixture, source)
+	queued, resolution := completeTerminallyJudgedNormalization(t, fixture, source, "non-claim")
 	claimed, err := fixture.service.NormalizationQueueApply(context.Background(), NormalizationQueueRequest{
 		Action: "claim", Actor: "manager", ItemID: queued.ID, ExpectedDigest: queued.Digest,
 		Timestamp: "2099-01-01T00:00:00Z",
@@ -629,5 +649,154 @@ func TestNormalizationResolutionRequiresCanonicalCuratorCoverageAndReviewProof(t
 	if !present || containsString(retained.Triggers, normalizationTriggerClosure) ||
 		retained.Status != "resolved" {
 		t.Fatalf("closure altered resolved normalization work: %#v", retained)
+	}
+}
+
+// terminalCoverageRationale supplies the span rationale ValidateIntake demands
+// for the dispositions that carry one, so a fixture can vary the disposition
+// without also having to vary its own bookkeeping.
+func terminalCoverageRationale(disposition string) string {
+	switch disposition {
+	case "out-of-scope":
+		return "The span states a claim about a subject this campaign does not own."
+	case "unresolved":
+		return "The curator could not decide whether this span states a durable claim."
+	default:
+		return ""
+	}
+}
+
+// TestNormalizationResolvesOutOfScopeExactlyAsNonClaim closes a disagreement
+// between two gates that both claim to mean "terminal".
+//
+// reviewedReportCoverage has always counted an `out-of-scope` span as covered,
+// so a campaign could clear the closure coverage gate with one; run.complete
+// names `out-of-scope` as one of the four dispositions that satisfy it; and
+// intake.coverage.retire offers it as one of the two judgments an unresolved
+// span may be given. verifyNormalizationResolution accepted only
+// `candidate-finding`, `duplicate`, and `non-claim`, so the same span that
+// cleared closure coverage refused the cross-campaign normalization resolution
+// over the same report - blocking the campaign at the normalize stage with a
+// refusal that named a disposition the rest of the engine had told the manager
+// to use.
+//
+// The test drives both dispositions through the identical path and requires the
+// same outcome, because that identity - not the acceptance of one extra string -
+// is the property that must not drift again.
+func TestNormalizationResolvesOutOfScopeExactlyAsNonClaim(t *testing.T) {
+	for _, disposition := range []string{"non-claim", "out-of-scope"} {
+		t.Run(disposition, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newRunPreparationFixture(t)
+			source := returnNormalizationSourceRun(t, fixture)
+			queued, resolution := completeTerminallyJudgedNormalization(
+				t, fixture, source, disposition)
+
+			// The receipt the engine independently derives must be the one the
+			// caller submitted, including its disposition: a report whose every
+			// span is out-of-scope yields no finding, exactly as one whose every
+			// span is non-claim does.
+			if resolution.Disposition != "reviewed-non-claim" ||
+				len(resolution.ResolvedFindingIDs) != 0 {
+				t.Fatalf("a fully %s report did not seal as a claimless resolution: %#v",
+					disposition, resolution)
+			}
+
+			claimed, err := fixture.service.NormalizationQueueApply(ctx, NormalizationQueueRequest{
+				Action: "claim", Actor: "manager", ItemID: queued.ID,
+				ExpectedDigest: queued.Digest, Timestamp: "2099-01-01T00:00:00Z",
+			})
+			if err != nil || claimed.Item == nil {
+				t.Fatalf("claim normalization: result=%#v err=%v", claimed, err)
+			}
+			acknowledged, err := fixture.service.NormalizationQueueApply(ctx, NormalizationQueueRequest{
+				Action: "ack", Actor: "manager", ItemID: queued.ID,
+				ExpectedDigest: claimed.Item.Digest, Timestamp: "2099-01-01T00:01:00Z",
+			})
+			if err != nil || acknowledged.Item == nil {
+				t.Fatalf("ack normalization: result=%#v err=%v", acknowledged, err)
+			}
+			resolved, err := fixture.service.NormalizationQueueApply(ctx, NormalizationQueueRequest{
+				Action: "resolve", Actor: "manager", ItemID: queued.ID,
+				ExpectedDigest: acknowledged.Item.Digest, Timestamp: "2099-01-01T00:02:00Z",
+				Resolution: &resolution,
+			})
+			if err != nil || resolved.Item == nil || resolved.Item.Status != "resolved" ||
+				resolved.Item.Resolution == nil ||
+				resolved.Item.Resolution.Disposition != "reviewed-non-claim" {
+				t.Fatalf("a %s span did not resolve its normalization: result=%#v err=%v",
+					disposition, resolved, err)
+			}
+
+			// The two gates now agree about the same records: coverage counts the
+			// report, and the queue no longer blocks the normalize stage.
+			graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+			if err != nil {
+				t.Fatal(err)
+			}
+			coverage, err := ComputeClosureCoverage(graph, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if coverage.SourceRunCoverage[source.run.ID] != "reviewed-intake" {
+				t.Fatalf("a %s span stopped counting as closure coverage: %s",
+					disposition, coverage.SourceRunCoverage[source.run.ID])
+			}
+			blockers, err := fixture.service.closureNormalizationBlockers(graph)
+			if err != nil || len(blockers) != 0 {
+				t.Fatalf("a %s span left the closure normalize gate blocked: blockers=%v err=%v",
+					disposition, blockers, err)
+			}
+		})
+	}
+}
+
+// TestNormalizationStillRefusesAnUnjudgedSpanAndNamesTheJudgments pins the
+// boundary of the change above. Widening the accepted set is only worth what
+// stays outside it: `unresolved` is the one disposition that is not a judgment
+// at all, and resolving a normalization over one would record that a manager
+// decided something nobody decided.
+//
+// It runs against a legacy reviewed intake because that is now the only kind
+// that can carry an unresolved span - which is itself the point: the two rules
+// meet here, and the older gate must keep holding for the records the newer one
+// arrived too late for.
+func TestNormalizationStillRefusesAnUnjudgedSpanAndNamesTheJudgments(t *testing.T) {
+	fixture := newRunPreparationFixture(t)
+	source := returnNormalizationSourceRun(t, fixture)
+	queued, resolution := completeTerminallyJudgedNormalization(t, fixture, source, "unresolved")
+
+	claimed, err := fixture.service.NormalizationQueueApply(context.Background(),
+		NormalizationQueueRequest{
+			Action: "claim", Actor: "manager", ItemID: queued.ID,
+			ExpectedDigest: queued.Digest, Timestamp: "2099-01-01T00:00:00Z",
+		})
+	if err != nil || claimed.Item == nil {
+		t.Fatalf("claim normalization: result=%#v err=%v", claimed, err)
+	}
+	acknowledged, err := fixture.service.NormalizationQueueApply(context.Background(),
+		NormalizationQueueRequest{
+			Action: "ack", Actor: "manager", ItemID: queued.ID,
+			ExpectedDigest: claimed.Item.Digest, Timestamp: "2099-01-01T00:01:00Z",
+		})
+	if err != nil || acknowledged.Item == nil {
+		t.Fatalf("ack normalization: result=%#v err=%v", acknowledged, err)
+	}
+	_, err = fixture.service.NormalizationQueueApply(context.Background(),
+		NormalizationQueueRequest{
+			Action: "resolve", Actor: "manager", ItemID: queued.ID,
+			ExpectedDigest: acknowledged.Item.Digest, Timestamp: "2099-01-01T00:02:00Z",
+			Resolution: &resolution,
+		})
+	if err == nil {
+		t.Fatal("a normalization resolved over a span nobody judged")
+	}
+	for _, want := range []string{
+		"non-final disposition unresolved",
+		"candidate-finding, duplicate, non-claim, or out-of-scope",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the unjudged-span refusal does not report %q: %v", want, err)
+		}
 	}
 }

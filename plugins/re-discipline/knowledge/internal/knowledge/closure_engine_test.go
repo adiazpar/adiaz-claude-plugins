@@ -986,3 +986,72 @@ func TestClosureStartNamesRestartAsTheRemedy(t *testing.T) {
 		t.Fatalf("start refused a reopened campaign without naming the remedy: %v", err)
 	}
 }
+
+// TestClosureRestartRefusesAGraphCarryingAClosureReceipt tests the one guard in
+// restartClosure that no end-to-end path can reach, by handing the function the
+// graph the loader will not build.
+//
+// The guard's own comment claims it is unreachable through ClosureApply, and
+// this test proves both halves of that claim rather than asserting it.
+// CampaignGraph.Validate must reject a receipt sitting beside a reopened job on
+// an open campaign - that is what makes the guard redundant today - and
+// restartClosure must refuse the same graph anyway, because it takes a
+// CampaignGraph as an argument rather than loading one, so the invariant it
+// leans on lives in a different file and is not its own to keep. The differential
+// matters as much as the refusal: the identical graph without the receipt
+// restarts, so the receipt is demonstrably the reason and not one of the other
+// two preconditions in the same neighbourhood.
+func TestClosureRestartRefusesAGraphCarryingAClosureReceipt(t *testing.T) {
+	store, _, service, _ := prepareClosureArchiveFixture(t)
+	graph := reopenClosureFixture(t, store, service, "2026-08-02T18:11:00Z", "closure-reopen")
+	request := closureRestartRequest(t, store, graph, "2026-08-02T18:13:00Z", "closure-restart")
+
+	receipt := ClosureReceipt{
+		SchemaVersion: CampaignSchemaVersion, CampaignID: graph.Campaign.ID,
+		ClosureJobID: graph.ClosureJob.ID, CampaignRevision: graph.Campaign.Revision,
+		StateHeadRevision: 9, EventID: "E-20260802-210001-RESTART",
+		ArchiveDestination: graph.ClosureJob.ArchiveDestination,
+		ArchiveDigest:      stateTestDigest("7"), TruthDigests: map[string]string{},
+		CoverageDigest: graph.ClosureCoverage.Digest, ClosedAt: "2026-08-02T18:12:00Z",
+	}
+	if err := sealClosureReceipt(&receipt); err != nil {
+		t.Fatal(err)
+	}
+	finalized := cloneCampaignGraph(graph)
+	finalized.ClosureReceipt = &receipt
+
+	// Half one: the loader can never produce this graph, which is why no
+	// end-to-end path reaches the guard. If this assertion ever fails, the guard
+	// has stopped being defence in depth and become load-bearing.
+	if err := finalized.Validate(); err == nil {
+		t.Fatal("a closure receipt validated beside a reopened job on an open campaign")
+	}
+
+	// Half two: restart refuses it regardless, and says which precondition failed.
+	// The call is direct because no public entry point can deliver this graph -
+	// ClosureApply loads its own, and the loader has just been shown to refuse it.
+	_, err := service.restartClosure(context.Background(), store, finalized, request)
+	if err == nil {
+		t.Fatal("closure restart re-planned a campaign whose closure was already finalized")
+	}
+	for _, want := range []string{
+		graph.Campaign.ID, "already carries closure receipt",
+		graph.ClosureJob.ID, graph.ClosureJob.ArchiveDestination,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the finalized-closure refusal does not report %q: %v", want, err)
+		}
+	}
+
+	// The differential, through the ordinary entry point: nothing about the
+	// campaign changed between the two calls, so the receipt is the whole of the
+	// difference between a refusal and a restart. Without this half the refusal
+	// above would be equally consistent with restart being broken.
+	result, err := service.ClosureApply(context.Background(), request)
+	if err != nil {
+		t.Fatalf("the same campaign without a receipt did not restart: %v", err)
+	}
+	if result.Job == nil || result.Job.Stage != "inventory" || result.Job.Status != "running" {
+		t.Fatalf("restart did not re-enter as a running attempt: %+v", result.Job)
+	}
+}

@@ -1006,11 +1006,9 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	if err := SealReviewLoadReceipt(&review.ReviewLoad); err != nil {
 		t.Fatal(err)
 	}
-	expectedDigests := map[string]string{committed.ID: committed.Digest}
 	outcomes := make([]FindingSubmission, 0, len(candidates))
 	for _, candidate := range candidates {
 		canonical := graph.Findings[candidate.Record.ID]
-		expectedDigests[candidate.Record.ID] = canonical.Digest
 		review.Decisions = append(review.Decisions, ReviewDecision{
 			FindingID: candidate.Record.ID, FindingRevision: canonical.Revision,
 			Action: "ratify", Projection: "campaign", Rationale: "Exact returned-run evidence verified.",
@@ -1042,20 +1040,18 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	reviewedIntake.RecordMeta = lifecycleAdvanceMeta(
 		reviewedIntake.RecordMeta, "2026-08-02T18:04:00Z", "manager", reviewCorrelation)
 	reviewedIntake.Digest, reviewedIntake.Status = stateTestDigest("3"), "reviewed"
-	reviewReceipt, err := fixture.service.ManagerApply(ctx, ManagerApplyRequest{
-		Action: "review.submit", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
-		CorrelationID: reviewCorrelation, IdempotencyKey: "idem-retire-review",
-		ExpectedHeadRevision:  curationReceipt.ResultingHead.Revision,
-		ExpectedHeadDigest:    curationReceipt.ResultingHead.Digest,
-		ExpectedRecordDigests: expectedDigests,
-		Intake:                &reviewedIntake, Review: &review, Findings: outcomes,
-		ReviewPacket: &ReviewPacketSubmission{
-			Envelope: envelope, Intake: committed, Candidates: submissions,
-		},
-	})
-	if err != nil {
-		t.Fatalf("ratify the curator packet: %v", err)
-	}
+	// The ratification this fixture needs is the one ValidateIntakeTransition now
+	// refuses: two spans are still unresolved, and that is the entire reason the
+	// retirement transition exists. review.submit can therefore no longer build
+	// this campaign, so the records it would have written are adopted instead,
+	// exactly as the live campaigns holding them were adopted.
+	//
+	// Everything the retirement tests then exercise runs against ordinary
+	// canonical state: the intake is `reviewed` at revision 2 with no amendments,
+	// review V-0101 binds revision 1, and both candidate findings are
+	// manager-ratified. Only the route in changed.
+	reviewReceipt := installLegacyRatifiedIntake(t, fixture, curationReceipt,
+		reviewCorrelation, "idem-retire-review", reviewedIntake, review, outcomes)
 	return retirementFixture{
 		fixture: fixture, runID: runID, reportPath: reportPath,
 		intakeID: intake.ID, reviewID: review.ID, findingIDs: ids,

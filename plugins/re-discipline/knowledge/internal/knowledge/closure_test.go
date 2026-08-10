@@ -543,3 +543,115 @@ func TestClosureAttemptTreatsAnAbsentCounterAsTheFirstAttempt(t *testing.T) {
 		t.Fatalf("a pre-restart closure job changed digest: %s want %s", resealed.Digest, job.Digest)
 	}
 }
+
+// preAttemptClosureJob is the ClosureJob shape exactly as it stood before 0.8.4:
+// every field of the current record except `attempt`. It stands in for the
+// decoder inside an older binary, which is the only thing the compatibility
+// claim about that field is actually about.
+type preAttemptClosureJob struct {
+	RecordMeta
+	CampaignID             string            `json:"campaignId"`
+	Stage                  string            `json:"stage"`
+	Status                 string            `json:"status"`
+	FrozenCampaignRevision int64             `json:"frozenCampaignRevision"`
+	ProjectionFindingIDs   []string          `json:"projectionFindingIds"`
+	Coverage               *ClosureCoverage  `json:"coverage,omitempty"`
+	ArchiveDestination     string            `json:"archiveDestination,omitempty"`
+	TruthDigests           map[string]string `json:"truthDigests,omitempty"`
+	ProjectionDigests      map[string]string `json:"projectionDigests,omitempty"`
+	StagingDigest          string            `json:"stagingDigest,omitempty"`
+	ArchiveDigest          string            `json:"archiveDigest,omitempty"`
+	Blockers               []string          `json:"blockers,omitempty"`
+}
+
+// TestTheAttemptFieldIsForwardCompatibleAndNotBackwardReadable states both
+// halves of the `attempt` field's compatibility story, because only one of them
+// is good news and the record should say so.
+//
+// Forward, it is safe, and that is the half the engine depends on:
+// readCanonicalRecordValue re-encodes every record it reads and refuses it when
+// the bytes differ from what was committed, so a closure job written before
+// restart existed - which carries no `attempt` at all - must re-encode without
+// one. `omitempty` is what makes that true, and this test would fail the moment
+// somebody removed it while "tidying up" the struct tags.
+//
+// Backward, it is not safe, and nothing can make it so. decodeStrictJSON calls
+// DisallowUnknownFields, so a binary built before 0.8.4 cannot read a closure
+// job that has been through a restart: `attempt` is an unknown field to it and
+// the record fails to decode, which means the whole campaign graph fails to
+// load. Records already on disk are unaffected - they carry no such field - so
+// this is a one-way door rather than a break: once a campaign restarts closure,
+// it is pinned to 0.8.4 or later, and rolling that binary back means restoring
+// the job record too. The pinning is deliberate, and it is written down here
+// because the only alternative - a parallel decoder that tolerates unknown
+// fields - would give up the canonical-bytes guarantee that every other
+// integrity rule in this package rests on.
+func TestTheAttemptFieldIsForwardCompatibleAndNotBackwardReadable(t *testing.T) {
+	graph := closureTestGraph(t)
+	coverage, err := ComputeClosureCoverage(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := sealClosureRestartTestJob(t, ClosureJob{
+		RecordMeta: closureTestMeta("closure-test-job"), CampaignID: "C-TEST",
+		Stage: "inventory", Status: "running", FrozenCampaignRevision: 1,
+		ProjectionFindingIDs: []string{"F-0001"}, Coverage: &coverage,
+		ArchiveDestination: "docs/history/campaigns/2026-08-02-test",
+		TruthDigests:       map[string]string{}, ProjectionDigests: map[string]string{},
+	})
+	firstBody, err := canonicalJSON(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(firstBody), "\"attempt\"") {
+		t.Fatalf("a first-attempt closure job encoded an attempt field: %s", firstBody)
+	}
+
+	// Forward compatibility, stated as the property the loader actually enforces:
+	// read the committed bytes and re-encode them, and the bytes must be equal.
+	var decoded ClosureJob
+	if err := decodeStrictJSON(firstBody, &decoded); err != nil {
+		t.Fatalf("a pre-restart closure job no longer decodes: %v", err)
+	}
+	reencoded, err := canonicalJSON(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(reencoded) != string(firstBody) {
+		t.Fatalf("a pre-restart closure job did not re-encode to its committed bytes:\n%s\n%s",
+			firstBody, reencoded)
+	}
+	if closureAttempt(decoded) != 1 {
+		t.Fatalf("an absent attempt counter was not read as the first attempt: %d",
+			closureAttempt(decoded))
+	}
+
+	// The old decoder still reads those same bytes. This also proves the mirror
+	// type above is faithful: if it were missing any other field, this decode
+	// would fail and the assertion after it would be meaningless.
+	var legacy preAttemptClosureJob
+	if err := decodeStrictJSON(firstBody, &legacy); err != nil {
+		t.Fatalf("a pre-0.8.4 decoder cannot read a record it wrote itself: %v", err)
+	}
+
+	// Backward incompatibility, pinned rather than hoped about. A restarted job
+	// carries the field, and the old decoder rejects it.
+	second := first
+	second.Attempt = 2
+	second = sealClosureRestartTestJob(t, second)
+	secondBody, err := canonicalJSON(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(secondBody), "\"attempt\": 2") {
+		t.Fatalf("a restarted closure job did not encode its attempt counter: %s", secondBody)
+	}
+	var downgraded preAttemptClosureJob
+	err = decodeStrictJSON(secondBody, &downgraded)
+	if err == nil {
+		t.Fatal("a pre-0.8.4 decoder read a restarted closure job; the downgrade note is now wrong")
+	}
+	if !strings.Contains(err.Error(), "attempt") {
+		t.Fatalf("the downgrade failure is not about the attempt field: %v", err)
+	}
+}

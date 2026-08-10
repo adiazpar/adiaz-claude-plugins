@@ -458,25 +458,52 @@ func (service *Service) verifyNormalizationResolution(
 	}
 
 	resolvedFindings := []string{}
-	allNonClaim := true
+	// noClaimExtracted stays true while every span the manager judged said that
+	// this report contributes no claim to the shared record - which is what
+	// `reviewed-non-claim` means on the queue item, and why `out-of-scope` counts
+	// towards it exactly as `non-claim` does.
+	noClaimExtracted := true
 	for _, entry := range coverage {
 		switch entry.Disposition {
 		case "candidate-finding", "duplicate":
-			allNonClaim = false
+			noClaimExtracted = false
 			resolvedFindings = append(resolvedFindings, entry.TargetID)
 			if _, exists := graph.Findings[entry.TargetID]; !exists {
 				return NormalizationResolution{}, fmt.Errorf(
 					"normalization coverage target %s is not canonical", entry.TargetID)
 			}
-		case "non-claim":
+		// `out-of-scope` is a terminal manager judgment in exactly the sense
+		// `non-claim` is: the span was read, it was decided, and the decision was
+		// that it yields nothing the shared record should carry. The two differ
+		// only in why - one says the text asserts no claim, the other says the
+		// claim it asserts belongs to somebody else's subject - and neither leaves
+		// work behind.
+		//
+		// Omitting it here was an oversight, not a distinction, and the omission
+		// had teeth. reviewedReportCoverage already treats `out-of-scope` as
+		// covered, ValidateIntake and the intake schema have always accepted it
+		// alongside `non-claim`, run.complete names it as one of the four
+		// dispositions that clear its guard, and intake.coverage.retire offers it
+		// as one of the two terminal judgments an unresolved span may be given. So
+		// a span retired to `out-of-scope` cleared the closure coverage gate while
+		// this function still called it "non-final", which left the campaign
+		// blocked at the normalize stage on a cross-campaign resolution it had
+		// already done the work for, with a refusal that named a disposition the
+		// rest of the engine had told the manager to use. The disagreement was
+		// recorded as a known asymmetry when the retirement transition landed and
+		// deferred to its own change; this is that change.
+		case "non-claim", "out-of-scope":
 		default:
 			return NormalizationResolution{}, fmt.Errorf(
-				"normalization coverage retains non-final disposition %s", entry.Disposition)
+				"normalization coverage retains non-final disposition %s; every span of the source "+
+					"report must carry a terminal judgment - candidate-finding, duplicate, non-claim, "+
+					"or out-of-scope - before its normalization can be resolved",
+				entry.Disposition)
 		}
 	}
 	resolvedFindings = SortedUnique(resolvedFindings)
 	disposition := "normalized"
-	if allNonClaim {
+	if noClaimExtracted {
 		disposition = "reviewed-non-claim"
 	}
 

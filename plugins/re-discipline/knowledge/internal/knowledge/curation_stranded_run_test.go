@@ -8,16 +8,27 @@ import (
 	"testing"
 )
 
-// reviewCommittedIntake ratifies one committed curator intake exactly as a
-// manager would: it echoes the persisted record, seals a packet envelope over
-// it, and commits the immutable receipt together with the reviewed intake.
-func reviewCommittedIntake(
+// intakeRatification is the pair of records one manager ratification produces
+// over a candidate-free curator intake: the immutable receipt, and the intake
+// revision it advances to `reviewed`.
+type intakeRatification struct {
+	Committed IntakeRecord
+	Reviewed  IntakeRecord
+	Review    ReviewRecord
+	Envelope  ReviewPacketEnvelope
+}
+
+// buildIntakeRatification echoes one persisted curator intake and seals the
+// packet envelope, review receipt, and resulting reviewed revision a manager
+// would submit for it. It is shared by the live path and the legacy-adoption
+// path below so that the two differ only in how the records are committed, never
+// in what they say.
+func buildIntakeRatification(
 	t *testing.T,
 	fixture runPreparationFixture,
-	receipt StateTransactionReceipt,
-	intakeID, reviewID, correlation, idempotencyKey, at string,
+	intakeID, reviewID, correlation, at string,
 	ordinal int,
-) StateTransactionReceipt {
+) intakeRatification {
 	t.Helper()
 	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
 	if err != nil {
@@ -45,19 +56,163 @@ func reviewCommittedIntake(
 	reviewed := committed
 	reviewed.RecordMeta = lifecycleAdvanceMeta(reviewed.RecordMeta, at, "manager", correlation)
 	reviewed.Digest, reviewed.Status = stateTestDigest("3"), "reviewed"
+	return intakeRatification{
+		Committed: committed, Reviewed: reviewed, Review: review, Envelope: envelope,
+	}
+}
 
+// reviewCommittedIntake ratifies one committed curator intake exactly as a
+// manager would: it echoes the persisted record, seals a packet envelope over
+// it, and commits the immutable receipt together with the reviewed intake.
+func reviewCommittedIntake(
+	t *testing.T,
+	fixture runPreparationFixture,
+	receipt StateTransactionReceipt,
+	intakeID, reviewID, correlation, idempotencyKey, at string,
+	ordinal int,
+) StateTransactionReceipt {
+	t.Helper()
+	ratification := buildIntakeRatification(t, fixture, intakeID, reviewID, correlation, at, ordinal)
 	applied, err := fixture.service.ManagerApply(context.Background(), ManagerApplyRequest{
 		Action: "review.submit", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
 		CorrelationID: correlation, IdempotencyKey: idempotencyKey,
 		Rationale:             "The curator packet is accepted into the campaign record.",
 		ExpectedHeadRevision:  receipt.ResultingHead.Revision,
 		ExpectedHeadDigest:    receipt.ResultingHead.Digest,
-		ExpectedRecordDigests: map[string]string{committed.ID: committed.Digest},
-		Intake:                &reviewed, Review: &review,
-		ReviewPacket: &ReviewPacketSubmission{Envelope: envelope, Intake: committed},
+		ExpectedRecordDigests: map[string]string{ratification.Committed.ID: ratification.Committed.Digest},
+		Intake:                &ratification.Reviewed, Review: &ratification.Review,
+		ReviewPacket: &ReviewPacketSubmission{
+			Envelope: ratification.Envelope, Intake: ratification.Committed,
+		},
 	})
 	if err != nil {
 		t.Fatalf("review intake %s: %v", intakeID, err)
+	}
+	return applied
+}
+
+// reviewCommittedIntakeAsLegacy installs a reviewed intake that still carries
+// unresolved coverage spans - the exact state this package's repairs exist for,
+// and the exact state the live path may no longer produce.
+//
+// ValidateIntakeTransition refuses submitted -> reviewed while any span is
+// unresolved, so review.submit cannot create this campaign any more, which is
+// the whole point of that guard. It is reproduced here the only way it can still
+// arise, and the way it actually arose in the field: canonical records that an
+// engine build without the guard already committed, adopted through the engine's
+// own reconcile.import path. The records are byte-for-byte what review.submit
+// would have written, so nothing downstream can tell the difference.
+func reviewCommittedIntakeAsLegacy(
+	t *testing.T,
+	fixture runPreparationFixture,
+	receipt StateTransactionReceipt,
+	intakeID, reviewID, correlation, idempotencyKey, at string,
+	ordinal int,
+) StateTransactionReceipt {
+	t.Helper()
+	ratification := buildIntakeRatification(t, fixture, intakeID, reviewID, correlation, at, ordinal)
+	if len(unresolvedCoverageHandles(ratification.Reviewed)) == 0 {
+		t.Fatalf("intake %s carries no unresolved span; ratify it through the live path instead", intakeID)
+	}
+	return installLegacyRatifiedIntake(t, fixture, receipt, correlation, idempotencyKey,
+		ratification.Reviewed, ratification.Review, nil)
+}
+
+// writeLegacyRecord overwrites one canonical record file in place, standing in
+// for the engine build that committed it before the rule under test existed.
+func writeLegacyRecord(t *testing.T, root, directory, name string, body []byte) {
+	t.Helper()
+	// The record directory may not exist yet: a campaign that has never had a
+	// review has no reviews/ directory, and the engine creates one only when it
+	// writes through it.
+	absolute := filepath.Join(root, "active", "test-campaign", directory)
+	if err := os.MkdirAll(absolute, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(absolute, name), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// installLegacyRatifiedIntake commits a reviewed intake, its immutable review
+// receipt, and any findings the review ratified, as records that already exist
+// rather than as a transition.
+//
+// validateAndApplyWrites treats a reconcile.import write whose record is
+// byte-identical to the one on disk as an adoption and skips transition
+// validation for it, which is precisely what an adoption means: the bytes are
+// asserted, not re-derived. That is the only remaining route to a reviewed
+// intake carrying unresolved spans, and it is a route a real campaign has taken,
+// so the fixture takes it too instead of weakening the guard it exists to test.
+func installLegacyRatifiedIntake(
+	t *testing.T,
+	fixture runPreparationFixture,
+	receipt StateTransactionReceipt,
+	correlation, idempotencyKey string,
+	intake IntakeRecord,
+	review ReviewRecord,
+	findings []FindingSubmission,
+) StateTransactionReceipt {
+	t.Helper()
+	expected := map[string]string{}
+
+	intakeValue, intakeBody, err := sealIntakeRecord(intake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedIntake := intakeValue.(IntakeRecord)
+	writeLegacyRecord(t, fixture.root, "intake", sealedIntake.ID+".json", intakeBody)
+	expected[sealedIntake.ID] = sealedIntake.Digest
+
+	// injectTransactionOwnedFields stamps a review's resultingEventIds with the
+	// event of the transaction that carries it, but only when the field is empty.
+	// A record already on disk carries the event of the transaction that first
+	// wrote it, so the adoption must supply one or the prepared record would
+	// differ from the committed bytes by exactly that field and stop being an
+	// exact reconciliation.
+	if len(review.ResultingEventIDs) == 0 {
+		head, headErr := fixture.store.LoadHead()
+		if headErr != nil {
+			t.Fatal(headErr)
+		}
+		review.ResultingEventIDs = []string{head.EventID}
+	}
+	reviewValue, reviewBody, err := sealReviewRecord(review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedReview := reviewValue.(ReviewRecord)
+	writeLegacyRecord(t, fixture.root, "reviews", sealedReview.ID+".json", reviewBody)
+	expected[sealedReview.ID] = sealedReview.Digest
+
+	adopted := make([]FindingSubmission, 0, len(findings))
+	for _, submission := range findings {
+		path := "active/test-campaign/findings/" + submission.Record.ID + ".md"
+		value, body, sealErr := sealFindingStateRecord(submission.Document(), path)
+		if sealErr != nil {
+			t.Fatal(sealErr)
+		}
+		document := value.(FindingDocument)
+		writeLegacyRecord(t, fixture.root, "findings", document.Record.ID+".md", body)
+		expected[document.Record.ID] = document.Record.Digest
+		adopted = append(adopted, FindingSubmission{
+			Record: document.Record, Body: document.Record.Body, Path: document.Record.Path,
+			SyntheticQuestions: document.SyntheticQuestions,
+			QuestionsReviewed:  document.QuestionsReviewed,
+		})
+	}
+
+	applied, err := fixture.service.ManagerApply(context.Background(), ManagerApplyRequest{
+		Action: "reconcile.import", Actor: "manager", CampaignSlug: "test-campaign", CampaignID: "C-TEST",
+		CorrelationID: correlation, IdempotencyKey: idempotencyKey,
+		Rationale:             "Adopt a packet an earlier engine build ratified over unresolved coverage.",
+		ExpectedHeadRevision:  receipt.ResultingHead.Revision,
+		ExpectedHeadDigest:    receipt.ResultingHead.Digest,
+		ExpectedRecordDigests: expected,
+		Intake:                &sealedIntake, Review: &sealedReview, Findings: adopted,
+	})
+	if err != nil {
+		t.Fatalf("adopt the legacy ratified intake %s: %v", sealedIntake.ID, err)
 	}
 	return applied
 }
@@ -168,7 +323,10 @@ func TestSupplementaryCurationRepairsAStrandedCompletedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit the curator intake with an unresolved span: %v", err)
 	}
-	reviewReceipt := reviewCommittedIntake(t, fixture, dirtyReceipt,
+	// Ratifying this packet is refused at the transition now, so the strand can
+	// only be adopted from a legacy record, never created. See
+	// TestRatificationRefusesUnresolvedCoverage for the refusal itself.
+	reviewReceipt := reviewCommittedIntakeAsLegacy(t, fixture, dirtyReceipt,
 		"I-0901", "V-0901", "corr-stranded-dirty-review", "idem-stranded-dirty-review",
 		"2026-08-02T18:07:00Z", 1)
 
@@ -415,7 +573,9 @@ func TestSupplementaryCurationRepairsAStrandedInvalidatedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit the curator intake with an unresolved span: %v", err)
 	}
-	reviewReceipt := reviewCommittedIntake(t, fixture, dirtyReceipt,
+	// As above: the ratification that produced this state is refused now, so the
+	// dirty reviewed intake is adopted as the legacy record it can only be.
+	reviewReceipt := reviewCommittedIntakeAsLegacy(t, fixture, dirtyReceipt,
 		"I-0921", "V-0921", "corr-invalidated-dirty-review", "idem-invalidated-dirty-review",
 		"2026-08-02T18:07:00Z", 1)
 

@@ -3,6 +3,7 @@ package knowledge
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -48,7 +49,75 @@ func ValidateIntakeTransition(previous *IntakeRecord, next IntakeRecord) error {
 	if !intakeTransitions[previous.Status][next.Status] {
 		return fmt.Errorf("illegal intake transition %s -> %s", previous.Status, next.Status)
 	}
+	if previous.Status != "reviewed" && next.Status == "reviewed" {
+		if err := refuseUnresolvedCoverageAtRatification(previous.Status, next); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// unresolvedCoverageHandles renders, in sorted order, the canonical span handle
+// of every coverage row an intake still leaves `unresolved`. Sorting matters
+// because the refusal below is the only place a curator or manager ever sees the
+// full list, and an order that changed between two identical refusals would make
+// them look like different failures.
+func unresolvedCoverageHandles(intake IntakeRecord) []string {
+	handles := []string{}
+	for _, entry := range intake.Coverage {
+		if entry.Disposition == "unresolved" {
+			handles = append(handles, canonicalCoverageHandle(entry))
+		}
+	}
+	sort.Strings(handles)
+	return handles
+}
+
+// refuseUnresolvedCoverageAtRatification is the whole of the rule that an intake
+// may not become `reviewed` while it still declares spans nobody judged.
+//
+// Why the rule exists at all. An `unresolved` disposition is not a judgment; it
+// is a recorded absence of one, and it is fatal much later. reviewedReportCoverage
+// refuses to count *any* source report carrying an unresolved span, so closure
+// classifies the run whose report the intake covers `missing-reviewed-intake`,
+// permanently: `completed` has no edge back to `returned`, curation_submit
+// accepts a fresh intake for a run that has left `returned` only under the
+// stranded-run admission, and `reviewed` has no edge back to `submitted`. Nothing
+// between ratification and the closure gate says any of this out loud. A real
+// campaign carried seven such spans for weeks and discovered them only when
+// closure refused, by which point the curator who had declined to judge them was
+// long gone and the manager who had to supply the judgment had never read the
+// report. Ratification is the last moment at which the person deciding is still
+// the person holding the packet, so it is where the cost belongs.
+//
+// Why this is a rule about the transition and not about the record. It would be
+// natural to put this in ValidateIntake, and it would be a data-loss bug.
+// decodeCanonicalRecord runs record validation on every *load*, so a rule there
+// would make every already-committed reviewed intake that carries an unresolved
+// span fail to decode - and because LoadCampaignGraph fails whole, the campaign
+// graph containing it would stop loading at all, across every campaign reviewed
+// before this rule existed. Gating the edge into `reviewed` instead leaves those
+// historical records readable and holds only new ratifications to the rule. The
+// reviewed -> reviewed edge is deliberately not covered: that is the amendment
+// path, and it is how a historical record with unresolved spans gets repaired
+// one span at a time.
+func refuseUnresolvedCoverageAtRatification(from string, next IntakeRecord) error {
+	handles := unresolvedCoverageHandles(next)
+	if len(handles) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"intake %s cannot be ratified while %d coverage span(s) are still unresolved (%s): an "+
+			"unresolved disposition records that nobody judged the span, and reviewedReportCoverage "+
+			"counts no source report that carries one, so ratifying this packet would classify the "+
+			"covered run missing-reviewed-intake at closure with nothing warning of it until then. "+
+			"Remedy: while the intake is %s, resubmit it through curation_submit with each named "+
+			"span disposed as candidate-finding, duplicate, non-claim, or out-of-scope, then ratify "+
+			"the resubmitted revision. manager_apply intake.coverage.retire is the sibling repair "+
+			"that gives exactly these spans a terminal non-claim or out-of-scope judgment under a "+
+			"review that already ratified them, and it exists for the intakes that reached "+
+			"reviewed with unresolved spans before this rule did",
+		next.ID, len(handles), strings.Join(handles, ", "), from)
 }
 
 func ValidateReviewTransition(previous *ReviewRecord, next ReviewRecord) error {

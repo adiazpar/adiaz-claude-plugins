@@ -32,14 +32,16 @@ import (
 // so widening this transition is an edit somebody has to make on purpose and a
 // reviewer can see.
 //
-// Known asymmetry, accepted and not reconciled here. reviewedReportCoverage
-// treats `out-of-scope` as covered, but verifyNormalizationResolution accepts
-// only `candidate-finding`, `duplicate`, and `non-claim`. Retiring a span to
-// `out-of-scope` therefore clears the closure coverage gate while still
-// blocking a cross-campaign normalization resolution over the same report. That
-// disagreement predates this transition; the transition only makes it easier to
-// reach. Reconciling the two gates is a separate change with its own evidence,
-// and folding it in here would hide it inside a bookkeeping fix.
+// Formerly-known asymmetry, now reconciled. reviewedReportCoverage treats
+// `out-of-scope` as covered, but verifyNormalizationResolution once accepted
+// only `candidate-finding`, `duplicate`, and `non-claim`, so retiring a span to
+// `out-of-scope` cleared the closure coverage gate while still blocking a
+// cross-campaign normalization resolution over the same report. That
+// disagreement predated this transition and was deferred to its own change;
+// verifyNormalizationResolution now accepts `out-of-scope` as the terminal
+// judgment it is, so both destinations named in the table below satisfy both
+// gates. If a future disposition is added here, check that function too - they
+// are two readings of the same word "terminal" and have drifted apart once.
 var permittedCoverageRetirements = map[string]map[string]bool{
 	"unresolved": {"non-claim": true, "out-of-scope": true},
 }
