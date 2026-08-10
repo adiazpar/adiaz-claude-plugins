@@ -53,13 +53,37 @@ func TestWorkAndCampaignTerminalTransitionsAreClosed(t *testing.T) {
 		t.Fatal("closed campaign reopened")
 	}
 
+	// A campaign is closed once; work is not. Done work reopens, because the
+	// judgement that called it finished can turn out to be early - a closure
+	// gate asking for a receipt the work never produced is exactly that case,
+	// and a pack will not compile against a done item, so without the reopen
+	// the run that would finish it can never be dispatched.
 	item := stateTestWorkItem("W-0001")
 	item.State, item.Outcome = "done", "Completed"
-	nextItem := item
-	nextItem.Revision++
-	nextItem.State, nextItem.Outcome = "ready", ""
-	if err := ValidateWorkItemTransition(&item, nextItem); err == nil {
-		t.Fatal("done work item returned to ready")
+	reopened := item
+	reopened.Revision++
+	reopened.State, reopened.Outcome = "active", ""
+	if err := ValidateWorkItemTransition(&item, reopened); err != nil {
+		t.Fatalf("done work item could not be reopened: %v", err)
+	}
+
+	// Reopening is not a general amnesty on terminal states: done still cannot
+	// be abandoned, and cancelled and superseded stay absorbing.
+	cancelled := item
+	cancelled.Revision++
+	cancelled.State, cancelled.Outcome = "cancelled", ""
+	if err := ValidateWorkItemTransition(&item, cancelled); err == nil {
+		t.Fatal("done work item was cancelled")
+	}
+	for _, terminal := range []string{"cancelled", "superseded"} {
+		absorbing := stateTestWorkItem("W-0001")
+		absorbing.State = terminal
+		escaped := absorbing
+		escaped.Revision++
+		escaped.State, escaped.Outcome = "active", ""
+		if err := ValidateWorkItemTransition(&absorbing, escaped); err == nil {
+			t.Fatalf("%s work item was reopened", terminal)
+		}
 	}
 }
 

@@ -18,12 +18,20 @@ var campaignTransitions = map[string]map[string]bool{
 }
 
 var workItemTransitions = map[string]map[string]bool{
-	"proposed":   {"proposed": true, "ready": true, "deferred": true, "cancelled": true, "superseded": true},
-	"ready":      {"ready": true, "active": true, "blocked": true, "deferred": true, "cancelled": true, "superseded": true},
-	"active":     {"active": true, "blocked": true, "deferred": true, "done": true, "cancelled": true, "superseded": true},
-	"blocked":    {"blocked": true, "ready": true, "active": true, "deferred": true, "cancelled": true, "superseded": true},
-	"deferred":   {"deferred": true, "ready": true, "active": true, "cancelled": true, "superseded": true},
-	"done":       {"done": true, "superseded": true},
+	"proposed": {"proposed": true, "ready": true, "deferred": true, "cancelled": true, "superseded": true},
+	"ready":    {"ready": true, "active": true, "blocked": true, "deferred": true, "cancelled": true, "superseded": true},
+	"active":   {"active": true, "blocked": true, "deferred": true, "done": true, "cancelled": true, "superseded": true},
+	"blocked":  {"blocked": true, "ready": true, "active": true, "deferred": true, "cancelled": true, "superseded": true},
+	"deferred": {"deferred": true, "ready": true, "active": true, "cancelled": true, "superseded": true},
+	// done reopens. Work is called finished by a judgement, and a judgement can
+	// turn out to be early: the receipt a closure gate asks for may be missing
+	// from work already marked done. Terminal-forever made that unreachable,
+	// because a pack will not compile against a done work item, so no run could
+	// ever be dispatched to finish it - and closure refused to advance without
+	// the run. Reopening is safe here because it is not an escape: closure still
+	// requires every work item to be terminal again before it advances past
+	// decide, so a reopen must be closed out rather than merely opened.
+	"done":       {"done": true, "ready": true, "active": true, "superseded": true},
 	"cancelled":  {"cancelled": true},
 	"superseded": {"superseded": true},
 }
