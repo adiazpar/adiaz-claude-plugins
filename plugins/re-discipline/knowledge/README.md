@@ -246,6 +246,19 @@ it. Both are exempt, so neither strands a campaign; the engine names the better
 one when a curator tries to curate such a run, which is where the question is
 actually asked.
 
+A curator run's report is exempt for a different reason, and closure records it
+as `not-a-claim-source`. A curator records how the record itself was triaged -
+which spans carry claims, and why - so its report is a proof artifact rather
+than a claim source. Triaging it as one made closure non-convergent: closure
+queues normalization for an uncovered report, clearing that item requires a
+curator run, and that run returns a report which is itself uncovered, so every
+lap added a report and the campaign could never close. The normalization queue
+already skipped curator runs; closure coverage did not, so closure demanded
+intakes for exactly the reports the queue would never offer an item for.
+`runIsClaimSource` is now the single definition both consult. The exemption is
+narrow: every other role remains a claim source, `manager` included, and an
+intake that does name a curator report still has to cover it span by span.
+
 `curation_submit` also accepts a source run that is already `completed` or
 `invalidated`, but only while that run is stranded: only when no non-superseded
 intake covers its report with every span disposed. For `completed` this is the

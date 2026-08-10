@@ -205,6 +205,29 @@ func ComputeClosureCoverage(graph CampaignGraph, prior *ClosureCoverage) (Closur
 			// supersedes it).
 			coverage.SourceRunCoverage[id] = "missing-report"
 			coverage.MissingDecisions = append(coverage.MissingDecisions, "run:"+id+":report")
+		case !runIsClaimSource(run):
+			// A curator report records how the record itself was triaged, not
+			// what is true of the system under study, so it is not a claim
+			// source. See runIsClaimSource for the single definition.
+			//
+			// Triaging curator reports as claim sources made closure recursive and
+			// therefore non-convergent. Closure queues normalization for an
+			// uncovered report; clearing that queue item requires a curator run;
+			// that curator run returns its own report, which is uncovered, which
+			// queues again. Every lap adds a report, so the campaign can never
+			// close, and the only escape was to hand-edit canonical state -
+			// which costs far more integrity than the gate was ever buying.
+			//
+			// The exemption costs nothing the gate protects. The gate exists so
+			// that no ratified claim rests on report bytes a curator never
+			// normalized, and a curator report is where normalization is
+			// recorded, not where a claim enters. Binding stays intact if a
+			// manager does choose to curate one: an intake that names such a
+			// report still has to cover it span by span, and
+			// validateCurationGraphBindings still resolves every candidate's
+			// evidence through intake.sourceRuns. The run's payload files are
+			// unaffected - FileRetention below still classifies every one.
+			coverage.SourceRunCoverage[id] = "not-a-claim-source"
 		case reviewedReports[reviewedRunCoverageKey(id, *run.Report)]:
 			coverage.SourceRunCoverage[id] = "reviewed-intake"
 		default:
@@ -411,6 +434,22 @@ func findingIsEpistemicallyLive(record FindingRecord) bool {
 		!validOne(record.Validity, "invalid", "superseded", "historical")
 }
 
+// runIsClaimSource reports whether a run's report can introduce a claim about
+// the system under study. A curator run cannot: it records decisions about the
+// campaign record itself - which spans were triaged, and why - so its report is
+// a proof artifact rather than a claim source. Every other role can, including
+// `manager`, which is why this is not a test for `investigator`.
+//
+// This is the single definition, and it must stay single. The rule previously
+// existed in only one of the two places that need it: the normalization queue
+// skipped curator runs, while closure coverage skipped nothing. Closure
+// therefore demanded a reviewed intake for exactly the reports the queue would
+// never offer a normalization item for, and said only `missing-reviewed-intake`
+// while doing it.
+func runIsClaimSource(run RunRecord) bool {
+	return run.Role != "curator"
+}
+
 func sealClosureCoverage(coverage *ClosureCoverage) error {
 	if coverage == nil {
 		return errors.New("closure coverage is required")
@@ -437,7 +476,7 @@ func ValidateClosureCoverage(coverage ClosureCoverage) error {
 	for key, value := range coverage.SourceRunCoverage {
 		if !runIDRE.MatchString(key) || !validOne(value,
 			"reviewed-intake", "aborted-with-reason", "invalidated-without-report",
-			"missing-report", "missing-reviewed-intake") {
+			"not-a-claim-source", "missing-report", "missing-reviewed-intake") {
 			return fmt.Errorf("closure run coverage %q has an invalid disposition", key)
 		}
 	}

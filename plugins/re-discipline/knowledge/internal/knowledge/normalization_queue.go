@@ -204,7 +204,7 @@ func (service *Service) queueClosureNormalization(
 	queued := []NormalizationSuggestion{}
 	for _, runID := range runIDs {
 		run := graph.Runs[runID]
-		if run.Report == nil || run.Status == "aborted" || run.Role == "curator" ||
+		if run.Report == nil || run.Status == "aborted" || !runIsClaimSource(run) ||
 			reviewed[reviewedRunCoverageKey(run.ID, *run.Report)] {
 			continue
 		}
