@@ -91,14 +91,35 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		return StateTransactionReceipt{}, err
 	} else if found {
 		if receipt.RequestDigest != prepared.RequestDigest {
-			return StateTransactionReceipt{}, ErrIdempotencyConflict
+			// The caller reused a key with different content. Both readings are
+			// plausible from outside -- a genuine retry whose payload drifted, or
+			// a new transition that copied the previous key -- and they have
+			// opposite remedies, so name both rather than guessing.
+			return StateTransactionReceipt{}, fmt.Errorf(
+				"%w: idempotencyKey %q already committed transaction %s at head revision %d with "+
+					"a different request. Remedy: if this is a retry, resend the byte-identical "+
+					"request and the committed receipt is replayed; if this is a new transition, "+
+					"give it its own idempotencyKey",
+				ErrIdempotencyConflict, prepared.Request.IdempotencyKey,
+				receipt.TransactionID, receipt.ResultingHead.Revision)
 		}
 		return receipt, nil
 	}
 	if head.Revision != prepared.Request.ExpectedHeadRevision || head.Digest != prepared.Request.ExpectedHeadDigest {
-		return StateTransactionReceipt{}, fmt.Errorf("%w: expected head %d/%s, found %d/%s",
+		// This is the single most frequent refusal in the engine, and until it
+		// named the way forward it read as a dead end rather than as "somebody
+		// else went first". Say what the caller must re-read, and say that
+		// nothing was written, because the second question after a conflict is
+		// always whether a partial write landed.
+		return StateTransactionReceipt{}, fmt.Errorf(
+			"%w: expected head %d/%s, found %d/%s. Canonical state moved between the read that "+
+				"produced those expectations and this call, so nothing was written. Remedy: "+
+				"state mode=delta campaignId=%s sinceEventId=<the eventHead you last read> "+
+				"shows exactly what changed; then re-read the affected records, rebuild "+
+				"expectedHeadRevision, expectedHeadDigest, and every expectedRecordDigests "+
+				"entry, and re-issue",
 			ErrStateConflict, prepared.Request.ExpectedHeadRevision, prepared.Request.ExpectedHeadDigest,
-			head.Revision, head.Digest)
+			head.Revision, head.Digest, prepared.Request.CampaignID)
 	}
 	if err := store.validateArtifactExpectations(prepared.Artifacts); err != nil {
 		return StateTransactionReceipt{}, err
@@ -390,14 +411,29 @@ func (store *StateStore) validateAndApplyWrites(request StateTransactionRequest,
 		}
 		if write.ExpectedRevision == 0 {
 			if exists {
-				return CampaignGraph{}, fmt.Errorf("%w: record %s already exists", ErrStateConflict, write.Path)
+				return CampaignGraph{}, fmt.Errorf(
+					"%w: record %s was submitted at revision 1, which means create, and it "+
+						"already exists at revision %d. Remedy: read it, then resubmit as "+
+						"revision %d with expectedRecordDigests[%q] set to %s",
+					ErrStateConflict, write.Path, handle.Revision,
+					handle.Revision+1, handle.RecordID, handle.RecordDigest)
 			}
 		} else {
 			if !exists {
-				return CampaignGraph{}, fmt.Errorf("%w: record %s is missing", ErrStateConflict, write.Path)
+				return CampaignGraph{}, fmt.Errorf(
+					"%w: record %s was submitted at revision %d, which means update, and no such "+
+						"record exists. Remedy: submit it at revision 1 to create it, or correct "+
+						"the id or campaign slug in the path",
+					ErrStateConflict, write.Path, write.ExpectedRevision+1)
 			}
 			if handle.RecordDigest != write.ExpectedDigest || (handle.Revision > 0 && handle.Revision != write.ExpectedRevision) {
-				return CampaignGraph{}, fmt.Errorf("%w: record %s expected revision/digest does not match", ErrStateConflict, write.Path)
+				return CampaignGraph{}, fmt.Errorf(
+					"%w: record %s is at revision %d digest %s; the request expected revision %d "+
+						"digest %s. Remedy: re-read it, resubmit as revision %d, and set "+
+						"expectedRecordDigests[%q] to %s",
+					ErrStateConflict, write.Path, handle.Revision, handle.RecordDigest,
+					write.ExpectedRevision, write.ExpectedDigest,
+					handle.Revision+1, handle.RecordID, handle.RecordDigest)
 			}
 		}
 		if !write.Internal {
@@ -458,12 +494,25 @@ func (store *StateStore) validateArtifactExpectations(artifacts []preparedStateA
 		}
 		if artifact.ExpectedDigest == "" {
 			if exists {
-				return fmt.Errorf("%w: artifact %s already exists", ErrStateConflict, artifact.Path)
+				return fmt.Errorf(
+					"%w: artifact %s is published as new, and a file already exists there with "+
+						"digest %s. Remedy: to replace it deliberately, set "+
+						"expectedArtifactDigests[%q] to %s; to write elsewhere, choose another "+
+						"destination",
+					ErrStateConflict, artifact.Path, digest, artifact.Path, digest)
 			}
 			continue
 		}
 		if !exists || digest != artifact.ExpectedDigest {
-			return fmt.Errorf("%w: artifact %s expected digest does not match", ErrStateConflict, artifact.Path)
+			found := "nothing"
+			if exists {
+				found = digest
+			}
+			return fmt.Errorf(
+				"%w: artifact %s expected digest %s and found %s. Remedy: re-read the file and "+
+					"set expectedArtifactDigests[%q] to its current digest, or omit the entry "+
+					"if the destination should be created rather than replaced",
+				ErrStateConflict, artifact.Path, artifact.ExpectedDigest, found, artifact.Path)
 		}
 	}
 	return nil
@@ -737,6 +786,15 @@ func sealStateEvent(event *StateEvent) error {
 }
 
 func sealTransactionReceipt(receipt *StateTransactionReceipt) error {
+	// Sealing a trimmed copy would mint a second, conflicting digest for one
+	// committed transaction. Nothing in this package does it - budgeting runs
+	// only at the service return boundary, after the commit - and this clause
+	// is here so that it stays true if someone later moves the trimming.
+	if len(receipt.Omitted) != 0 {
+		return errors.New(
+			"a tokenBudget-trimmed receipt copy cannot be sealed; seal the complete receipt and " +
+				"trim only the value returned to the caller")
+	}
 	receipt.ResultDigest = ""
 	digest, err := CanonicalDigest(*receipt)
 	if err != nil {
@@ -769,6 +827,18 @@ func sealTransactionReceipt(receipt *StateTransactionReceipt) error {
 }
 
 func verifyTransactionReceipt(receipt StateTransactionReceipt) error {
+	// A budgeted response copy is not a receipt and must never be mistaken for
+	// one. Its ResultDigest still names the complete committed receipt, so the
+	// digest comparison below would fail with "does not verify" - a message
+	// that reads as corruption when the truth is only that the caller kept the
+	// short form. Name it, and name the way back.
+	if len(receipt.Omitted) != 0 {
+		return fmt.Errorf(
+			"this is a tokenBudget-trimmed response copy, not a verifiable receipt (%d section(s) "+
+				"omitted); its resultDigest is the digest of the complete committed receipt. "+
+				"Re-issue the transition with tokenBudget omitted to obtain a receipt that verifies",
+			len(receipt.Omitted))
+	}
 	want := receipt.ResultDigest
 	if err := sealTransactionReceipt(&receipt); err != nil {
 		return err

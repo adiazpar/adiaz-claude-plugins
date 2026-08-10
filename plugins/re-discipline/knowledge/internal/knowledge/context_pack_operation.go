@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // ContextPackMaterializeRequest is the operation contract shared by MCP and
@@ -33,21 +34,41 @@ type ContextPackMaterializationResult struct {
 
 func ValidateContextPackMaterializeRequest(request ContextPackMaterializeRequest) error {
 	if request.Action != "preview" && request.Action != "materialize" {
-		return errors.New("context_pack_materialize action must be preview or materialize")
+		return fmt.Errorf(
+			"context_pack_materialize action must be preview or materialize; it is %q. preview "+
+				"compiles a pack and writes nothing; materialize publishes a preview whose "+
+				"digest the caller retained independently",
+			request.Action)
 	}
 	if request.Target.Kind != "active-run" && request.Target.Kind != "recruiting-run" {
-		return errors.New("context_pack_materialize requires an active-run or recruiting-run target")
+		return fmt.Errorf(
+			"context_pack_materialize requires target.kind \"active-run\" or \"recruiting-run\"; "+
+				"it is %q. An active-run target needs campaignId, workItemId, and runId; a "+
+				"recruiting-run target needs candidateSlug and recruitingRunId",
+			request.Target.Kind)
 	}
 	if request.Action == "preview" &&
 		(request.ExpectedDigest != "" || request.ExpectedPackID != "") {
-		return errors.New("context pack preview does not accept materialization fields")
+		return errors.New(
+			"context pack preview does not accept expectedDigest or expectedPackId; those are " +
+				"the compare-and-swap a materialize supplies from a preview it already ran, " +
+				"and a preview that accepted them would be verifying its own output. Remedy: " +
+				"drop both fields to preview, or set action=materialize to publish")
 	}
 	if request.Action == "materialize" && request.ExpectedDigest == "" {
-		return errors.New("context pack materialization requires expectedDigest")
+		return errors.New(
+			"context pack materialization requires expectedDigest: the digest of the preview " +
+				"being published, retained by the caller rather than recomputed here, so that " +
+				"an index or profile change between the two calls is caught instead of " +
+				"silently published. Remedy: run context_pack_materialize action=preview with " +
+				"the same target, task, role, tiers, and writeGrants, then pass its digest")
 	}
 	if request.Action == "materialize" && request.Target.Kind == "active-run" {
 		return errors.New(
-			"active-run context packs are published atomically by manager_apply run.prepare")
+			"active-run context packs are published atomically by manager_apply run.prepare, " +
+				"in the same transaction as the run record, so a run can never exist without " +
+				"the pack that scoped it. Remedy: preview the pack here, then submit it " +
+				"unchanged as manager_apply run.prepare runPreparation.contextPack")
 	}
 	return nil
 }

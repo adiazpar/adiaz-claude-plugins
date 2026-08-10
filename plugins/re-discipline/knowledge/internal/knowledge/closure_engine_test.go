@@ -914,7 +914,7 @@ func TestClosureRestartCarriesManagerDispositionsAndPrunesVanishedActiveFiles(t 
 	bogus := closureRestartRequest(t, store, graph, "2026-08-02T18:21:00Z", "closure-restart-third")
 	bogus.ActiveFileDispositions = map[string]string{"vanishing-notes.md": "ephemeral"}
 	if _, err := service.ClosureApply(context.Background(), bogus); err == nil ||
-		!strings.Contains(err.Error(), "names a missing file") {
+		!strings.Contains(err.Error(), "which does not exist under active/test-campaign") {
 		t.Fatalf("a declared disposition for a missing file was accepted: %v", err)
 	}
 }

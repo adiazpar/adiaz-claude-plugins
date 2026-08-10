@@ -245,7 +245,7 @@ func TestManagerRunPreparationRejectsTamperAndHalfPreparedLaunches(t *testing.T)
 		request := fixture.request
 		request.RunPreparation = nil
 		if _, err := fixture.service.ManagerApply(context.Background(), request); err == nil ||
-			!strings.Contains(err.Error(), "requires a canonical brief") {
+			!strings.Contains(err.Error(), "requires runPreparation") {
 			t.Fatalf("delegated run without launch payload returned %v", err)
 		}
 	})

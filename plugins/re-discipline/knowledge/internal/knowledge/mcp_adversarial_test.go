@@ -204,16 +204,25 @@ func managedFileURI(t *testing.T, path string) string {
 // Each ceiling sits just above where its tool actually lands, so the headroom
 // is for a field or two, not for another record type. Raising one is a normal
 // thing to do -- silently drifting past it is not.
+//
+// Raised for the four mutating tools when `tokenBudget` was added to them. The
+// number bought a documented affordance rather than a field: the description
+// has to say what a budget may drop and promise that nothing is truncated,
+// because a caller cannot decide whether it can afford a short receipt without
+// knowing which sections are at risk, and discovering that by tripping a
+// refusal is the exact cost this parameter exists to remove. curation_submit
+// and closure_apply needed the raise; manager_apply and normalization_queue
+// absorbed it inside their existing headroom.
 var toolSchemaBudgets = map[string]int{
 	"state":                    1350,
 	"read":                     1600,
 	"trace":                    1700,
 	"query":                    2950,
-	"normalization_queue":      3200,
-	"closure_apply":            3400,
+	"normalization_queue":      3550,
+	"closure_apply":            3750,
 	"context_pack_materialize": 3750,
 	"migrate_project":          8800,
-	"curation_submit":          9600,
+	"curation_submit":          9750,
 	"manager_apply":            23600,
 }
 
@@ -707,7 +716,7 @@ func TestMCPV8RepresentativeRequestsAndStructuredResults(t *testing.T) {
 	if closure["action"] != "status" || closure["digest"] == "" || closure["state"] == nil {
 		t.Fatalf("closure status adapter result is incomplete: %#v", closure)
 	}
-	assertToolError(t, rpcResponseByID(t, messages, 9), "manager actor is required")
+	assertToolError(t, rpcResponseByID(t, messages, 9), "manager_apply requires actor")
 	assertToolError(t, rpcResponseByID(t, messages, 10), "unsupported schema version")
 	assertToolError(t, rpcResponseByID(t, messages, 11), `unknown tool "status"`)
 	assertToolError(t, rpcResponseByID(t, messages, 12), "unknown field")
@@ -1137,7 +1146,8 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 	assertToolError(t, rpcResponseByID(t, materializeMessages, 6), "unknown field")
 	assertToolError(t, rpcResponseByID(t, materializeMessages, 7), "requires expectedDigest")
 	assertToolError(t, rpcResponseByID(t, materializeMessages, 8), "expected")
-	assertToolError(t, rpcResponseByID(t, materializeMessages, 9), "does not accept materialization fields")
+	assertToolError(t, rpcResponseByID(t, materializeMessages, 9),
+		"does not accept expectedDigest or expectedPackId")
 	assertToolError(t, rpcResponseByID(t, materializeMessages, 11), "manager_apply run.prepare")
 	if _, err := os.Stat(filepath.Join(root, "docs", "context-pack.json")); !os.IsNotExist(err) {
 		t.Fatal("invalid materialization left a partial artifact")

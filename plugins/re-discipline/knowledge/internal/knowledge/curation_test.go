@@ -101,7 +101,12 @@ func TestCurationPacketEnforcesCuratorBoundaryAndCoverage(t *testing.T) {
 		t.Fatal("manager self-declaration was accepted as a curator submission")
 	}
 	packet.Candidates[0].Record.ReviewState = "manager-ratified"
-	if err := ValidateCurationPacket("curator", packet); err == nil || !strings.Contains(err.Error(), "cannot submit") {
+	// The refusal now names the two review states a curator may submit and the
+	// transition that sets the others, so this pins the boundary it states
+	// rather than the verb it used to lead with.
+	if err := ValidateCurationPacket("curator", packet); err == nil ||
+		!strings.Contains(err.Error(), `a curator may submit only "extracted" or "curator-checked"`) ||
+		!strings.Contains(err.Error(), "manager_apply review.submit") {
 		t.Fatalf("curator ratification was not rejected: %v", err)
 	}
 }

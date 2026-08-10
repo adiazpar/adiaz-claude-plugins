@@ -135,10 +135,26 @@ func ValidateCurationPacket(role string, packet CurationPacket) error {
 		return err
 	}
 	if packet.Intake.Status != "submitted" {
-		return errors.New("curation packet must be submitted before manager review")
+		remedy := "Remedy: set intake.status to \"submitted\" on the revision this call carries"
+		if packet.Intake.Status == "reviewed" {
+			remedy = "A reviewed intake is ratified and curation_submit cannot resubmit it. " +
+				"Remedy: to change the disposition of unresolved spans on a reviewed intake, " +
+				"use manager_apply intake.coverage.retire; to add coverage a reviewed intake " +
+				"does not carry, submit a further intake as a new record"
+		}
+		return fmt.Errorf(
+			"curation_submit publishes an intake at status \"submitted\"; this one is %q. A "+
+				"curator proposes and a manager ratifies, so the curator never writes the "+
+				"reviewed state. %s",
+			packet.Intake.Status, remedy)
 	}
 	if len(packet.Candidates) > 10 {
-		return errors.New("curation packet may contain at most 10 related findings")
+		return fmt.Errorf(
+			"curation packet carries %d candidate findings and the limit is 10; a manager "+
+				"review is a single sitting over related claims, and a packet larger than that "+
+				"is ratified without being read. Remedy: split the coverage across several "+
+				"curation_submit calls, each with its own intake id and its own spans",
+			len(packet.Candidates))
 	}
 	declared := map[string]bool{}
 	for _, id := range packet.Intake.CandidateFindingIDs {
@@ -166,11 +182,23 @@ func ValidateCurationPacket(role string, packet CurationPacket) error {
 			return fmt.Errorf("candidate finding %s belongs to another campaign", record.ID)
 		}
 		if !validOne(record.ReviewState, "extracted", "curator-checked") {
-			return fmt.Errorf("curator cannot submit finding %s with review state %s", record.ID, record.ReviewState)
+			return fmt.Errorf(
+				"candidate finding %s has reviewState %q; a curator may submit only "+
+					"\"extracted\" or \"curator-checked\". manager-ratified and "+
+					"manager-rejected are set by manager_apply review.submit, which is the "+
+					"authority boundary this engine exists to keep. Remedy: set reviewState to "+
+					"\"curator-checked\"",
+				record.ID, record.ReviewState)
 		}
 		if record.Validity == "current" || record.ReviewState == "manager-ratified" ||
 			record.ReviewState == "manager-rejected" {
-			return fmt.Errorf("curator cannot make an authoritative decision for %s", record.ID)
+			return fmt.Errorf(
+				"candidate finding %s asserts an authority a curator does not hold: validity %q "+
+					"with reviewState %q. \"current\" means the project treats the claim as "+
+					"true, and only closure projection sets it. Remedy: submit the candidate as "+
+					"validity \"provisional\" with reviewState \"curator-checked\" and let "+
+					"manager_apply review.submit decide",
+				record.ID, record.Validity, record.ReviewState)
 		}
 		if err := ValidateFindingDocument(candidate, true); err != nil {
 			return fmt.Errorf("candidate %s: %w", record.ID, err)
@@ -180,11 +208,22 @@ func ValidateCurationPacket(role string, packet CurationPacket) error {
 		}
 	}
 	if len(seen) != len(declared) || len(packet.Rows) != len(declared) {
-		return errors.New("intake candidates, finding records, and triage rows must match exactly")
+		return fmt.Errorf(
+			"the packet's three candidate lists must agree exactly: intake.candidateFindingIds "+
+				"declares %d, %d finding records were submitted, and %d triage rows were "+
+				"submitted. Each declared id needs exactly one record and exactly one row, "+
+				"because the manager review binds all three together. Remedy: add or remove "+
+				"whichever list is short",
+			len(declared), len(seen), len(packet.Rows))
 	}
 	for _, coverage := range packet.Intake.Coverage {
 		if coverage.Disposition == "candidate-finding" && !declared[coverage.TargetID] {
-			return fmt.Errorf("coverage target %s is not in the packet", coverage.TargetID)
+			return fmt.Errorf(
+				"coverage span %s:%d-%d is disposed \"candidate-finding\" naming targetId %s, "+
+					"which this packet neither declares in intake.candidateFindingIds nor "+
+					"submits as a candidate record. Remedy: add the finding to both, or "+
+					"re-dispose the span as duplicate, non-claim, or out-of-scope",
+				coverage.SourcePath, coverage.StartLine, coverage.EndLine, coverage.TargetID)
 		}
 	}
 	if err := validateCandidateCoverageEvidence(packet); err != nil {

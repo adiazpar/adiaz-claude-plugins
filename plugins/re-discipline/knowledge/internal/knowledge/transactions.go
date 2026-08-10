@@ -88,6 +88,21 @@ type StateTransactionReceipt struct {
 	GeneratedViewDigest string                `json:"generatedViewDigest"`
 	CommittedAt         string                `json:"committedAt"`
 	ResultDigest        string                `json:"resultDigest"`
+	// Omitted is set only on the copy of this receipt that a tokenBudget
+	// trimmed on its way back to the caller. It is never set on the receipt
+	// this package seals, journals, or persists under receipts/, and
+	// verifyTransactionReceipt refuses any receipt carrying it.
+	//
+	// That refusal is the point. ResultDigest is the digest of the *complete*
+	// receipt - the one on disk, the one the retired-finalization replay path
+	// re-authenticates - so a trimmed copy necessarily carries a digest its own
+	// body does not reproduce. Rather than let that look like corruption when
+	// somebody checks it, or mint a second conflicting digest for one
+	// transaction by re-sealing the trimmed body, the trimmed copy says out
+	// loud that it is a budgeted view and is not verifiable as a receipt.
+	// `omitempty` keeps it out of the canonical encoding entirely, so no stored
+	// receipt's bytes or digest change because this field exists.
+	Omitted []string `json:"omitted,omitempty"`
 }
 
 type preparedStateWrite struct {

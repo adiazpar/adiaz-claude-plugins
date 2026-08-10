@@ -41,7 +41,7 @@ func TestCurationSubmitRejectsUnknownDuplicateCoverageTarget(t *testing.T) {
 		ExpectedHeadRevision: receipt.ResultingHead.Revision,
 		ExpectedHeadDigest:   receipt.ResultingHead.Digest, Intake: intake,
 	})
-	if err == nil || !strings.Contains(err.Error(), "not a canonical campaign finding") {
+	if err == nil || !strings.Contains(err.Error(), "is neither a canonical finding of campaign") {
 		t.Fatalf("unknown duplicate coverage target was accepted: %v", err)
 	}
 }

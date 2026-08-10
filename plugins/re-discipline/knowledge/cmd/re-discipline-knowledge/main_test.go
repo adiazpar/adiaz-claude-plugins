@@ -260,7 +260,13 @@ func TestContextPackCLIValidatesOperationBeforeProjectResolution(t *testing.T) {
 		"context-pack-materialize", "--input", input,
 		"--project-root", filepath.Join(t.TempDir(), "not-a-project"),
 	})
-	if err == nil || err.Error() != "context_pack_materialize action must be preview or materialize" {
+	// The point of this test is the *order* -- operation validation must run
+	// before project resolution -- not the exact prose, so it pins the leading
+	// clause rather than the whole message. The remedy text after it was added
+	// when refusals were made to carry one, and pinning that too would make
+	// every wording improvement look like an ordering regression.
+	if err == nil || !strings.HasPrefix(err.Error(),
+		"context_pack_materialize action must be preview or materialize") {
 		t.Fatalf("CLI and MCP validation order diverged: %v", err)
 	}
 }
@@ -282,9 +288,9 @@ func TestContextPackCLIActionValidationMatchesMCP(t *testing.T) {
 	}{
 		{name: "missing action", request: knowledge.ContextPackMaterializeRequest{Target: recruitingTarget}, want: "action must be preview or materialize"},
 		{name: "unknown action", request: knowledge.ContextPackMaterializeRequest{Action: "write", Target: recruitingTarget}, want: "action must be preview or materialize"},
-		{name: "missing target", request: knowledge.ContextPackMaterializeRequest{Action: "preview"}, want: "requires an active-run or recruiting-run target"},
-		{name: "unsupported target", request: knowledge.ContextPackMaterializeRequest{Action: "preview", Target: knowledge.ContextPackTarget{Kind: "project"}}, want: "requires an active-run or recruiting-run target"},
-		{name: "preview with identity", request: knowledge.ContextPackMaterializeRequest{Action: "preview", Target: recruitingTarget, ExpectedDigest: validDigest}, want: "preview does not accept materialization fields"},
+		{name: "missing target", request: knowledge.ContextPackMaterializeRequest{Action: "preview"}, want: "requires target.kind"},
+		{name: "unsupported target", request: knowledge.ContextPackMaterializeRequest{Action: "preview", Target: knowledge.ContextPackTarget{Kind: "project"}}, want: "requires target.kind"},
+		{name: "preview with identity", request: knowledge.ContextPackMaterializeRequest{Action: "preview", Target: recruitingTarget, ExpectedDigest: validDigest}, want: "preview does not accept expectedDigest or expectedPackId"},
 		{name: "materialize without digest", request: knowledge.ContextPackMaterializeRequest{Action: "materialize", Target: recruitingTarget}, want: "requires expectedDigest"},
 		{name: "active direct materialize", request: knowledge.ContextPackMaterializeRequest{Action: "materialize", Target: activeTarget, ExpectedDigest: validDigest}, want: "manager_apply run.prepare"},
 		{name: "valid active preview", request: knowledge.ContextPackMaterializeRequest{Action: "preview", Target: activeTarget}},

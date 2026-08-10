@@ -54,6 +54,19 @@ var traceRelationSet = map[string]bool{
 	"focus": true, "projection": true,
 }
 
+// SupportedTraceRelations is the traversable relation set in a stable order.
+// A refusal that rejects one relation name without listing the accepted ones
+// costs a tool-schema round trip to recover from, and the set is nineteen
+// hyphenated names that nobody guesses.
+func SupportedTraceRelations() []string {
+	relations := make([]string, 0, len(traceRelationSet))
+	for relation := range traceRelationSet {
+		relations = append(relations, relation)
+	}
+	sort.Strings(relations)
+	return relations
+}
+
 func (service *Service) Trace(ctx context.Context, request TraceRequest) (TraceResponse, error) {
 	if service == nil {
 		return TraceResponse{}, errors.New("service is required")
@@ -63,13 +76,17 @@ func (service *Service) Trace(ctx context.Context, request TraceRequest) (TraceR
 	}
 	request.StartHandle = strings.TrimSpace(request.StartHandle)
 	if request.StartHandle == "" {
-		return TraceResponse{}, errors.New("trace requires startHandle")
+		return TraceResponse{}, errors.New(
+			"trace requires startHandle: an exact finding, record, evidence, run, or state " +
+				"handle. query returns finding handles, and every state view returns handles " +
+				"in its expansions list")
 	}
 	if request.Direction == "" {
 		request.Direction = "both"
 	}
 	if !validOne(request.Direction, "outgoing", "incoming", "both") {
-		return TraceResponse{}, errors.New("trace direction must be outgoing, incoming, or both")
+		return TraceResponse{}, fmt.Errorf(
+			"trace direction must be outgoing, incoming, or both; it is %q", request.Direction)
 	}
 	if request.Depth == 0 {
 		request.Depth = 2
@@ -92,7 +109,9 @@ func (service *Service) Trace(ctx context.Context, request TraceRequest) (TraceR
 	allowed := map[string]bool{}
 	for _, relation := range request.Relations {
 		if !traceRelationSet[relation] {
-			return TraceResponse{}, fmt.Errorf("unsupported trace relation %q", relation)
+			return TraceResponse{}, fmt.Errorf(
+				"unsupported trace relation %q; trace follows %s",
+				relation, strings.Join(SupportedTraceRelations(), ", "))
 		}
 		allowed[relation] = true
 	}
@@ -108,7 +127,12 @@ func (service *Service) Trace(ctx context.Context, request TraceRequest) (TraceR
 		ok = start.handle != ""
 	}
 	if !ok {
-		return TraceResponse{}, fmt.Errorf("trace start handle %q does not resolve", request.StartHandle)
+		return TraceResponse{}, fmt.Errorf(
+			"trace start handle %q does not resolve to a finding, record, evidence, run, or "+
+				"state node. Remedy: if the handle is campaign-local, pass campaignId to "+
+				"disambiguate it; otherwise query returns exact finding handles and read "+
+				"selector=record confirms a record handle before tracing from it",
+			request.StartHandle)
 	}
 	response := TraceResponse{
 		SchemaVersion: CampaignSchemaVersion, StartHandle: start.handle,
@@ -353,7 +377,9 @@ func graphForTraceHandle(store *StateStore, campaignID, handle string) (Campaign
 		_, alias := resolver.recordAliases[handle]
 		if direct || alias {
 			if found != nil {
-				return CampaignGraph{}, errors.New("trace handle is ambiguous across campaigns")
+				return CampaignGraph{}, errors.New(
+					"trace handle resolves in more than one campaign. Remedy: pass campaignId " +
+						"to name the one you mean; state mode=orient lists the open campaigns")
 			}
 			copy := graphs[index]
 			found = &copy
@@ -384,7 +410,11 @@ func boundAndSealTrace(response TraceResponse, budget int) (TraceResponse, error
 			break
 		}
 		if len(response.Nodes) <= 1 {
-			return TraceResponse{}, errors.New("trace token budget is too small for mandatory metadata")
+			return TraceResponse{}, fmt.Errorf(
+				"trace tokenBudget %d is below the %d tokens the start node and envelope "+
+					"already cost. Remedy: re-issue with tokenBudget at least %d, or narrow the "+
+					"trace with depth=1 and a shorter relations list",
+				budget, response.EstimatedTokens, response.EstimatedTokens)
 		}
 		removed := response.Nodes[len(response.Nodes)-1].Handle
 		response.Nodes = response.Nodes[:len(response.Nodes)-1]

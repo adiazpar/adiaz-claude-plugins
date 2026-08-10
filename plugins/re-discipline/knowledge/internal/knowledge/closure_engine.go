@@ -42,6 +42,7 @@ type ClosureApplyRequest struct {
 	ActiveFileDispositions      map[string]string `json:"activeFileDispositions,omitempty"`
 	ExportedWorkItemIDs         []string          `json:"exportedWorkItemIds,omitempty"`
 	ProjectionDestinations      map[string]string `json:"projectionDestinations,omitempty"`
+	TokenBudget                 int               `json:"tokenBudget,omitempty"`
 }
 
 // ClosureActions is the complete closure surface. mcp.go builds closure_apply's
@@ -70,31 +71,79 @@ type ClosureApplyResult struct {
 	Receipt *ClosureReceipt  `json:"receipt,omitempty"`
 	Archive *ArchiveManifest `json:"archive,omitempty"`
 	Digest  string           `json:"digest"`
+	// Omitted names every derived section a requested tokenBudget dropped.
+	// Unlike StateTransactionReceipt.Digest, this result's Digest is a pure
+	// response seal - nothing on disk carries it and nothing re-authenticates
+	// it - so a budgeted result is re-sealed over exactly the body that was
+	// returned and stays self-consistent. The record digests *inside* it
+	// (Job.Digest, Plan.Digest, Archive.Digest) are the opposite: they are
+	// on-disk identities and compare-and-swap inputs, so they are never
+	// recomputed and never dropped, even when the record around them is
+	// trimmed.
+	Omitted []string `json:"omitted,omitempty"`
 }
 
+// ClosureApply is the whole closure surface. It budgets its own response rather
+// than delegating to a wrapper because `status` is a read that already has a
+// budgeted projection underneath it, while the mutating actions are receipts
+// whose droppable sections are named in budgetClosureApplyResult.
 func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRequest) (ClosureApplyResult, error) {
 	if service == nil {
 		return ClosureApplyResult{}, errors.New("service is required")
 	}
 	if !validOne(request.Action, ClosureActions...) {
-		return ClosureApplyResult{}, fmt.Errorf("unsupported closure action %q", request.Action)
+		return ClosureApplyResult{}, fmt.Errorf(
+			"unsupported closure action %q; closure_apply accepts %s",
+			request.Action, strings.Join(ClosureActions, ", "))
+	}
+	if err := validateMutationTokenBudget("closure_apply", request.TokenBudget); err != nil {
+		return ClosureApplyResult{}, err
 	}
 	if request.Action == "status" {
-		view, err := service.State(ctx, StateRequest{Mode: "closure", CampaignID: request.CampaignID})
+		// status compiles a bounded state view, so a tokenBudget here belongs to
+		// that projection rather than to the closure envelope around it. Passing
+		// it down means one budget with one meaning instead of two that could
+		// disagree.
+		view, err := service.State(ctx, StateRequest{
+			Mode: "closure", CampaignID: request.CampaignID, TokenBudget: request.TokenBudget,
+		})
 		if err != nil {
 			return ClosureApplyResult{}, err
 		}
 		result := ClosureApplyResult{SchemaVersion: CampaignSchemaVersion, Action: request.Action, State: &view}
 		return sealClosureApplyResult(result)
 	}
-	if request.Actor == "" || request.CampaignID == "" || request.CampaignSlug == "" ||
-		request.CorrelationID == "" || request.IdempotencyKey == "" ||
-		!digestRE.MatchString(request.ExpectedHeadDigest) {
-		return ClosureApplyResult{}, errors.New("closure mutation requires actor, campaign, correlation, idempotency, and expected head")
+	// Name the fields that are actually missing. This gate covers six of them,
+	// and answering with the list rather than the union is the difference
+	// between one retry and six.
+	missing := []string{}
+	for _, field := range []struct{ name, value string }{
+		{"actor", request.Actor}, {"campaignId", request.CampaignID},
+		{"campaignSlug", request.CampaignSlug}, {"correlationId", request.CorrelationID},
+		{"idempotencyKey", request.IdempotencyKey},
+	} {
+		if field.value == "" {
+			missing = append(missing, field.name)
+		}
+	}
+	if !digestRE.MatchString(request.ExpectedHeadDigest) {
+		missing = append(missing, "expectedHeadDigest (sha256:<64 hex>)")
+	}
+	if len(missing) != 0 {
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure %s is a mutation and requires %s. state mode=orient returns the campaign id, "+
+				"slug, and the current head revision and digest; correlationId and "+
+				"idempotencyKey are caller-chosen and must be stable across retries of this "+
+				"same transition",
+			request.Action, strings.Join(missing, ", "))
 	}
 	timestamp, err := time.Parse(time.RFC3339Nano, request.Timestamp)
 	if err != nil || timestamp.Location() != time.UTC {
-		return ClosureApplyResult{}, errors.New("closure mutation requires a UTC RFC3339 timestamp")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure %s requires timestamp as a UTC RFC3339 instant, for example "+
+				"2026-01-31T14:05:00Z; it is %q. The engine never invents a closure time because "+
+				"the receipt it seals is the campaign's durable record of when it closed",
+			request.Action, request.Timestamp)
 	}
 	store := NewStateStoreWithBoundary(service.Boundary)
 	store.Now = func() time.Time { return timestamp }
@@ -105,7 +154,7 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 		if replay, found, err := replayRetiredClosureFinalization(store, request); err != nil {
 			return ClosureApplyResult{}, err
 		} else if found {
-			return replay, nil
+			return budgetClosureApplyResult(replay, request.TokenBudget)
 		}
 	}
 	graph, err := store.LoadCampaignGraph(request.CampaignID)
@@ -113,20 +162,140 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 		return ClosureApplyResult{}, err
 	}
 	if graph.Campaign.Slug != request.CampaignSlug || !containsString(graph.Campaign.PermittedManagers, request.Actor) {
-		return ClosureApplyResult{}, errors.New("closure campaign slug or manager authority does not match")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure %s refused: campaign %s is slug %q with permitted managers %s, and the request "+
+				"named slug %q and actor %q. Remedy: re-issue with the canonical slug and an actor "+
+				"already on that list; manager_apply campaign.update is the only transition that "+
+				"changes permittedManagers",
+			request.Action, graph.Campaign.ID, graph.Campaign.Slug,
+			strings.Join(graph.Campaign.PermittedManagers, ", "),
+			request.CampaignSlug, request.Actor)
 	}
+	var result ClosureApplyResult
 	switch request.Action {
 	case "start":
-		return service.startClosure(ctx, store, graph, request)
+		result, err = service.startClosure(ctx, store, graph, request)
 	case "advance", "verify", "finalize":
-		return service.advanceClosure(ctx, store, graph, request)
+		result, err = service.advanceClosure(ctx, store, graph, request)
 	case "reopen":
-		return service.reopenClosure(ctx, store, graph, request)
+		result, err = service.reopenClosure(ctx, store, graph, request)
 	case "restart":
-		return service.restartClosure(ctx, store, graph, request)
+		result, err = service.restartClosure(ctx, store, graph, request)
 	default:
-		return ClosureApplyResult{}, errors.New("unsupported closure transition")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure action %q has no transition; the mutating closure actions are %s",
+			request.Action, strings.Join(ClosureActions[1:], ", "))
 	}
+	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	return budgetClosureApplyResult(result, request.TokenBudget)
+}
+
+// budgetClosureApplyResult drops the derived sections of a closure receipt in a
+// fixed least-useful-first order and re-seals what remains.
+//
+// The floor is everything the next closure_apply call has to quote back:
+// Transaction.PreviousHead/ResultingHead and Transaction.Records supply
+// expectedHeadRevision, expectedHeadDigest, and every expectedRecordDigests
+// entry; Job.Stage, Job.Status, Job.Revision, and Job.Digest say which stage may
+// be targeted next and with which digest; Job.Blockers is the actionable
+// summary of why an advance was refused. Plan.CampaignRevision and Plan.Digest
+// are restart's expectedClosurePlanRevision and expectedRecordDigests entry.
+// None of those are droppable.
+//
+// What goes is bulk that the caller either already holds or can re-read:
+// ArchiveManifest.Coverage is a whole second copy of the coverage record;
+// Files and Projections carry one row per archived file, which on a real
+// campaign runs to hundreds; Job.Coverage is the same five maps Blockers
+// already summarizes; Plan's five requirement lists are re-derivable from the
+// campaign; Transaction.Artifacts is one row per published file.
+func budgetClosureApplyResult(result ClosureApplyResult, budget int) (ClosureApplyResult, error) {
+	if budget <= 0 {
+		return result, nil
+	}
+	sections := []budgetSection{
+		{
+			Name: "archive.coverage",
+			Note: "the archive manifest's embedded closure-coverage copy; read it from " +
+				"closure_apply action=status",
+			Present: func() bool { return result.Archive != nil },
+			Drop:    func() { result.Archive.Coverage = ClosureCoverage{} },
+		},
+		{
+			Name: "archive.files",
+			Note: "one digest row per archived file; read manifest.json under the archive " +
+				"destination, whose digest is archive.digest",
+			Present: func() bool { return result.Archive != nil && len(result.Archive.Files) != 0 },
+			Drop:    func() { result.Archive.Files = nil },
+		},
+		{
+			Name: "archive.projections",
+			Note: "one digest row per published durable projection; read manifest.json under " +
+				"the archive destination",
+			Present: func() bool { return result.Archive != nil && len(result.Archive.Projections) != 0 },
+			Drop:    func() { result.Archive.Projections = nil },
+		},
+		{
+			Name: "job.coverage",
+			Note: "the derived coverage maps; job.blockers already names every unmet gate, " +
+				"and closure_apply action=status returns the full coverage record",
+			Present: func() bool { return result.Job != nil && result.Job.Coverage != nil },
+			Drop:    func() { result.Job.Coverage = nil },
+		},
+		{
+			Name: "transaction.artifacts",
+			Note: "one row per file this transaction published; no closure input reads them",
+			Present: func() bool {
+				return result.Transaction != nil && len(result.Transaction.Artifacts) != 0
+			},
+			Drop: func() {
+				result.Transaction.Artifacts = nil
+				// Mark the embedded receipt itself, not only the envelope, so a
+				// caller that passes it to verifyTransactionReceipt is told it
+				// is a budgeted copy rather than that its digest failed.
+				result.Transaction.Omitted = []string{
+					"artifacts omitted under tokenBudget: one row per file this transaction " +
+						"published; no closure input reads them",
+				}
+			},
+		},
+		{
+			Name: "plan.requirements",
+			Note: "the plan's projection, run, work-item, finding, and retention id lists; " +
+				"plan.campaignRevision and plan.digest are kept because restart requires them, " +
+				"and closure_apply action=status returns the lists",
+			Present: func() bool { return result.Plan != nil },
+			Drop: func() {
+				plan := *result.Plan
+				plan.ProjectionFindingIDs, plan.RequiredRunIDs = nil, nil
+				plan.RequiredWorkItemIDs, plan.RequiredFindingIDs = nil, nil
+				plan.RequiredRetentionPaths = nil
+				result.Plan = &plan
+			},
+		},
+	}
+	// Archive, Job, and Plan are pointers into caller-visible values that other
+	// code still holds, so copy before trimming: a budgeted response must never
+	// mutate the job or manifest the engine just built.
+	if result.Archive != nil {
+		archive := *result.Archive
+		result.Archive = &archive
+	}
+	if result.Job != nil {
+		job := *result.Job
+		result.Job = &job
+	}
+	if result.Transaction != nil {
+		transaction := *result.Transaction
+		result.Transaction = &transaction
+	}
+	omitted, err := applyResponseBudget(budget, &result, sections)
+	if err != nil {
+		return ClosureApplyResult{}, err
+	}
+	result.Omitted = omitted
+	return sealClosureApplyResult(result)
 }
 
 func (service *Service) startClosure(
@@ -145,14 +314,24 @@ func (service *Service) startClosure(
 				"this campaign has a reopened closure job; re-enter closure with action \"restart\", " +
 					"which re-plans against the current campaign revision")
 		}
-		return ClosureApplyResult{}, errors.New(
-			"closure has already started on this campaign; advance, verify, finalize, or reopen it")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure job %s already exists on this campaign at stage %q, status %q. Remedy: "+
+				"closure_apply action=status to see where it stands, then advance (or verify, "+
+				"or finalize) to the next stage, or reopen to return the campaign to open",
+			graph.ClosureJob.ID, graph.ClosureJob.Stage, graph.ClosureJob.Status)
 	}
 	if !validOne(graph.Campaign.Status, "open", "paused") {
-		return ClosureApplyResult{}, errors.New("closure can start only on an open or paused campaign")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure can start only on an open or paused campaign, and %s is %q. %s",
+			graph.Campaign.ID, graph.Campaign.Status,
+			closureCampaignStatusRemedy(graph.Campaign.Status))
 	}
 	if !correlationIDRE.MatchString(request.ClosureJobID) {
-		return ClosureApplyResult{}, errors.New("closure start requires a stable closureJobId")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure start requires closureJobId matching %s; it is %q. It is caller-chosen and "+
+				"permanent - the job keeps this id across reopen and restart, and every closure "+
+				"transition after this one names it",
+			correlationIDRE.String(), request.ClosureJobID)
 	}
 	if err := validateExportedDefermentIDs(graph, request.ExportedWorkItemIDs); err != nil {
 		return ClosureApplyResult{}, err
@@ -223,7 +402,27 @@ func (service *Service) advanceClosure(
 	request ClosureApplyRequest,
 ) (ClosureApplyResult, error) {
 	if graph.ClosureJob == nil || graph.ClosureCoverage == nil || graph.ClosurePlan == nil || graph.Campaign.Status != "closing" {
-		return ClosureApplyResult{}, errors.New("closure advance requires a complete active closure job")
+		if graph.ClosureJob != nil && graph.ClosureJob.Status == "reopened" {
+			return ClosureApplyResult{}, fmt.Errorf(
+				"closure %s cannot run against reopened job %s; a reopen returned the campaign "+
+					"to %q and discarded the attempt's staged work. Remedy: closure_apply "+
+					"action=restart, which re-plans against the current campaign revision and "+
+					"requires expectedClosurePlanRevision plus the prior campaign, plan, job, "+
+					"and coverage digests",
+				request.Action, graph.ClosureJob.ID, graph.Campaign.Status)
+		}
+		if graph.ClosureJob == nil {
+			return ClosureApplyResult{}, fmt.Errorf(
+				"closure %s requires an active closure job, and campaign %s has none. Remedy: "+
+					"closure_apply action=start with a caller-chosen closureJobId and an "+
+					"archiveDestination",
+				request.Action, graph.Campaign.ID)
+		}
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure %s requires a complete active closure job on a closing campaign: campaign "+
+				"%s is %q, and the job, plan, and coverage records must all be present. "+
+				"closure_apply action=status reports which of them the campaign carries",
+			request.Action, graph.Campaign.ID, graph.Campaign.Status)
 	}
 	target := request.TargetStage
 	if request.Action == "verify" {
@@ -235,13 +434,24 @@ func (service *Service) advanceClosure(
 	from, fromOK := closureStageIndex[graph.ClosureJob.Stage]
 	to, toOK := closureStageIndex[target]
 	if !fromOK || !toOK || to != from+1 {
-		return ClosureApplyResult{}, errors.New("closure targetStage must be the next explicit stage")
+		// Closure stages are strictly sequential and there is exactly one legal
+		// next value, so naming it turns this from a guessing game into a copy.
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure is at stage %q and targetStage %q is not the next one; %s",
+			graph.ClosureJob.Stage, target, closureNextStageRemedy(graph.ClosureJob.Stage))
 	}
 	if err := validateExportedDefermentIDs(graph, request.ExportedWorkItemIDs); err != nil {
 		return ClosureApplyResult{}, err
 	}
 	if to > closureStageIndex["project"] && len(request.ExportedWorkItemIDs) != 0 {
-		return ClosureApplyResult{}, errors.New("deferred backlog exports must be declared no later than the project stage")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"exportedWorkItemIds may not be declared while advancing to %q: the project stage "+
+				"renders every exported backlog item into a durable file, and verify re-derives "+
+				"those files, so an export declared afterwards would be sealed into the archive "+
+				"without ever having been projected. This closure already passed project. "+
+				"Remedy: drop exportedWorkItemIds from this request; to add one, closure_apply "+
+				"action=reopen then action=restart and declare it at or before project",
+			target)
 	}
 	prior := cloneClosureCoverage(*graph.ClosureCoverage)
 	for key, value := range request.FileRetention {
@@ -291,14 +501,23 @@ func (service *Service) advanceClosure(
 	}
 	if target == "finalize" && coverage.Digest != graph.ClosureCoverage.Digest {
 		return ClosureApplyResult{}, fmt.Errorf(
-			"closure finalization cannot change verified coverage: %s",
-			strings.Join(closureCoverageBlockers(coverage), ","),
+			"closure finalization recomputed coverage %s against the verified %s: something "+
+				"changed after verify, so the archive would freeze coverage nobody verified. "+
+				"Outstanding blockers: %s. Remedy: closure_apply action=reopen then "+
+				"action=restart to re-plan and re-verify against current state; a finalize "+
+				"cannot absorb a coverage change",
+			coverage.Digest, graph.ClosureCoverage.Digest,
+			blockerListOrNone(closureCoverageBlockers(coverage)),
 		)
 	}
 	if target == "finalize" && len(normalizationBlockers) != 0 {
 		return ClosureApplyResult{}, fmt.Errorf(
-			"closure finalization cannot retire unresolved normalization work: %s",
-			strings.Join(normalizationBlockers, ","),
+			"closure finalization cannot retire unresolved normalization work: %s. Each entry is "+
+				"normalization:<runId>:<state>. Remedy: for every one, work the queue item to "+
+				"resolved - normalization_queue action=status to find it, then claim, ack, and "+
+				"resolve with a receipt binding the curator run, reviewed intake, and manager "+
+				"review that covered that run's report - then finalize again",
+			strings.Join(normalizationBlockers, ", "),
 		)
 	}
 	next := *graph.ClosureJob
@@ -926,7 +1145,17 @@ func (service *Service) reopenClosure(
 	request ClosureApplyRequest,
 ) (ClosureApplyResult, error) {
 	if graph.ClosureJob == nil || graph.Campaign.Status != "closing" {
-		return ClosureApplyResult{}, errors.New("only a closing campaign may be reopened")
+		if graph.ClosureJob == nil {
+			return ClosureApplyResult{}, fmt.Errorf(
+				"campaign %s has no closure job to reopen. Remedy: nothing is needed - the "+
+					"campaign is already %q; closure_apply action=start begins closure",
+				graph.Campaign.ID, graph.Campaign.Status)
+		}
+		return ClosureApplyResult{}, fmt.Errorf(
+			"only a closing campaign may be reopened, and %s is %q with closure job %s at status "+
+				"%q. %s",
+			graph.Campaign.ID, graph.Campaign.Status, graph.ClosureJob.ID,
+			graph.ClosureJob.Status, closureReopenRemedy(graph.Campaign.Status, *graph.ClosureJob))
 	}
 	campaign := *graph.Campaign
 	campaign.Revision++
@@ -987,8 +1216,25 @@ func (service *Service) restartClosure(
 ) (ClosureApplyResult, error) {
 	previousJob, previousPlan := graph.ClosureJob, graph.ClosurePlan
 	if previousJob == nil || previousPlan == nil || graph.ClosureCoverage == nil {
-		return ClosureApplyResult{}, errors.New(
-			"closure restart requires the reopened job, plan, and coverage it replaces")
+		absent := []string{}
+		for _, record := range []struct {
+			name    string
+			present bool
+		}{
+			{"closure/job.json", previousJob != nil},
+			{"closure/plan.json", previousPlan != nil},
+			{"closure/coverage.json", graph.ClosureCoverage != nil},
+		} {
+			if !record.present {
+				absent = append(absent, record.name)
+			}
+		}
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure restart replaces the reopened job, plan, and coverage in one transaction, "+
+				"and campaign %s carries no %s. Remedy: if closure never started here, "+
+				"closure_apply action=start; otherwise closure_apply action=status reports what "+
+				"the campaign actually holds",
+			graph.Campaign.ID, strings.Join(absent, " or "))
 	}
 	// A closure receipt is the proof that a campaign was finalized, and finalizing
 	// retires the whole active tree, so in practice restart never meets one: the
@@ -1018,12 +1264,25 @@ func (service *Service) restartClosure(
 			graph.ClosureReceipt.ArchiveDestination)
 	}
 	if previousJob.Status != "reopened" || !validOne(graph.Campaign.Status, "open", "paused") {
-		return ClosureApplyResult{}, errors.New(
-			"closure restart requires a reopened closure job on an open or paused campaign")
+		remedy := "Remedy: closure_apply action=reopen first, which withdraws the current " +
+			"attempt and returns the campaign to open; restart then re-enters closure"
+		if previousJob.Status == "reopened" {
+			remedy = fmt.Sprintf(
+				"Remedy: the job is already reopened, so it is the campaign that is wrong - "+
+					"manager_apply campaign.update setting status \"open\" or \"paused\", not %q",
+				graph.Campaign.Status)
+		}
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure restart requires a reopened closure job on an open or paused campaign; job "+
+				"%s is %q and campaign %s is %q. %s",
+			previousJob.ID, previousJob.Status, graph.Campaign.ID, graph.Campaign.Status, remedy)
 	}
 	if request.ClosureJobID != previousJob.ID {
 		return ClosureApplyResult{}, fmt.Errorf(
-			"closure restart must name the exact closure job it re-enters (%s)", previousJob.ID)
+			"closure restart must name the exact closure job it re-enters; it named %q and this "+
+				"campaign's job is %s. A campaign has one closure record at one canonical path, "+
+				"and a restart keeps its identity. Remedy: set closureJobId to %s",
+			request.ClosureJobID, previousJob.ID, previousJob.ID)
 	}
 	// Name the file and the number found. A terse refusal here would simply move
 	// the dead end rather than remove it: a caller who cannot tell which
@@ -1036,8 +1295,13 @@ func (service *Service) restartClosure(
 	}
 	if request.ArchiveDestination != "" &&
 		request.ArchiveDestination != previousJob.ArchiveDestination {
-		return ClosureApplyResult{}, errors.New(
-			"closure restart cannot repoint an existing closure job's archive destination")
+		return ClosureApplyResult{}, fmt.Errorf(
+			"closure restart cannot repoint job %s from archive destination %s to %s: every "+
+				"durable evidence handle the project stage writes, and the whole "+
+				"retired-finalization replay path, are addressed against the original. Remedy: "+
+				"omit archiveDestination, or set it to %s",
+			previousJob.ID, previousJob.ArchiveDestination, request.ArchiveDestination,
+			previousJob.ArchiveDestination)
 	}
 	if err := validateExportedDefermentIDs(graph, request.ExportedWorkItemIDs); err != nil {
 		return ClosureApplyResult{}, err
@@ -1160,7 +1424,14 @@ func closureWrites(
 			}
 		}
 		if spec.expectedRevision > 0 && !digestRE.MatchString(spec.expectedDigest) {
-			return nil, fmt.Errorf("closure record %s requires its exact expected digest", id)
+			return nil, fmt.Errorf(
+				"closure_apply updates %s at %s and requires expectedRecordDigests[%q]: the "+
+					"exact digest of the record it replaces. Remedy: closure_apply "+
+					"action=status returns the current campaign, closure-plan, closure-job, and "+
+					"closure-coverage records; copy this one's digest in under the key %q. Note "+
+					"that the plan and coverage are keyed by the literal names \"closure-plan\" "+
+					"and \"closure-coverage\", not by a record id",
+				id, recordPath, id, id)
 		}
 		writes = append(writes, StateWrite{
 			Path: recordPath, ExpectedRevision: spec.expectedRevision,
@@ -1264,6 +1535,17 @@ func (service *Service) inheritedClosureCoverage(
 	return prior, nil
 }
 
+// blockerListOrNone keeps a refusal from ending in an empty clause. A finalize
+// can be refused for a coverage digest change with no blockers at all - the
+// coverage moved but is still satisfiable - and "blockers: " followed by
+// nothing reads as a truncated message rather than as an answer.
+func blockerListOrNone(blockers []string) string {
+	if len(blockers) == 0 {
+		return "none (the coverage moved but is not itself blocked)"
+	}
+	return strings.Join(blockers, ", ")
+}
+
 func closureCoverageBlockers(coverage ClosureCoverage) []string {
 	return SortedUnique(append(append([]string{}, coverage.MissingDecisions...), coverage.UnresolvedConflicts...))
 }
@@ -1320,7 +1602,13 @@ func (service *Service) applyClosureActiveFileInventory(
 			return fmt.Errorf("closure active-file disposition path %q is invalid", relative)
 		}
 		if !actual[relative] {
-			return fmt.Errorf("closure active-file disposition %s names a missing file", relative)
+			return fmt.Errorf(
+				"activeFileDispositions names %s, which does not exist under active/%s. A "+
+					"disposition is an assertion about a file the archive will decide the fate "+
+					"of, so one naming nothing is silently ignored rather than obeyed. Remedy: "+
+					"drop the entry; closure_apply action=status lists the files that still "+
+					"need a disposition as active-file:<path> blockers",
+				relative, slug)
 		}
 	}
 	coverage.ActiveFileDispositions = dispositions
@@ -1476,7 +1764,41 @@ func (service *Service) prepareClosureFindingTransitions(
 		if truthCandidate && (!validOne(finding.Validity, "provisional", "current") ||
 			finding.ReviewState != "manager-ratified" || finding.EvidenceGrade != "direct" ||
 			len(finding.Relations.Contradicts) != 0) {
-			return CampaignGraph{}, nil, fmt.Errorf("truth projection finding %s is not closure-promotable", id)
+			// Truth promotion is the one projection that changes what the
+			// project believes, so it carries four independent preconditions.
+			// Naming the failing one is the difference between one repair and
+			// four guesses, and two of them have different remedies entirely -
+			// a contradiction needs overturn, a soft grade needs new evidence.
+			unmet := []string{}
+			if !validOne(finding.Validity, "provisional", "current") {
+				unmet = append(unmet, fmt.Sprintf(
+					"validity is %q, and truth promotion accepts only provisional or current",
+					finding.Validity))
+			}
+			if finding.ReviewState != "manager-ratified" {
+				unmet = append(unmet, fmt.Sprintf(
+					"reviewState is %q, not \"manager-ratified\"; ratify it through "+
+						"manager_apply review.submit before closure projects it",
+					finding.ReviewState))
+			}
+			if finding.EvidenceGrade != "direct" {
+				unmet = append(unmet, fmt.Sprintf(
+					"evidenceGrade is %q, and truth requires \"direct\"; a claim the project "+
+						"will treat as true must cite evidence it can re-read",
+					finding.EvidenceGrade))
+			}
+			if len(finding.Relations.Contradicts) != 0 {
+				unmet = append(unmet, fmt.Sprintf(
+					"it contradicts %s, and an unresolved contradiction cannot become truth; "+
+						"settle it through the overturn workflow first",
+					strings.Join(finding.Relations.Contradicts, ", ")))
+			}
+			return CampaignGraph{}, nil, fmt.Errorf(
+				"finding %s targets truth but is not closure-promotable: %s. Remedy: repair the "+
+					"finding with manager_apply finding.update, or retarget it with "+
+					"projection \"history\", \"backlog\", \"playbook\", or \"archive\", then "+
+					"reopen and restart closure so the plan is rebuilt without it",
+				id, strings.Join(unmet, "; "))
 		}
 		changed := truthCandidate && finding.Validity != "current"
 		projectedEvidence := append([]EvidenceReference(nil), finding.Evidence...)
@@ -1631,16 +1953,33 @@ func (service *Service) prepareClosureProjections(
 			continue
 		case "truth", "backlog", "playbook", "maintained":
 		default:
-			return nil, nil, nil, fmt.Errorf("finding %s has no closure-ready projection", id)
+			return nil, nil, nil, fmt.Errorf(
+				"finding %s has projection %q, which closure cannot project. Remedy: set it with "+
+					"manager_apply finding.update to one that publishes a file - truth, "+
+					"backlog, playbook, or maintained - or to one closure retires without "+
+					"publishing: history, archive, or rejected",
+				id, finding.Projection)
 		}
 		if destination == "" {
-			return nil, nil, nil, fmt.Errorf("finding %s requires a projection destination", id)
+			return nil, nil, nil, fmt.Errorf(
+				"finding %s has projection %q and needs a destination, which the engine will not "+
+					"invent because the path is what readers cite forever. Remedy: pass "+
+					"projectionDestinations[%q] on this closure_apply call - %s",
+				id, finding.Projection, id, closureProjectionDestinationHint(finding.Projection))
 		}
 		if validClosureNavigationPath(destination) {
-			return nil, nil, nil, fmt.Errorf("finding %s cannot replace closure-managed navigation index %s", id, destination)
+			return nil, nil, nil, fmt.Errorf(
+				"finding %s cannot project to %s: closure generates that navigation index from "+
+					"everything it publishes, so a finding written there would be overwritten by "+
+					"the same transaction. Remedy: choose a leaf path such as %s",
+				id, destination, closureProjectionDestinationHint(finding.Projection))
 		}
 		if seenDestinations[destination] {
-			return nil, nil, nil, fmt.Errorf("projection destination %s is assigned more than once", destination)
+			return nil, nil, nil, fmt.Errorf(
+				"projection destination %s is assigned more than once in this closure; one file "+
+					"cannot hold two projections and the second would silently replace the "+
+					"first. Remedy: give finding %s its own path in projectionDestinations",
+				destination, id)
 		}
 		seenDestinations[destination] = true
 
@@ -1712,7 +2051,11 @@ func (service *Service) prepareClosureProjections(
 	}
 	for id := range request.ProjectionDestinations {
 		if _, exists := graph.Findings[id]; !exists {
-			return nil, nil, nil, fmt.Errorf("projection destination names unknown finding %s", id)
+			return nil, nil, nil, fmt.Errorf(
+				"projectionDestinations names %s, which is not a finding of campaign %s. Remedy: "+
+					"remove the key, or correct it - closure_apply action=status lists every "+
+					"finding this closure will project",
+				id, graph.Campaign.ID)
 		}
 	}
 	for _, id := range graph.ClosurePlan.ProjectionFindingIDs {
@@ -1722,6 +2065,25 @@ func (service *Service) prepareClosureProjections(
 	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
 	return truthDigests, projectionDigests, artifacts, nil
+}
+
+// closureProjectionDestinationHint gives the shape of a legal destination for
+// one projection kind. The rules differ per kind and two of them are checked
+// far apart from where the destination is first demanded, so a caller told only
+// "requires a projection destination" would have to trip a second refusal to
+// learn the constraint.
+func closureProjectionDestinationHint(projection string) string {
+	switch projection {
+	case "backlog":
+		return "a Markdown file below docs/backlog/, for example docs/backlog/<slug>.md"
+	case "playbook":
+		return "a Markdown file below docs/playbooks/, for example docs/playbooks/<slug>.md"
+	case "maintained":
+		return "the existing project-relative file this finding documents, outside both the " +
+			"campaign's active tree and the closure archive"
+	default:
+		return "a project-relative file path, conventionally docs/truth/<slug>.md"
+	}
 }
 
 func validClosureNavigationPath(value string) bool {

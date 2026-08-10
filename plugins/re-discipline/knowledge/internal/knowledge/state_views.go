@@ -44,7 +44,12 @@ func compileStateView(
 		return StateView{}, err
 	}
 	if !validOne(request.Mode, "orient", "resume", "work", "delta", "closure") {
-		return StateView{}, fmt.Errorf("unsupported state mode %q", request.Mode)
+		return StateView{}, fmt.Errorf(
+			"unsupported state mode %q. state accepts orient (no campaign needed; the entry "+
+				"point when you do not yet know what exists), resume (campaignId), work "+
+				"(campaignId and workItemId), delta (campaignId and sinceEventId), and closure "+
+				"(campaignId)",
+			request.Mode)
 	}
 	budget := request.TokenBudget
 	if budget == 0 {
@@ -206,7 +211,9 @@ func compileOrientState(
 
 func compileResumeState(store *StateStore, campaignID string, asOf time.Time, view *StateView) error {
 	if campaignID == "" {
-		return errors.New("resume state requires campaignId")
+		return errors.New(
+			"state mode=resume requires campaignId. Remedy: state mode=orient lists every " +
+				"campaign with its id, and needs no arguments")
 	}
 	graph, err := store.LoadCampaignGraph(campaignID)
 	if err != nil {
@@ -311,7 +318,11 @@ func compileResumeState(store *StateStore, campaignID string, asOf time.Time, vi
 
 func compileWorkState(store *StateStore, campaignID, workItemID string, asOf time.Time, view *StateView) error {
 	if campaignID == "" || !workItemIDRE.MatchString(workItemID) {
-		return errors.New("work state requires campaignId and a valid workItemId")
+		return fmt.Errorf(
+			"state mode=work requires campaignId and a workItemId matching %s; it received "+
+				"campaignId %q and workItemId %q. Remedy: state mode=resume campaignId=<id> "+
+				"lists the campaign's work items",
+			workItemIDRE.String(), campaignID, workItemID)
 	}
 	graph, err := store.LoadCampaignGraph(campaignID)
 	if err != nil {
@@ -319,7 +330,10 @@ func compileWorkState(store *StateStore, campaignID, workItemID string, asOf tim
 	}
 	item, ok := graph.WorkItems[workItemID]
 	if !ok {
-		return fmt.Errorf("work item %s does not exist in campaign %s", workItemID, graph.Campaign.ID)
+		return fmt.Errorf(
+			"work item %s does not exist in campaign %s. Remedy: state mode=resume "+
+				"campaignId=%s lists the campaign's work items with their ids",
+			workItemID, graph.Campaign.ID, graph.Campaign.ID)
 	}
 	view.CampaignID, view.WorkItemID, view.EventHead = graph.Campaign.ID, item.ID, graph.Campaign.LastEventID
 	evaluations, err := loadCampaignDefermentEvaluations(store, graph, asOf)
@@ -376,7 +390,12 @@ func compileWorkState(store *StateStore, campaignID, workItemID string, asOf tim
 
 func compileDeltaState(store *StateStore, campaignID, sinceEventID string, view *StateView) error {
 	if campaignID == "" || !eventIDRE.MatchString(sinceEventID) {
-		return errors.New("delta state requires campaignId and a valid sinceEventId")
+		return fmt.Errorf(
+			"state mode=delta requires campaignId and a sinceEventId matching %s; it received "+
+				"campaignId %q and sinceEventId %q. sinceEventId is an exclusive cursor: pass "+
+				"the eventHead from an earlier state view or the resultingHead.eventId of a "+
+				"mutation receipt",
+			eventIDRE.String(), campaignID, sinceEventID)
 	}
 	graph, err := store.LoadCampaignGraph(campaignID)
 	if err != nil {
@@ -388,7 +407,12 @@ func compileDeltaState(store *StateStore, campaignID, sinceEventID string, view 
 		return err
 	}
 	if !found {
-		return fmt.Errorf("event %s is outside the retained campaign journal", sinceEventID)
+		return fmt.Errorf(
+			"event %s is outside campaign %s's retained journal, so the delta since it cannot "+
+				"be reconstructed. Remedy: state mode=resume campaignId=%s recompiles the "+
+				"campaign from scratch and returns the current eventHead to use as the next "+
+				"cursor",
+			sinceEventID, graph.Campaign.ID, graph.Campaign.ID)
 	}
 	if len(events) == 0 {
 		view.Status = "unchanged"
@@ -414,7 +438,9 @@ func compileDeltaState(store *StateStore, campaignID, sinceEventID string, view 
 
 func compileClosureState(store *StateStore, campaignID string, asOf time.Time, view *StateView) error {
 	if campaignID == "" {
-		return errors.New("closure state requires campaignId")
+		return errors.New(
+			"state mode=closure requires campaignId. Remedy: state mode=orient lists every " +
+				"campaign with its id and closure status")
 	}
 	graph, err := store.LoadCampaignGraph(campaignID)
 	if err != nil {
@@ -894,7 +920,16 @@ func boundAndSealStateView(view StateView, budget, maxCards int) (StateView, err
 			break
 		}
 		if len(view.Cards) == 0 {
-			return StateView{}, errors.New("state token budget is too small for mandatory metadata")
+			// The envelope alone -- mode, campaign, generation, event head,
+			// status, digest -- does not fit, so there is no card left to drop
+			// and nothing this call can do differently except ask for more.
+			// Naming the measured floor turns an unbounded retry loop into one
+			// corrected call.
+			return StateView{}, fmt.Errorf(
+				"state tokenBudget %d is below the %d tokens this view's mandatory metadata "+
+					"already costs, and every card has been dropped. Remedy: re-issue with "+
+					"tokenBudget at least %d",
+				budget, cost, cost)
 		}
 		view.Cards = view.Cards[:len(view.Cards)-1]
 		omitted++

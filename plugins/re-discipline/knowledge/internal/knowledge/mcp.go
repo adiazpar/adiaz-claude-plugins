@@ -1056,6 +1056,7 @@ func toolDefinitions() []map[string]any {
 		"expectedHeadRevision":    integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before the transition."),
 		"expectedHeadDigest":      map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before the transition."},
 		"archiveFallbackDecision": archiveFallbackDecisionSchema,
+		"tokenBudget":             mutationTokenBudgetSchema("artifact rows"),
 	})
 	hoistManagerRecordDefinitions(managerSchema)
 	describeRunLaunchHandles(managerSchema)
@@ -1074,6 +1075,7 @@ func toolDefinitions() []map[string]any {
 		"expectedHeadRevision": integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before submission."),
 		"expectedHeadDigest":   map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before submission."},
 		"curatorRun":           curatorRunSchema,
+		"tokenBudget":          mutationTokenBudgetSchema("artifact rows"),
 	})
 
 	closureSchema := reflectedToolSchema(closureApplyToolInput{})
@@ -1101,6 +1103,9 @@ func toolDefinitions() []map[string]any {
 				"retain", "destroy-approved", "ephemeral"),
 			"description": "Manager dispositions for active-tree files not already typed by canonical records or run inventory.",
 		},
+		"tokenBudget": mutationTokenBudgetSchema(
+			"archive maps, job.coverage, artifact rows, plan requirement lists; " +
+				"status budgets its state view"),
 	})
 
 	normalizationQueueSchema := reflectedToolSchema(normalizationQueueToolInput{})
@@ -1130,6 +1135,9 @@ func toolDefinitions() []map[string]any {
 		"timestamp":      stringSchema("UTC RFC3339 mutation timestamp.", 0, 64),
 		"resolution":     normalizationResolutionSchema,
 		"limit":          integerSchemaDescription(1, 100, "Maximum active queue items returned by status."),
+		"tokenBudget": mutationTokenBudgetSchema(
+			"the resolution echo, the backlog listing; status bounds its listing and " +
+				"counts it in queue.omitted"),
 	})
 
 	migrationSchema := reflectedToolSchema(migrationProjectToolInput{})

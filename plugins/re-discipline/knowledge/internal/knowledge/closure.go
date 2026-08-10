@@ -24,6 +24,74 @@ var closureStageIndex = func() map[string]int {
 	return result
 }()
 
+// closureNextStageRemedy renders the single legal next move from a given stage,
+// including which action owns it.
+//
+// The stage list is strictly sequential and one edge wide, so there is never
+// more than one right answer - which makes a refusal that withholds it purely
+// expensive. `verify` and `finalize` are their own actions rather than
+// targetStage values, and that asymmetry is exactly the kind of thing a caller
+// discovers by tripping the refusal twice, so it is named here rather than left
+// to the schema.
+func closureNextStageRemedy(stage string) string {
+	index, known := closureStageIndex[stage]
+	if !known {
+		return fmt.Sprintf(
+			"the closure stages are %s in that order; closure_apply action=status reports the "+
+				"current one", strings.Join(ClosureStages, " -> "))
+	}
+	if index+1 >= len(ClosureStages) {
+		return "finalize is the last stage; this closure has nothing further to advance to"
+	}
+	next := ClosureStages[index+1]
+	switch next {
+	case "verify":
+		return "the next stage is \"verify\", which has its own action: issue closure_apply " +
+			"action=verify with no targetStage"
+	case "finalize":
+		return "the next stage is \"finalize\", which has its own action: issue closure_apply " +
+			"action=finalize with no targetStage"
+	default:
+		return fmt.Sprintf(
+			"the next stage is %q: issue closure_apply action=advance targetStage=%q", next, next)
+	}
+}
+
+// closureReopenRemedy answers the reopen refusal.
+//
+// The two reachable cases have opposite answers and neither is guessable from
+// the refusal alone: a job already `reopened` needs `restart` rather than a
+// second reopen, and a `closed` campaign needs nothing because there is no
+// active attempt left to withdraw.
+func closureReopenRemedy(campaignStatus string, job ClosureJob) string {
+	if job.Status == "reopened" {
+		return "Remedy: this attempt is already withdrawn; closure_apply action=restart " +
+			"re-enters closure against the current campaign revision"
+	}
+	if campaignStatus == "closed" {
+		return "A finalized campaign's records were archived and its active tree retired, so " +
+			"there is no attempt to reopen. Open a new campaign against the archive instead"
+	}
+	return "Remedy: reopen applies only while the campaign is closing; closure_apply " +
+		"action=status reports where this campaign actually stands"
+}
+
+// closureCampaignStatusRemedy answers "so what do I do instead" for each
+// campaign status that closure start refuses.
+func closureCampaignStatusRemedy(status string) string {
+	switch status {
+	case "closing":
+		return "Remedy: closure has already started; use closure_apply action=status, then " +
+			"advance, verify, finalize, or reopen"
+	case "closed":
+		return "A closed campaign's records were archived and its active tree retired; nothing " +
+			"reopens it. Open a new campaign against the archive instead"
+	default:
+		return "Remedy: manager_apply campaign.update setting status \"open\" or \"paused\", " +
+			"then start closure"
+	}
+}
+
 type ClosurePlan struct {
 	SchemaVersion          int      `json:"schemaVersion"`
 	CampaignID             string   `json:"campaignId"`

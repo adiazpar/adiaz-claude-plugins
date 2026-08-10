@@ -21,6 +21,7 @@ type NormalizationQueueRequest struct {
 	Timestamp      string                   `json:"timestamp,omitempty"`
 	Resolution     *NormalizationResolution `json:"resolution,omitempty"`
 	Limit          int                      `json:"limit,omitempty"`
+	TokenBudget    int                      `json:"tokenBudget,omitempty"`
 }
 
 type NormalizationQueueResult struct {
@@ -29,6 +30,88 @@ type NormalizationQueueResult struct {
 	Item          *NormalizationSuggestion `json:"item,omitempty"`
 	Queue         NormalizationQueueStatus `json:"queue"`
 	Digest        string                   `json:"digest"`
+	// Omitted names every derived section a requested tokenBudget dropped.
+	// Digest is a pure response seal, so a budgeted result is re-sealed over
+	// exactly what it returned; Item.Digest is the queue item's identity and
+	// the expectedDigest of the next transition, so it is never dropped.
+	Omitted []string `json:"omitted,omitempty"`
+}
+
+// budgetNormalizationQueueResult trims the two derived sections of a queue
+// mutation receipt.
+//
+// The floor is Item: its id, status, and digest are exactly the itemId and
+// expectedDigest the next claim/ack/resolve must carry, so dropping any of them
+// would force a `status` round trip to do anything at all - the opposite of the
+// saving. Item.Resolution is droppable for the narrower reason that on the only
+// action that produces one, `resolve`, it is a verified echo of the receipt the
+// caller just sent. Queue is the backlog listing, which `status` returns and
+// which no transition reads.
+func budgetNormalizationQueueResult(
+	result NormalizationQueueResult,
+	budget int,
+) (NormalizationQueueResult, error) {
+	if budget <= 0 {
+		return result, nil
+	}
+	if result.Item != nil {
+		item := *result.Item
+		result.Item = &item
+	}
+	omitted, err := applyResponseBudget(budget, &result, []budgetSection{
+		{
+			Name: "item.resolution",
+			Note: "the sealed resolution receipt this call submitted and the engine verified; " +
+				"normalization_queue action=status returns the stored copy",
+			Present: func() bool { return result.Item != nil && result.Item.Resolution != nil },
+			Drop:    func() { result.Item.Resolution = nil },
+		},
+		{
+			Name: "queue.items",
+			Note: "the backlog listing; the queued/claimed/acknowledged/resolved counts are " +
+				"kept, and normalization_queue action=status returns the items",
+			Present: func() bool { return len(result.Queue.Items) != 0 },
+			Drop: func() {
+				result.Queue.Omitted += len(result.Queue.Items)
+				result.Queue.Items = nil
+			},
+		},
+	})
+	if err != nil {
+		return NormalizationQueueResult{}, err
+	}
+	result.Omitted = omitted
+	return sealNormalizationQueueResult(result)
+}
+
+// budgetNormalizationQueueStatus bounds the listing `status` returns.
+//
+// This one is a read, not a receipt, so the read rule applies rather than the
+// write rule: a shorter listing costs the caller recall, not correctness, and
+// NormalizationQueueStatus.Omitted already exists for exactly this - the
+// `limit` parameter has always truncated the listing and reported the count
+// there. A tokenBudget is the same bound expressed in tokens instead of rows,
+// so it reuses the same field and the same guarantee: what you got is the head
+// of the list, and the count of what you did not get is on the response.
+func budgetNormalizationQueueStatus(
+	result NormalizationQueueResult,
+	budget int,
+) (NormalizationQueueResult, error) {
+	if budget <= 0 {
+		return sealNormalizationQueueResult(result)
+	}
+	for len(result.Queue.Items) > 0 {
+		estimated, err := estimateResponseTokens(result)
+		if err != nil {
+			return NormalizationQueueResult{}, err
+		}
+		if estimated <= budget {
+			break
+		}
+		result.Queue.Items = result.Queue.Items[:len(result.Queue.Items)-1]
+		result.Queue.Omitted++
+	}
+	return sealNormalizationQueueResult(result)
 }
 
 func (service *Service) NormalizationQueueApply(
@@ -42,7 +125,14 @@ func (service *Service) NormalizationQueueApply(
 		return NormalizationQueueResult{}, err
 	}
 	if !validOne(request.Action, "status", "request", "claim", "ack", "resolve") {
-		return NormalizationQueueResult{}, fmt.Errorf("unsupported normalization queue action %q", request.Action)
+		return NormalizationQueueResult{}, fmt.Errorf(
+			"unsupported normalization queue action %q; normalization_queue accepts status, "+
+				"request, claim, ack, and resolve, and a queued item advances in the order "+
+				"claim -> ack -> resolve",
+			request.Action)
+	}
+	if err := validateMutationTokenBudget("normalization_queue", request.TokenBudget); err != nil {
+		return NormalizationQueueResult{}, err
 	}
 	if request.Action == "status" {
 		if request.Limit == 0 {
@@ -54,10 +144,10 @@ func (service *Service) NormalizationQueueApply(
 		if err := service.archiveTracker.Refresh(); err != nil {
 			return NormalizationQueueResult{}, err
 		}
-		return sealNormalizationQueueResult(NormalizationQueueResult{
+		return budgetNormalizationQueueStatus(NormalizationQueueResult{
 			SchemaVersion: CampaignSchemaVersion, Action: request.Action,
 			Queue: service.archiveTracker.QueueStatus(request.Limit),
-		})
+		}, request.TokenBudget)
 	}
 	when, err := time.Parse(time.RFC3339Nano, request.Timestamp)
 	if err != nil || when.Location() != time.UTC {
@@ -66,29 +156,56 @@ func (service *Service) NormalizationQueueApply(
 	if request.Action == "request" {
 		return service.requestNormalization(ctx, request)
 	}
-	if strings.TrimSpace(request.Actor) == "" || strings.TrimSpace(request.ItemID) == "" ||
-		!digestRE.MatchString(request.ExpectedDigest) {
-		return NormalizationQueueResult{}, errors.New("normalization queue transition requires actor, itemId, and expectedDigest")
+	missing := []string{}
+	if strings.TrimSpace(request.Actor) == "" {
+		missing = append(missing, "actor")
+	}
+	if strings.TrimSpace(request.ItemID) == "" {
+		missing = append(missing, "itemId")
+	}
+	if !digestRE.MatchString(request.ExpectedDigest) {
+		missing = append(missing, "expectedDigest (sha256:<64 hex>)")
+	}
+	if len(missing) != 0 {
+		return NormalizationQueueResult{}, fmt.Errorf(
+			"normalization %s requires %s. normalization_queue action=status returns every "+
+				"item's id and current digest; actor must be a permitted manager of the "+
+				"campaign that owns the item's source report",
+			request.Action, strings.Join(missing, ", "))
 	}
 	if err := service.archiveTracker.Refresh(); err != nil {
 		return NormalizationQueueResult{}, err
 	}
 	item, present := service.archiveTracker.Get(request.ItemID)
 	if !present {
-		return NormalizationQueueResult{}, errors.New("normalization queue item does not exist")
+		return NormalizationQueueResult{}, fmt.Errorf(
+			"normalization queue has no item %s. Remedy: normalization_queue action=status "+
+				"lists the queue; if the report has never been queued, normalization_queue "+
+				"action=request with its reportPath and exact reportDigest creates the item",
+			request.ItemID)
 	}
 	campaign, err := service.loadNormalizationSourceCampaign(item)
 	if err != nil {
 		return NormalizationQueueResult{}, fmt.Errorf("load normalization source campaign: %w", err)
 	}
 	if !containsString(campaign.PermittedManagers, request.Actor) {
-		return NormalizationQueueResult{}, errors.New("normalization queue mutation requires a permitted campaign manager")
+		return NormalizationQueueResult{}, fmt.Errorf(
+			"normalization %s of item %s requires a permitted manager of its source campaign %s, "+
+				"whose permittedManagers are %s; the request named %q. Remedy: re-issue as one "+
+				"of those actors",
+			request.Action, request.ItemID, campaign.ID,
+			strings.Join(campaign.PermittedManagers, ", "), request.Actor)
 	}
 	var resolution *NormalizationResolution
 	if request.Action == "resolve" {
 		if request.Resolution == nil {
 			return NormalizationQueueResult{}, errors.New(
-				"normalization resolve requires a canonical resolution receipt; rationale alone is insufficient")
+				"normalization resolve requires resolution: a receipt naming the returned " +
+					"curator run and its digest and report, the reviewed intake with its exact " +
+					"revision and digest, the coverage digest over that intake's spans of this " +
+					"source, the manager review with its revision and digest, and the resulting " +
+					"finding ids. The engine re-derives every one of them and refuses anything " +
+					"that does not match, so a rationale alone is not a proof")
 		}
 		verified, verifyErr := service.verifyNormalizationResolution(item, *request.Resolution)
 		if verifyErr != nil {
@@ -96,7 +213,11 @@ func (service *Service) NormalizationQueueApply(
 		}
 		resolution = &verified
 	} else if request.Resolution != nil {
-		return NormalizationQueueResult{}, errors.New("only normalization resolve may carry a resolution receipt")
+		return NormalizationQueueResult{}, fmt.Errorf(
+			"normalization %s cannot carry a resolution receipt; only resolve records one. "+
+				"Remedy: drop the field, or - if this item is already acknowledged - re-issue "+
+				"as action=resolve",
+			request.Action)
 	}
 	item, err = service.archiveTracker.Transition(
 		request.Action, request.ItemID, request.Actor, request.Timestamp,
@@ -105,10 +226,10 @@ func (service *Service) NormalizationQueueApply(
 	if err != nil {
 		return NormalizationQueueResult{}, err
 	}
-	return sealNormalizationQueueResult(NormalizationQueueResult{
+	return budgetNormalizationQueueResult(NormalizationQueueResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action, Item: &item,
 		Queue: service.archiveTracker.QueueStatus(20),
-	})
+	}, request.TokenBudget)
 }
 
 func (service *Service) requestNormalization(
@@ -165,10 +286,10 @@ func (service *Service) requestNormalization(
 	if err != nil {
 		return NormalizationQueueResult{}, err
 	}
-	return sealNormalizationQueueResult(NormalizationQueueResult{
+	return budgetNormalizationQueueResult(NormalizationQueueResult{
 		SchemaVersion: CampaignSchemaVersion, Action: request.Action, Item: &item,
 		Queue: service.archiveTracker.QueueStatus(20),
-	})
+	}, request.TokenBudget)
 }
 
 // queueClosureNormalization materializes Amendment 2's closure trigger for
@@ -563,10 +684,16 @@ func (tracker *ArchiveFallbackTracker) Transition(
 	}
 	current, present := tracker.suggestions[itemID]
 	if !present {
-		return NormalizationSuggestion{}, errors.New("normalization queue item does not exist")
+		return NormalizationSuggestion{}, fmt.Errorf(
+			"normalization queue has no item %s; normalization_queue action=status lists it", itemID)
 	}
 	if current.Digest != expectedDigest {
-		return NormalizationSuggestion{}, ErrStateConflict
+		return NormalizationSuggestion{}, fmt.Errorf(
+			"%w: normalization item %s is at digest %s and the request expected %s. Somebody "+
+				"else advanced it, or the queue was refreshed since the caller read it. Remedy: "+
+				"normalization_queue action=status, re-read this item's digest and status, and "+
+				"re-issue",
+			ErrStateConflict, itemID, current.Digest, expectedDigest)
 	}
 	if strings.TrimSpace(actor) == "" || validateUTC(timestamp) != nil {
 		return NormalizationSuggestion{}, errors.New("normalization transition requires actor and UTC timestamp")
@@ -576,27 +703,45 @@ func (tracker *ArchiveFallbackTracker) Transition(
 	switch action {
 	case "claim":
 		if current.Status != "queued" {
-			return NormalizationSuggestion{}, fmt.Errorf("normalization item in %s state cannot be claimed", current.Status)
+			return NormalizationSuggestion{}, fmt.Errorf(
+				"normalization item %s is %q and only a queued item may be claimed. %s",
+				itemID, current.Status, normalizationNextTransition(current.Status))
 		}
 		next.Status, next.ClaimedBy, next.ClaimedAt = "claimed", actor, timestamp
 	case "ack":
 		if current.Status != "claimed" {
-			return NormalizationSuggestion{}, fmt.Errorf("normalization item in %s state cannot be acknowledged", current.Status)
+			return NormalizationSuggestion{}, fmt.Errorf(
+				"normalization item %s is %q and only a claimed item may be acknowledged. %s",
+				itemID, current.Status, normalizationNextTransition(current.Status))
 		}
 		next.Status, next.AcknowledgedBy, next.AcknowledgedAt = "acknowledged", actor, timestamp
 	case "resolve":
-		if current.Status != "acknowledged" || resolution == nil ||
-			validateNormalizationResolution(*resolution) != nil ||
-			resolution.SourceReport.Path != current.ReportPath ||
-			resolution.SourceReport.SHA256 != current.ReportDigest {
+		if current.Status != "acknowledged" {
+			return NormalizationSuggestion{}, fmt.Errorf(
+				"normalization item %s is %q and only an acknowledged item may be resolved. %s",
+				itemID, current.Status, normalizationNextTransition(current.Status))
+		}
+		if resolution == nil || validateNormalizationResolution(*resolution) != nil {
 			return NormalizationSuggestion{}, errors.New(
-				"only an acknowledged normalization item may be resolved with a sealed source-bound receipt")
+				"normalization resolve requires a sealed resolution receipt; the submitted one " +
+					"is absent or does not carry its own valid self-digest")
+		}
+		if resolution.SourceReport.Path != current.ReportPath ||
+			resolution.SourceReport.SHA256 != current.ReportDigest {
+			return NormalizationSuggestion{}, fmt.Errorf(
+				"normalization resolution names source report %s@%s, and item %s was queued for "+
+					"%s@%s. A receipt must bind the exact report it resolves. Remedy: set "+
+					"resolution.sourceReport to that path and digest",
+				resolution.SourceReport.Path, resolution.SourceReport.SHA256,
+				itemID, current.ReportPath, current.ReportDigest)
 		}
 		next.Status, next.ResolvedBy, next.ResolvedAt = "resolved", actor, timestamp
 		copy := *resolution
 		next.Resolution = &copy
 	default:
-		return NormalizationSuggestion{}, fmt.Errorf("unsupported normalization transition %q", action)
+		return NormalizationSuggestion{}, fmt.Errorf(
+			"unsupported normalization transition %q; a queue item advances claim -> ack -> "+
+				"resolve", action)
 	}
 	if err := sealNormalizationSuggestion(&next); err != nil {
 		return NormalizationSuggestion{}, err
@@ -607,6 +752,31 @@ func (tracker *ArchiveFallbackTracker) Transition(
 		return NormalizationSuggestion{}, err
 	}
 	return next, nil
+}
+
+// normalizationNextTransition names the one action legal from a queue item's
+// current status.
+//
+// The queue is a four-state line - queued, claimed, acknowledged, resolved -
+// with exactly one edge out of each, so a refusal that says which state the
+// item is in and stops there has withheld the only thing the caller needed. The
+// `resolved` case matters most: it is terminal, and a caller retrying a
+// transition against an item somebody else already finished should be told to
+// stop rather than to try a different verb.
+func normalizationNextTransition(status string) string {
+	switch status {
+	case "queued":
+		return "Remedy: normalization_queue action=claim"
+	case "claimed":
+		return "Remedy: normalization_queue action=ack"
+	case "acknowledged":
+		return "Remedy: normalization_queue action=resolve with a sealed resolution receipt"
+	case "resolved":
+		return "resolved is terminal and has no further transition; this item's normalization " +
+			"is already recorded"
+	default:
+		return "Remedy: normalization_queue action=status to see the item's current state"
+	}
 }
 
 func sealNormalizationQueueResult(result NormalizationQueueResult) (NormalizationQueueResult, error) {

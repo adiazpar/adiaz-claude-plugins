@@ -53,7 +53,18 @@ func (service *Service) ReadExact(ctx context.Context, request ExactReadRequest)
 	}
 	if !validOne(request.Selector, "record", "finding", "evidence", "report", "path", "chunk", "uri") ||
 		strings.TrimSpace(request.Value) == "" {
-		return ExactReadResponse{}, errors.New("read requires a supported selector and nonempty value")
+		// Selector and value are one decision, not two: each selector names the
+		// shape of value it accepts, and a caller that has one wrong usually has
+		// both. Answer with the pairing rather than with the rejected token.
+		return ExactReadResponse{}, fmt.Errorf(
+			"read requires selector plus a nonempty value; it received selector %q and value "+
+				"%q. record takes record:<canonical/path>, finding takes finding:<id>, "+
+				"evidence takes an evidence handle from a finding card, report takes "+
+				"run:<runId>, path takes a canonical project path optionally suffixed "+
+				"#L<start>-L<end> or #B<start>-B<end>, chunk takes an indexed chunk id, and "+
+				"uri takes a generation URI. query and trace return handles in exactly these "+
+				"forms",
+			request.Selector, request.Value)
 	}
 	if request.TokenBudget == 0 {
 		request.TokenBudget = 1500
@@ -135,11 +146,20 @@ func (service *Service) ReadExact(ctx context.Context, request ExactReadRequest)
 			return ExactReadResponse{}, err
 		}
 		if run.Report == nil {
-			return ExactReadResponse{}, fmt.Errorf("run %s has no report", run.ID)
+			return ExactReadResponse{}, fmt.Errorf(
+				"run %s is %s and has frozen no report, so there is nothing to read. A report "+
+					"handle appears only when manager_apply run.return freezes one",
+				run.ID, run.Status)
 		}
 		return service.readFileHandleExact("report", "run:"+run.ID, *run.Report, 0, 0, request.TokenBudget)
 	default:
-		return ExactReadResponse{}, errors.New("unsupported exact read")
+		// Unreachable: the selector was validated at entry. Kept because this
+		// switch and that check are edited independently, and an unhandled
+		// selector must refuse rather than return an empty response that reads
+		// as "this handle expands to nothing".
+		return ExactReadResponse{}, fmt.Errorf(
+			"read selector %q passed validation but has no expansion path; this is an engine "+
+				"defect, not a caller error", request.Selector)
 	}
 }
 
@@ -303,7 +323,10 @@ func parseExactPathHandle(value string) (parsedExactPathHandle, error) {
 	}
 	value = strings.TrimPrefix(value, "path:")
 	if strings.Contains(value, ":") {
-		return parsedExactPathHandle{}, errors.New("path handle uses an unsupported scheme")
+		return parsedExactPathHandle{}, errors.New(
+			"path handle uses an unsupported scheme; read selector=path accepts a canonical " +
+				"project-relative path, optionally prefixed path: and optionally suffixed " +
+				"#L<start>-L<end> or #B<start>-B<end>")
 	}
 	pathValue, fragment := value, ""
 	if marker := strings.LastIndex(value, "#"); marker >= 0 {
