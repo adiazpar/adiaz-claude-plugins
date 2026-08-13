@@ -16,9 +16,11 @@ SKILLS = {
     "decide-agent",
     "decide-retrieval-profile",
     "delegate",
+    "discard-campaign",
     "hire-agent",
     "init-project",
     "migrate-project",
+    "merge-campaigns",
     "onboard",
     "open-campaign",
     "overturn",
@@ -57,6 +59,12 @@ CORE_SCHEMAS = {
     "transaction.schema.json",
 }
 
+TOPOLOGY_SCHEMAS = {
+    "campaign-merge-plan.schema.json",
+    "campaign-merge-id-map.schema.json",
+    "campaign-chronology.schema.json",
+}
+
 MIGRATION_SCHEMAS = {
     "review-packet.schema.json",
     "closure-plan.schema.json",
@@ -78,13 +86,13 @@ def frontmatter(text: str) -> str:
 
 
 class ReDisciplineCompatibilityTests(unittest.TestCase):
-    def test_manifests_publish_one_080_contract(self):
+    def test_manifests_publish_one_08_state_contract(self):
         claude = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
         codex = json.loads((PLUGIN / ".codex-plugin" / "plugin.json").read_text())
         # Both manifests publish one version, and it is the declared one.
         # Pinning a literal here made every release fail an unrelated test.
         declared = declared_plugin_version(ROOT)
-        self.assertRegex(declared, r"^0\.8\.\d+$")
+        self.assertRegex(declared, r"^0\.(?:8|9)\.\d+$")
         self.assertEqual(claude["version"], declared)
         self.assertEqual(codex["version"], declared)
         for manifest in (claude, codex):
@@ -139,7 +147,7 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
     def test_schema_superset_is_versioned_and_unique(self):
         schema_root = PLUGIN / "knowledge" / "schemas"
         actual = {path.name for path in schema_root.glob("*.schema.json")}
-        self.assertTrue(CORE_SCHEMAS | MIGRATION_SCHEMAS <= actual)
+        self.assertTrue(CORE_SCHEMAS | TOPOLOGY_SCHEMAS | MIGRATION_SCHEMAS <= actual)
         ids = set()
         for path in schema_root.glob("*.schema.json"):
             schema = json.loads(path.read_text(encoding="utf-8"))
@@ -150,6 +158,9 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
             schema = json.loads((schema_root / name).read_text())
             if "schemaVersion" in schema.get("properties", {}):
                 self.assertEqual(schema["properties"]["schemaVersion"].get("const"), 2)
+        for name in TOPOLOGY_SCHEMAS:
+            schema = json.loads((schema_root / name).read_text())
+            self.assertEqual(schema["properties"]["schemaVersion"].get("const"), 1)
 
     def test_project_configuration_declares_08_control_plane(self):
         config = json.loads((PLUGIN / "templates" / "project" / "config.json").read_text())

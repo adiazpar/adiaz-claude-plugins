@@ -1,4 +1,4 @@
-"""Deterministic re-discipline 0.8 release-tree inventory and legacy audit."""
+"""Deterministic re-discipline release-tree inventory and legacy audit."""
 
 from __future__ import annotations
 
@@ -29,9 +29,11 @@ EXPECTED_SKILLS = {
     "decide-agent",
     "decide-retrieval-profile",
     "delegate",
+    "discard-campaign",
     "hire-agent",
     "init-project",
     "migrate-project",
+    "merge-campaigns",
     "onboard",
     "open-campaign",
     "overturn",
@@ -46,6 +48,7 @@ EXPECTED_MCP_TOOLS = [
     "trace",
     "context_pack_materialize",
     "manager_apply",
+    "campaign_merge_plan",
     "curation_submit",
     "closure_apply",
     "normalization_queue",
@@ -120,6 +123,9 @@ REQUIRED_PATHS = {
     "knowledge/schemas/work-item.schema.json",
     "knowledge/schemas/run.schema.json",
     "knowledge/schemas/finding-frontmatter.schema.json",
+    "knowledge/schemas/campaign-merge-plan.schema.json",
+    "knowledge/schemas/campaign-merge-id-map.schema.json",
+    "knowledge/schemas/campaign-chronology.schema.json",
     "knowledge/schemas/migration-plan.schema.json",
     "knowledge/schemas/migration-operation.schema.json",
     "knowledge/schemas/migration-receipt.schema.json",
@@ -1145,7 +1151,7 @@ def audit_staged_tree(stage: Path) -> dict[str, object]:
             )
     for required in sorted(REQUIRED_PATHS - paths):
         add_violation(
-            violations, "missing-path", required, "required 0.8 path is absent"
+            violations, "missing-path", required, "required release path is absent"
         )
 
     skill_paths = {path for path in paths if re.fullmatch(r"skills/[^/]+/SKILL\.md", path)}
@@ -1155,11 +1161,11 @@ def audit_staged_tree(stage: Path) -> dict[str, object]:
             violations,
             "unexpected-skill",
             unexpected,
-            "skill is outside the 0.8 surface",
+            "skill is outside the published surface",
         )
     for missing in sorted(expected_skill_paths - skill_paths):
         add_violation(
-            violations, "missing-skill", missing, "required 0.8 skill is absent"
+            violations, "missing-skill", missing, "required published skill is absent"
         )
 
     agent_paths = {path for path in paths if re.fullmatch(r"agents/[^/]+\.md", path)}

@@ -1,4 +1,4 @@
-# re-discipline 0.8
+# re-discipline 0.9
 
 Re-discipline is an evidence-disciplined work and knowledge system for Claude
 Code and Codex. One filesystem-canonical engine manages campaigns, work items,
@@ -35,11 +35,15 @@ active/<slug>/
   intake/
   reviews/
   events/events.jsonl
+  merge/
   closure/
 ```
 
-`payload/` is created only when needed. Ordinary project source remains in its
-normal location and is registered in the run record.
+`payload/`, `merge/`, and `closure/` are created only when needed. A merged
+campaign retains its approved plan, collision-safe ID map, explicit chronology,
+source event journals, and otherwise-unclassified source artifacts under
+`merge/`. Ordinary project source remains in its normal location and is
+registered in the run record.
 
 ## Lifecycle
 
@@ -53,13 +57,33 @@ normal location and is registered in the run record.
 6. `review-subagent` records manager decisions as immutable receipts.
 7. `overturn` challenges and traces dependent findings without rewriting
    provenance.
-8. `close-campaign` proves coverage and atomically projects current truth,
+8. `merge-campaigns`, when explicitly requested, plans against exact source
+   trees and atomically consolidates them into one paused canonical graph.
+9. `close-campaign` proves coverage and atomically projects current truth,
    history, backlog, maintained assets, and a complete campaign archive.
 
 Evidence grade (`direct`, `inferred`, `reported`, `unknown`), review state,
 and validity are independent. Manager-ratified active findings remain labeled
 campaign knowledge. Only closure may project a direct, reproducible,
 conflict-free finding into `docs/truth/`.
+
+## Campaign Topology
+
+Use `campaign_merge_plan` before `manager_apply(action="campaign.merge")`.
+The dry run is deterministic and binds the target, ordered sources, explicit
+historical chronology, current head, exact source-tree digests, remapped IDs,
+and preserved artifacts. Application accepts only that retained digest and
+publishes one target while retiring every source in the same recoverable
+transaction. It does not create a successor plus source archives, and it does
+not reinterpret returned runs as approved work.
+
+`manager_apply(action="campaign.discard")` is deliberately outside the normal
+lifecycle. Use it only after an explicit request to destroy one exact open or
+paused campaign. It requires the current head and campaign digest, a reason,
+and the literal confirmation `DISCARD <campaign-id> FROM <campaign-slug>`.
+Discard removes the active tree and inventory membership without closure,
+projection, or a disguised archive, retaining only project-level proof of the
+intentional destructive action. Closed campaigns cannot be discarded.
 
 ## Context And Retrieval
 

@@ -1,7 +1,8 @@
 # Re-Discipline Knowledge Runtime
 
 This directory contains the local, manager-neutral state and knowledge engine
-shipped with re-discipline 0.8. Claude Code, Codex, direct managers, and
+shipped with re-discipline 0.9 for the 0.8 canonical project-state format.
+Claude Code, Codex, direct managers, and
 delegated workers use the same executable, canonical record schemas, finding
 index, retrieval profiles, and context-pack format.
 
@@ -85,7 +86,7 @@ knowledge/bin/re-discipline-knowledge serve --asset-root knowledge
 with the path form required by that host. The server uses newline-delimited
 JSON-RPC over stdio and supports MCP initialization, roots, ping, tool
 discovery, cancellation notifications, and structured tool results. Its
-public surface is exactly ten role-oriented operations:
+public surface is exactly eleven role-oriented operations:
 
 | Tool | Effect |
 |---|---|
@@ -94,7 +95,8 @@ public surface is exactly ten role-oriented operations:
 | `read` | Expand one exact record, finding, evidence, report, path, chunk, or URI handle. |
 | `trace` | Follow evidence, dependency, contradiction, supersession, run, and projection edges. |
 | `context_pack_materialize` | Preview an active-run or recruiting-run pack; after digest verification, directly publish recruiting packs only. Active-run publication belongs to `manager_apply` `run.prepare`. |
-| `manager_apply` | Apply typed campaign, work-item, run, review, finding, decision, and coverage-retirement transitions. |
+| `campaign_merge_plan` | Validate exact source trees and return a deterministic, digest-bound merge plan, collision-safe ID map, artifact inventory, counts, and explicit historical chronology without writing state. |
+| `manager_apply` | Apply typed campaign, work-item, run, review, finding, decision, coverage-retirement, atomic campaign-merge, and explicitly destructive campaign-discard transitions. |
 | `curation_submit` | Submit a curator intake batch and complete report-span coverage. |
 | `closure_apply` | Start, advance, verify, reopen, restart, or finalize a resumable closure job. `restart` is the only re-entry after a reopen: it re-plans against the current campaign revision under an exact plan, job, coverage, and campaign compare-and-swap. |
 | `normalization_queue` | Inspect durable archive-normalization demand; create an exact path/digest/byte-bound manager request; or claim, acknowledge, and resolve one source-bound item with a verified curator-run, intake-coverage, and complete-review receipt. |
@@ -105,7 +107,7 @@ the host supplies roots, requests are restricted to those roots. One server
 process can cache services for multiple validated roots without merging their
 indexes or policies.
 
-The four read operations never change canonical sources, settings, accepted
+The five read operations never change canonical sources, settings, accepted
 memory, or retrieval profiles. A first query may reconcile only disposable
 derived index and aggregate-metrics files under the approved cache root;
 deleting those files never deletes project knowledge. Managed recovery happens
@@ -130,6 +132,8 @@ From this `knowledge/` directory, the same launcher is
 | `serve` | Start the MCP stdio server. |
 | `state`, `query`, `read`, `trace` | Invoke the same typed read operation as MCP from strict JSON supplied with `--input <path-or->`. `query --session` accepts a stream of JSON requests in one process. |
 | `context-pack-materialize`, `manager-apply`, `curation-submit`, `closure-apply`, `normalization-queue` | Invoke the same typed project operation as MCP from strict JSON. |
+| `campaign-merge-plan` | Run the read-only deterministic merge planner from a strict `CampaignMergePlanRequest`. |
+| `campaign-merge`, `campaign-discard` | Invoke the corresponding `manager_apply` action through an action-locked command. `campaign-discard` is destructive. |
 | `recover`, `ensure` | Restore current managed bootstrap files, or report that a legacy project requires explicit migration. |
 | `migrate-project` | Preview; export and submit digest-bound non-activating retrieval-profile decisions and truth atomicization reviews; apply, resume, inspect, verify, record strict retrieval/host evidence gates, and ratify the sole 0.7-to-0.8 conversion path. |
 | `status`, `preflight`, `index`, `replay` | Maintainer diagnostics for configuration, derived-index health, and deterministic passage retrieval. These are not MCP aliases. |
@@ -159,6 +163,50 @@ Canonical state changes flow only through typed peer operations or the
 explicit migrator. Recovery, index reconciliation, calibration, and benchmark
 report output have separately documented scopes. Read operations may populate
 only disposable derived cache as described above.
+
+## Campaign topology operations
+
+`campaign.merge` is a two-step manager operation. First call
+`campaign_merge_plan` (or `campaign-merge-plan`) with the exact current head,
+an ordered set of at least two open or paused source campaigns, one absent
+target identity, and an explicit chronology. Retain the returned plan digest
+outside the source trees. Inspect its source-tree digests, counts, ID and
+artifact mappings, and chronology before approval. Then submit the identical
+specification and retained digest through `manager_apply` with action
+`campaign.merge` (or the action-locked `campaign-merge` command).
+
+Application creates one paused target graph and retires every exact source
+tree in one journaled transaction. It collision-safely remaps campaign-local
+work, run, finding, evidence, intake, review, review-load, review-session, and
+event identifiers;
+rewrites their internal references; and preserves source-qualified handles,
+record revisions and correlations, artifact bytes and modes, raw source event
+journals, and remapped historical events. Returned runs remain returned and
+aborted runs remain aborted. Historical dates live in `merge/chronology.json`
+and `merge/CHRONOLOGY.md` independently from migration and merge timestamps.
+The committed target also retains `merge/plan.json` and `merge/id-map.json`.
+An exact retry replays the receipt; any changed request, plan, source tree, or
+head refuses without a partial target or partial source retirement.
+
+`campaign.discard` is a separate, unmistakably destructive manager action.
+It accepts only an exact open or paused campaign ID and slug, current head,
+campaign digest, identical non-empty reason and rationale, and the literal
+confirmation `DISCARD <campaign-id> FROM <campaign-slug>`. An optional tree
+digest adds an independently computed byte-for-byte assertion; the engine
+always computes and rechecks the tree digest under the writer lock. The
+transaction removes that exact active tree and inventory membership without
+closure gates, truth projection, or an archive. Only the project-level event
+and transaction receipt remain to prove the intentional discard; a recovery
+journal is retained only while recovery requires it. Closed campaigns are
+immutable. Do not use discard as a substitute for closure, merge, or
+reconciliation.
+
+`STATE.md`, search indexes, and caches remain derived. A topology commit
+publishes the target view, canonical inventory, event journal, and head
+atomically. Existing immutable index generations fail their source-state
+freshness check after the tree switch; the next index/query reconciliation
+publishes a new complete generation rather than serving the changed corpus as
+current.
 
 Every public context-pack request names either an `active-run` target
 (`campaignId`, `workItemId`, and `runId`) or a `recruiting-run` target

@@ -23,6 +23,29 @@ func TestRetiredContextPackCLICommandIsRemoved(t *testing.T) {
 	}
 }
 
+func TestCampaignTopologyCLICommandsAreActionLocked(t *testing.T) {
+	tests := []struct {
+		command string
+		action  string
+		want    string
+	}{
+		{command: "campaign-merge", action: "campaign.discard", want: `campaign-merge requires request action "campaign.merge"`},
+		{command: "campaign-discard", action: "campaign.merge", want: `campaign-discard requires request action "campaign.discard"`},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.command, func(t *testing.T) {
+			input := writeCLIRequest(t, `{"action":"`+testCase.action+`"}`)
+			err := run(context.Background(), []string{
+				testCase.command, "--input", input,
+				"--project-root", filepath.Join(t.TempDir(), "not-a-project"),
+			})
+			if err == nil || err.Error() != testCase.want {
+				t.Fatalf("topology command was not action-locked: %v", err)
+			}
+		})
+	}
+}
+
 func TestNormalizedVsRawCLIRequiresExplicitProjectRoot(t *testing.T) {
 	err := run(context.Background(), []string{"normalized-vs-raw"})
 	if err == nil || err.Error() != "normalized-vs-raw requires --project-root" {

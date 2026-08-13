@@ -86,6 +86,11 @@ type managerApplyToolInput struct {
 	ManagerApplyRequest
 }
 
+type campaignMergePlanToolInput struct {
+	ProjectRoot string `json:"projectRoot,omitempty"`
+	CampaignMergePlanRequest
+}
+
 type curationSubmitToolInput struct {
 	ProjectRoot string `json:"projectRoot,omitempty"`
 	CurationSubmitRequest
@@ -725,6 +730,16 @@ func (server *MCPServer) callTool(ctx context.Context, name string, body json.Ra
 			return nil, err
 		}
 		return service.ManagerApply(ctx, input.ManagerApplyRequest)
+	case "campaign_merge_plan":
+		var input campaignMergePlanToolInput
+		if err := decodeToolInput(body, &input); err != nil {
+			return nil, err
+		}
+		service, err := server.service(input.ProjectRoot)
+		if err != nil {
+			return nil, err
+		}
+		return service.PlanCampaignMerge(ctx, input.CampaignMergePlanRequest)
 	case "curation_submit":
 		var input curationSubmitToolInput
 		if err := decodeToolInput(body, &input); err != nil {
@@ -1030,8 +1045,25 @@ func toolDefinitions() []map[string]any {
 		},
 	})
 
+	campaignMergePlanSchema := reflectedToolSchema(campaignMergePlanToolInput{})
+	setSchemaProperties(campaignMergePlanSchema, map[string]any{
+		"projectRoot": projectRoot,
+		"actor": stringSchema(
+			"Manager who must be permitted on every exact source campaign.", 1, 128),
+		"expectedHeadRevision": integerSchemaDescription(
+			0, 2147483647, "Exact project state-head revision bound into the dry-run plan."),
+		"expectedHeadDigest": map[string]any{
+			"type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+			"description": "Exact project state-head digest bound into the dry-run plan.",
+		},
+	})
+
 	managerSchema := reflectedToolSchema(managerApplyToolInput{})
 	archiveFallbackDecisionSchema := reflectedJSONSchema(reflect.TypeOf(ArchiveFallbackOptInDecision{}))
+	campaignMergeSubmissionSchema := reflectedJSONSchema(reflect.TypeOf(CampaignMergeSubmission{}))
+	campaignMergeSubmissionSchema["description"] = "Exact specification and approved plan digest; campaign.merge only."
+	campaignDiscardSubmissionSchema := reflectedJSONSchema(reflect.TypeOf(CampaignDiscardSubmission{}))
+	campaignDiscardSubmissionSchema["description"] = "DESTRUCTIVE exact confirmation, reason, and campaign digest; an optional tree digest adds a byte-for-byte source-tree assertion. campaign.discard only."
 	archiveFallbackDecisionSchema["description"] = "Exact manager ratification of one retained normalized-versus-raw candidate; valid only for knowledge.archive-fallback.opt-in."
 	setSchemaProperties(archiveFallbackDecisionSchema, map[string]any{
 		"candidateRunId":         stringSchema("Derived normalized-versus-raw run ID whose cache path the engine resolves.", 1, 96),
@@ -1043,7 +1075,8 @@ func toolDefinitions() []map[string]any {
 	setSchemaProperties(managerSchema, map[string]any{
 		"projectRoot": projectRoot,
 		"action": enumSchema("Typed manager transition.",
-			"campaign.open", "campaign.update", "work.create", "work.update", "run.prepare", "run.start",
+			"campaign.open", "campaign.update", "campaign.merge", "campaign.discard",
+			"work.create", "work.update", "run.prepare", "run.start",
 			"run.return", "run.complete", "closure.remediation.run.create", "review.submit",
 			"finding.challenge", "finding.update", "decision.record", "intake.coverage.retire",
 			"reconcile.import", "knowledge.archive-fallback.opt-in"),
@@ -1056,6 +1089,8 @@ func toolDefinitions() []map[string]any {
 		"expectedHeadRevision":    integerSchemaDescription(0, 2147483647, "Exact project state-head revision observed before the transition."),
 		"expectedHeadDigest":      map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Exact project state-head digest observed before the transition."},
 		"archiveFallbackDecision": archiveFallbackDecisionSchema,
+		"campaignMerge":           campaignMergeSubmissionSchema,
+		"campaignDiscard":         campaignDiscardSubmissionSchema,
 		"tokenBudget":             mutationTokenBudgetSchema("artifact rows"),
 	})
 	hoistManagerRecordDefinitions(managerSchema)
@@ -1243,9 +1278,15 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name": "manager_apply", "title": "Apply typed manager transition",
-			"description": "Validate and atomically apply one typed campaign, work, run, review, finding, decision, reconciliation, or receipt-bound archive-policy transition with optimistic concurrency.",
+			"description": "Validate and atomically apply one typed transition with optimistic concurrency. campaign.merge consolidates exact source trees from an approved plan. campaign.discard is explicitly destructive and permanently removes one open or paused campaign without closure.",
 			"inputSchema": managerSchema,
-			"annotations": writeOnly,
+			"annotations": closureWrite,
+		},
+		{
+			"name": "campaign_merge_plan", "title": "Plan an atomic campaign merge",
+			"description": "Read and validate exact source campaign trees, reconstruct explicit historical chronology, and return the digest-bound deterministic merge plan without writing state.",
+			"inputSchema": campaignMergePlanSchema,
+			"annotations": readOnly,
 		},
 		{
 			"name": "curation_submit", "title": "Submit bounded curation packet",

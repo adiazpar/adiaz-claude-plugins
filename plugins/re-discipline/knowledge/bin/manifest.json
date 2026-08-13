@@ -3,8 +3,8 @@
   "schemaVersion": 1,
   "runtime": {
     "name": "re-discipline-knowledge",
-    "version": "0.8.10",
-    "buildId": "sha256:c2e75e7c486a90d6ffbb16ec188b187db9703dc694fc0d17ad811c6cad5c63a5"
+    "version": "0.9.0",
+    "buildId": "sha256:0b43b5cf620430ef4676ca8b48b75f82945fba7b5bbada7c1e2447a577d033b7"
   },
   "build": {
     "goToolchain": "go1.26.5",
@@ -12,7 +12,7 @@
     "flags": [
       "-trimpath",
       "-buildvcs=false",
-      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:c2e75e7c486a90d6ffbb16ec188b187db9703dc694fc0d17ad811c6cad5c63a5"
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:0b43b5cf620430ef4676ca8b48b75f82945fba7b5bbada7c1e2447a577d033b7"
     ],
     "environment": [
       "CGO_ENABLED=0",
@@ -32,8 +32,8 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:46ea34679d67f67fd2b3918b32ac04f9afbd729033d104fb19e76a5f3ef2f522",
-      "size": 12111872,
+      "sha256": "sha256:e55fcdc840c54c69d75bfb2ccea602c121bd501f49a3704d0cea3c21ec510f21",
+      "size": 12372480,
       "mode": "0644"
     },
     {
@@ -41,8 +41,8 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:f5ef719eec3b5ea4c1a39a2a2d6cffed3d3ebc0d95ce4d9d70628d84c7dd6075",
-      "size": 11133952,
+      "sha256": "sha256:d3ea02e6510c0bffb98d7091cce372156bdcf6a7eb85894c1722805d0cd49a09",
+      "size": 11347968,
       "mode": "0644"
     },
     {
@@ -50,8 +50,8 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:c97aa1f19eccdfbcce0f36737665efcdc57926f32eb0c015d63c92f3142bcbc3",
-      "size": 11845758,
+      "sha256": "sha256:73f856bd484116f00fc095b048a3a1649ff9bbf147430a0924724c184cfdb8ca",
+      "size": 12099710,
       "mode": "0755"
     },
     {
@@ -59,8 +59,8 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:1350c8232c1009dc8f29ffa2e383d49a48fc91851845354f50db08ca467af89c",
-      "size": 11010174,
+      "sha256": "sha256:341a779ec3c55a97294e46473f19d433323d908ff15ee1e05555e103d144cfcf",
+      "size": 11272318,
       "mode": "0755"
     },
     {
@@ -68,8 +68,8 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:1b67894e1902b4cd6dc44208100e9688f3d4720386bbeb752ef993315c40e49d",
-      "size": 12012848,
+      "sha256": "sha256:274629d281c6aeacc42225b250b899cbfb7d5fd66814e6691fcc0258d32d88a0",
+      "size": 12273184,
       "mode": "0755"
     },
     {
@@ -77,8 +77,8 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:db895c8cc337be5ba0372236200a2b5a194456666170f1f754674d8deefb0263",
-      "size": 11255890,
+      "sha256": "sha256:8a55d0b004576725a4b1fb826353180c0171d97eeb61c85dc9d69970ebe8d93c",
+      "size": 11472866,
       "mode": "0755"
     }
   ],
@@ -95,7 +95,7 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "re-discipline-knowledge.exe",
-      "sha256": "sha256:7fc2ee55112b02fffdd2c9bf58bc2fd1ae7984f9f543e35d43aa471bfe7867fb",
+      "sha256": "sha256:c4809ac648f77303406a924cd25798c1dc1c34156ceec9ab19000bcb048a38a1",
       "size": 2072064,
       "mode": "0644"
     }
@@ -433,8 +433,8 @@
     {
       "kind": "model-manifest",
       "path": "models/manifest.json",
-      "sha256": "sha256:b7c76036b741c0f1ba600092578c54bc462b9b8e57eb4d1ef1600b6f59a4339b",
-      "size": 1287,
+      "sha256": "sha256:b1939ac59c02392a56a26156e2a3daab3dbee5ec2be537494ea3da992ebde6b0",
+      "size": 1286,
       "mode": "0644"
     },
     {
@@ -447,7 +447,7 @@
     {
       "kind": "retrieval-profile",
       "path": "profiles/balanced-v1.json",
-      "sha256": "sha256:155c8025392d4b02d06c7a33b5ab7676f76389f86eb954d6b6e8919df47788bc",
+      "sha256": "sha256:24b05beda9cf3d69c191838c6bfcbb758427285546f3025cf3b2bbc690696104",
       "size": 2960,
       "mode": "0644"
     },
@@ -463,6 +463,27 @@
       "path": "schemas/benchmark-result.schema.json",
       "sha256": "sha256:e80bde3f1507ea983565b87d319f8ab8c8e0eb24ba4c5a860e60c27f5757940f",
       "size": 2513,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/campaign-chronology.schema.json",
+      "sha256": "sha256:3431be99e6fe4ced8f36daeb7a5c2bcbb1275c6765352e88c6f5197a71efc9c9",
+      "size": 2298,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/campaign-merge-id-map.schema.json",
+      "sha256": "sha256:751a73badaf7676da93153cf2491bd41663fdfe8cf97643c4cb68e7844748fa2",
+      "size": 1988,
+      "mode": "0644"
+    },
+    {
+      "kind": "json-schema",
+      "path": "schemas/campaign-merge-plan.schema.json",
+      "sha256": "sha256:cde59c31ec0e809799d38b174fc2e7ea5b34b48eb8f6fc762f860ec9d1444cce",
+      "size": 7304,
       "mode": "0644"
     },
     {
@@ -776,8 +797,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/transaction.schema.json",
-      "sha256": "sha256:70208320cf61056c77b46d879ddfab564d8a0ac195d7cf52accd13dd360f4ef2",
-      "size": 2634,
+      "sha256": "sha256:a85afdd1ace765e250436c1bc78063d337dccd155ff6cdcb976b49a98ae74282",
+      "size": 3158,
       "mode": "0644"
     },
     {

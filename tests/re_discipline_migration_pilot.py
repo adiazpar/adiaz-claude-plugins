@@ -452,14 +452,14 @@ def _verify_package(plugin: Path) -> dict[str, Any]:
     runtime = manifest.get("runtime")
     if manifest.get("schemaVersion") != 1 or not isinstance(runtime, dict):
         _fail("package.manifest", "has an unsupported schema or runtime identity")
-    # Any 0.8.x runtime is the 0.8 runtime. Pinning the patch level here made
-    # this harness reject every release after the one it was written against.
+    # The 0.8 project-state migrator remains supported by the 0.8 and 0.9
+    # plugin lines. Pinning a patch level here rejects every subsequent release.
     runtime_version = runtime.get("version")
     if runtime.get("name") != "re-discipline-knowledge" or not (
         isinstance(runtime_version, str)
-        and re.fullmatch(r"0\.8\.\d+", runtime_version)
+        and re.fullmatch(r"0\.(?:8|9)\.\d+", runtime_version)
     ):
-        _fail("package.runtime", "is not the re-discipline 0.8 runtime")
+        _fail("package.runtime", "does not support the re-discipline 0.8 state runtime")
     build_id = runtime.get("buildId")
     if not isinstance(build_id, str) or not DIGEST_RE.fullmatch(build_id):
         _fail("package.runtime.buildId", "must be a sha256 identity")

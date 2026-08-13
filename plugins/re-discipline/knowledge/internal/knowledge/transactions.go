@@ -37,6 +37,7 @@ type StateArtifactWrite struct {
 	Path           string `json:"path"`
 	ExpectedDigest string `json:"expectedDigest,omitempty"`
 	ContentDigest  string `json:"contentDigest"`
+	Mode           uint32 `json:"mode,omitempty"`
 	Body           []byte `json:"-"`
 }
 
@@ -52,6 +53,10 @@ type StateTransactionRequest struct {
 	IdempotencyKey       string                  `json:"idempotencyKey"`
 	ExpectedHeadRevision int64                   `json:"expectedHeadRevision"`
 	ExpectedHeadDigest   string                  `json:"expectedHeadDigest"`
+	CreateActiveTree     string                  `json:"createActiveTree,omitempty"`
+	RetireActiveTrees    []string                `json:"retireActiveTrees,omitempty"`
+	RetireTreeDigests    map[string]string       `json:"retireTreeDigests,omitempty"`
+	EventJournal         string                  `json:"eventJournal,omitempty"`
 	RetireActiveTree     string                  `json:"retireActiveTree,omitempty"`
 	RetiredEventJournal  string                  `json:"retiredEventJournal,omitempty"`
 	Writes               []StateWrite            `json:"-"`
@@ -71,6 +76,7 @@ type StateArtifactResult struct {
 	Path           string `json:"path"`
 	PreviousDigest string `json:"previousDigest,omitempty"`
 	ContentDigest  string `json:"contentDigest"`
+	Mode           uint32 `json:"mode,omitempty"`
 }
 
 type StateTransactionReceipt struct {
@@ -84,6 +90,9 @@ type StateTransactionReceipt struct {
 	Event               StateEvent            `json:"event"`
 	Records             []StateRecordResult   `json:"records"`
 	Artifacts           []StateArtifactResult `json:"artifacts,omitempty"`
+	CreatedTree         string                `json:"createdTree,omitempty"`
+	RetiredTrees        []string              `json:"retiredTrees,omitempty"`
+	RetiredTreeDigests  map[string]string     `json:"retiredTreeDigests,omitempty"`
 	RetiredTree         string                `json:"retiredTree,omitempty"`
 	GeneratedViewDigest string                `json:"generatedViewDigest"`
 	CommittedAt         string                `json:"committedAt"`
@@ -122,6 +131,7 @@ type preparedStateArtifact struct {
 	Path           string
 	ExpectedDigest string
 	ContentDigest  string
+	Mode           uint32
 	Body           []byte
 }
 
@@ -150,6 +160,7 @@ type StateTransactionArtifactDescriptor struct {
 	Path           string `json:"path"`
 	ExpectedDigest string `json:"expectedDigest,omitempty"`
 	ContentDigest  string `json:"contentDigest"`
+	Mode           uint32 `json:"mode,omitempty"`
 }
 
 // StateTransactionDescriptor is the versioned, portable transaction shape
@@ -167,6 +178,10 @@ type StateTransactionDescriptor struct {
 	IdempotencyKey       string                               `json:"idempotencyKey"`
 	ExpectedHeadRevision int64                                `json:"expectedHeadRevision"`
 	ExpectedHeadDigest   string                               `json:"expectedHeadDigest"`
+	CreateActiveTree     string                               `json:"createActiveTree,omitempty"`
+	RetireActiveTrees    []string                             `json:"retireActiveTrees,omitempty"`
+	RetireTreeDigests    map[string]string                    `json:"retireTreeDigests,omitempty"`
+	EventJournal         string                               `json:"eventJournal,omitempty"`
 	RetireActiveTree     string                               `json:"retireActiveTree,omitempty"`
 	RetiredEventJournal  string                               `json:"retiredEventJournal,omitempty"`
 	Writes               []StateTransactionWriteDescriptor    `json:"writes"`
@@ -210,15 +225,11 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 		!actionIDRE.MatchString(request.Action) || !correlationIDRE.MatchString(request.CorrelationID) ||
 		strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 128 ||
 		request.ExpectedHeadRevision < 0 || !digestRE.MatchString(request.ExpectedHeadDigest) ||
-		(len(request.Writes) == 0 && len(request.Artifacts) == 0) {
+		(len(request.Writes) == 0 && len(request.Artifacts) == 0 && len(transactionRetiredTrees(request)) == 0) {
 		return preparedTransaction{}, errors.New("transaction identity, authority, action, expected head, and writes are required")
 	}
-	if request.RetireActiveTree != "" || request.RetiredEventJournal != "" {
-		if request.Action != "closure.finalize" || !validOne(request.Authority, "manager", "system") ||
-			request.RetireActiveTree != "active/"+request.CampaignSlug ||
-			validateRetiredEventJournal(request.RetiredEventJournal) != nil {
-			return preparedTransaction{}, errors.New("only closure.finalize may retire its exact active tree into a durable archive journal")
-		}
+	if err := validateStateTopologyRequest(request); err != nil {
+		return preparedTransaction{}, err
 	}
 	prepared := make([]preparedStateWrite, 0, len(request.Writes))
 	seenPaths := map[string]bool{}
@@ -266,7 +277,8 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 	artifactDescriptors := make([]StateTransactionArtifactDescriptor, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		artifactDescriptors = append(artifactDescriptors, StateTransactionArtifactDescriptor{
-			Path: artifact.Path, ExpectedDigest: artifact.ExpectedDigest, ContentDigest: artifact.ContentDigest,
+			Path: artifact.Path, ExpectedDigest: artifact.ExpectedDigest,
+			ContentDigest: artifact.ContentDigest, Mode: artifact.Mode,
 		})
 	}
 	semantic := StateTransactionDescriptor{
@@ -276,6 +288,8 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 		Rationale: request.Rationale, ReviewHandle: request.ReviewHandle,
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadRevision: request.ExpectedHeadRevision, ExpectedHeadDigest: request.ExpectedHeadDigest,
+		CreateActiveTree: request.CreateActiveTree, RetireActiveTrees: request.RetireActiveTrees,
+		RetireTreeDigests: request.RetireTreeDigests, EventJournal: request.EventJournal,
 		RetireActiveTree: request.RetireActiveTree, RetiredEventJournal: request.RetiredEventJournal,
 		Writes: descriptors, Artifacts: artifactDescriptors,
 	}
@@ -310,12 +324,28 @@ func prepareStateArtifact(action, authority, slug string, artifact StateArtifact
 	if artifact.ExpectedDigest != "" && !digestRE.MatchString(artifact.ExpectedDigest) {
 		return preparedStateArtifact{}, errors.New("artifact expected digest is invalid")
 	}
-	if len(artifact.Body) == 0 || int64(len(artifact.Body)) > maxSourceBytes {
-		return preparedStateArtifact{}, fmt.Errorf("artifact body must contain 1..%d bytes", maxSourceBytes)
+	maximumBytes := maxSourceBytes
+	allowEmpty := authority == "manager" && action == "campaign.merge"
+	if allowEmpty {
+		maximumBytes = maxCampaignMergeArtifactBytes
+	}
+	if (!allowEmpty && len(artifact.Body) == 0) || int64(len(artifact.Body)) > maximumBytes {
+		return preparedStateArtifact{}, fmt.Errorf(
+			"artifact body must contain %d..%d bytes", map[bool]int{true: 0, false: 1}[allowEmpty], maximumBytes)
 	}
 	digest := "sha256:" + SHA256Bytes(artifact.Body)
 	if artifact.ContentDigest != digest {
 		return preparedStateArtifact{}, errors.New("artifact content digest does not match its body")
+	}
+	mode := artifact.Mode
+	if mode == 0 {
+		mode = 0o644
+	}
+	if mode&^uint32(0o777) != 0 || mode == 0 {
+		return preparedStateArtifact{}, errors.New("artifact mode must contain only portable permission bits")
+	}
+	if action != "campaign.merge" && artifact.Mode != 0 {
+		return preparedStateArtifact{}, errors.New("explicit artifact modes are reserved for campaign.merge preservation")
 	}
 	switch {
 	case authority == "manager" && action == "migration.ratify":
@@ -333,6 +363,10 @@ func prepareStateArtifact(action, authority, slug string, artifact StateArtifact
 		if err := validateArchiveFallbackOptInArtifact(artifact); err != nil {
 			return preparedStateArtifact{}, err
 		}
+	case authority == "manager" && action == "campaign.merge":
+		if err := validateCampaignMergeArtifactPath(slug, artifact.Path); err != nil {
+			return preparedStateArtifact{}, err
+		}
 	case strings.HasPrefix(action, "closure.") && validOne(authority, "manager", "system"):
 		if err := validateClosureArtifactPath(slug, artifact.Path); err != nil {
 			return preparedStateArtifact{}, err
@@ -342,8 +376,18 @@ func prepareStateArtifact(action, authority, slug string, artifact StateArtifact
 	}
 	return preparedStateArtifact{
 		Path: artifact.Path, ExpectedDigest: artifact.ExpectedDigest,
-		ContentDigest: artifact.ContentDigest, Body: append([]byte(nil), artifact.Body...),
+		ContentDigest: artifact.ContentDigest, Mode: mode,
+		Body: append([]byte(nil), artifact.Body...),
 	}, nil
+}
+
+func validateCampaignMergeArtifactPath(slug, value string) error {
+	prefix := "active/" + slug + "/"
+	if !strings.HasPrefix(value, prefix) || value == prefix+"campaign.json" ||
+		value == prefix+"STATE.md" || value == prefix+"events/events.jsonl" {
+		return errors.New("campaign.merge artifacts must stay inside the new campaign tree and outside engine-owned live records and views")
+	}
+	return nil
 }
 
 func validateArchiveFallbackOptInArtifact(artifact StateArtifactWrite) error {
@@ -489,8 +533,9 @@ func prepareStateWrite(slug, campaignID, correlationID, eventID string, resultin
 		action = actions[0]
 	}
 	reconcileExact := action == "reconcile.import" && revision == write.ExpectedRevision
-	if recordCampaign != campaignID || (!reconcileExact && recordCorrelation != correlationID) ||
-		(!reconcileExact && revision != write.ExpectedRevision+1) {
+	mergeImport := action == "campaign.merge" && write.ExpectedRevision == 0 && revision >= 1
+	if recordCampaign != campaignID || (!reconcileExact && !mergeImport && recordCorrelation != correlationID) ||
+		(!reconcileExact && !mergeImport && revision != write.ExpectedRevision+1) {
 		return preparedStateWrite{}, fmt.Errorf("record %s campaign, correlation, or resulting revision is inconsistent", id)
 	}
 	if _, archive := record.(ArchiveManifest); archive {

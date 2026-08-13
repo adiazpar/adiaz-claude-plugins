@@ -94,12 +94,16 @@ type ManagerApplyRequest struct {
 	ReviewPacket            *ReviewPacketSubmission       `json:"reviewPacket,omitempty"`
 	RunPreparation          *RunPreparation               `json:"runPreparation,omitempty"`
 	ArchiveFallbackDecision *ArchiveFallbackOptInDecision `json:"archiveFallbackDecision,omitempty"`
+	CampaignMerge           *CampaignMergeSubmission      `json:"campaignMerge,omitempty"`
+	CampaignDiscard         *CampaignDiscardSubmission    `json:"campaignDiscard,omitempty"`
 	TokenBudget             int                           `json:"tokenBudget,omitempty"`
 }
 
 var managerActionKinds = map[string]map[string]bool{
 	"campaign.open":                     {"campaign": true, "work": true},
 	"campaign.update":                   {"campaign": true, "work": true},
+	"campaign.merge":                    {},
+	"campaign.discard":                  {},
 	"work.create":                       {"work": true, "campaign": true},
 	"work.update":                       {"work": true, "campaign": true},
 	"run.prepare":                       {"run": true, "work": true},
@@ -145,6 +149,12 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 		return StateTransactionReceipt{}, fmt.Errorf(
 			"unsupported manager action %q; manager_apply accepts %s",
 			request.Action, strings.Join(SupportedManagerActions(), ", "))
+	}
+	if request.Action == "campaign.merge" {
+		return service.managerCampaignMerge(ctx, request)
+	}
+	if request.Action == "campaign.discard" {
+		return service.managerCampaignDiscard(ctx, request)
 	}
 	// One pass, every violation the request alone reveals, before any write.
 	// The returned request carries the two engine-owned derivations - the run
@@ -287,10 +297,12 @@ func validateManagerActionPayload(request ManagerApplyRequest, allowed map[strin
 // otherwise receives a generic refusal and cannot tell whether the action is
 // misdesigned or simply misused.
 var managerActionObligations = map[string]string{
-	"campaign.open":   "Submit the open campaign record and its root work item.",
-	"campaign.update": "Submit the next campaign revision.",
-	"work.create":     "Submit at least one new work item.",
-	"work.update":     "Submit at least one next work-item revision.",
+	"campaign.open":    "Submit the open campaign record and its root work item.",
+	"campaign.update":  "Submit the next campaign revision.",
+	"campaign.merge":   "Submit the exact merge specification and the independently retained dry-run plan digest.",
+	"campaign.discard": "Submit the exact campaign digest, destructive confirmation, and a non-empty reason.",
+	"work.create":      "Submit at least one new work item.",
+	"work.update":      "Submit at least one next work-item revision.",
 	"run.prepare": "Submit the prepared run, its primary work item, and the runPreparation " +
 		"brief and context pack.",
 	"run.start":  "Submit the running run and its primary work item.",

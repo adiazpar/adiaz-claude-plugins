@@ -17,7 +17,7 @@
       }
     },
     {
-      "description": "Transactional campaigns and atomic project knowledge for Claude Code and Codex, with unified runs, bounded context, immutable review, resumable closure, and one filesystem-canonical engine.",
+      "description": "Transactional campaigns and atomic project knowledge for Claude Code and Codex, with atomic campaign consolidation, guarded destructive discard, unified runs, bounded context, immutable review, resumable closure, and one filesystem-canonical engine.",
       "name": "re-discipline",
       "source": "./plugins/re-discipline",
       "author": {

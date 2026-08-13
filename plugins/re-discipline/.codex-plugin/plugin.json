@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
-  "version": "0.8.10",
-  "description": "Transactional campaigns, unified runs, atomic findings, bounded context, closure-gated truth, and governed cross-host retrieval.",
+  "version": "0.9.0",
+  "description": "Transactional campaigns, atomic consolidation, guarded discard, unified runs, atomic findings, bounded context, closure-gated truth, and governed retrieval.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
@@ -29,7 +29,7 @@
   "interface": {
     "displayName": "Re-Discipline",
     "shortDescription": "Transactional campaigns and atomic project knowledge",
-    "longDescription": "Manage work items, unified runs, atomic findings, immutable reviews, bounded context, resumable closure, and citable project knowledge through one filesystem-canonical engine shared by manager hosts and drafters.",
+    "longDescription": "Manage campaign consolidation and guarded discard, work items, unified runs, atomic findings, immutable reviews, bounded context, resumable closure, and citable project knowledge through one filesystem-canonical engine shared by manager hosts and drafters.",
     "developerName": "Alex Diaz",
     "category": "Productivity",
     "capabilities": [
@@ -39,7 +39,8 @@
     "defaultPrompt": [
       "Initialize this project with re-discipline.",
       "Orient me with the bounded project state view.",
-      "Search atomic findings and trace their evidence."
+      "Search atomic findings and trace their evidence.",
+      "Plan an atomic merge of related campaigns."
     ]
   }
 }

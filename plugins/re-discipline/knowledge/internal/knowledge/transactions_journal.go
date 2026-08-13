@@ -43,10 +43,11 @@ type transactionJournal struct {
 }
 
 type publicationArtifact struct {
-	Kind   string
-	Target string
-	Body   []byte
-	Mode   fs.FileMode
+	Kind           string
+	Target         string
+	Body           []byte
+	Mode           fs.FileMode
+	ExpectedDigest string
 }
 
 func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared preparedTransaction) (StateTransactionReceipt, error) {
@@ -120,25 +121,46 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	if err != nil {
 		return StateTransactionReceipt{}, err
 	}
+	discard := prepared.Request.Action == "campaign.discard"
+	if discard {
+		if graph.Campaign == nil || graph.Campaign.ID != prepared.Request.CampaignID {
+			return StateTransactionReceipt{}, errors.New("campaign.discard target no longer resolves to the exact campaign")
+		}
+		if graph.Campaign.Digest != prepared.Request.ReviewHandle {
+			return StateTransactionReceipt{}, fmt.Errorf(
+				"%w: campaign.discard target campaign digest changed", ErrStateConflict)
+		}
+		if !containsString(graph.Campaign.PermittedManagers, prepared.Request.Actor) {
+			return StateTransactionReceipt{}, errors.New("campaign.discard actor is not a permitted manager of the exact campaign")
+		}
+	}
+	if prepared.Request.Action == "campaign.merge" && graph.Campaign != nil {
+		return StateTransactionReceipt{}, fmt.Errorf("%w: campaign.merge target tree already exists", ErrStateConflict)
+	}
 	previousCampaignEventID := ""
 	if graph.Campaign != nil {
 		previousCampaignEventID = graph.Campaign.LastEventID
 	}
 	now := store.Now().UTC()
 	eventID := eventIDForRequest(prepared.Request)
-	writes, err := store.augmentCampaignWrite(prepared, graph, eventID, RFC3339UTC(now))
-	if err != nil {
-		return StateTransactionReceipt{}, err
-	}
-	nextGraph, err := store.validateAndApplyWrites(prepared.Request, graph, writes)
-	if err != nil {
-		return StateTransactionReceipt{}, err
-	}
-	if err := nextGraph.Validate(); err != nil {
-		return StateTransactionReceipt{}, fmt.Errorf("resulting campaign graph: %w", err)
+	writes := prepared.Writes
+	nextGraph := graph
+	if !discard {
+		writes, err = store.augmentCampaignWrite(prepared, graph, eventID, RFC3339UTC(now))
+		if err != nil {
+			return StateTransactionReceipt{}, err
+		}
+		nextGraph, err = store.validateAndApplyWrites(prepared.Request, graph, writes)
+		if err != nil {
+			return StateTransactionReceipt{}, err
+		}
+		if err := nextGraph.Validate(); err != nil {
+			return StateTransactionReceipt{}, fmt.Errorf("resulting campaign graph: %w", err)
+		}
 	}
 	mutationDigest, resultingStateDigest, err := transactionStateDigests(
-		head, writes, prepared.Artifacts, prepared.Request.RetireActiveTree)
+		head, writes, prepared.Artifacts, prepared.Request.CreateActiveTree,
+		transactionRetiredTrees(prepared.Request))
 	if err != nil {
 		return StateTransactionReceipt{}, err
 	}
@@ -149,8 +171,9 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	for _, artifact := range prepared.Artifacts {
 		affected = append(affected, artifact.Path)
 	}
-	if prepared.Request.RetireActiveTree != "" {
-		affected = append(affected, prepared.Request.RetireActiveTree)
+	affected = append(affected, transactionRetiredTrees(prepared.Request)...)
+	if validOne(prepared.Request.Action, "campaign.merge", "campaign.discard") {
+		affected = append(affected, prepared.Request.CampaignID)
 	}
 	affected = SortedUnique(affected)
 	event := StateEvent{
@@ -168,21 +191,32 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		return StateTransactionReceipt{}, err
 	}
 	eventPath := "active/" + prepared.Request.CampaignSlug + "/events/events.jsonl"
+	if prepared.Request.EventJournal != "" {
+		eventPath = prepared.Request.EventJournal
+	}
 	resultingEventJournal := eventPath
 	if prepared.Request.RetiredEventJournal != "" {
 		resultingEventJournal = prepared.Request.RetiredEventJournal
 	}
-	eventBody, err := store.appendEventBody(eventPath, previousCampaignEventID, event)
+	var eventBody []byte
+	if discard {
+		eventBody, err = store.appendIndependentEventBody(eventPath, event)
+	} else {
+		eventBody, err = store.appendEventBody(eventPath, previousCampaignEventID, event)
+	}
 	if err != nil {
 		return StateTransactionReceipt{}, err
 	}
-	events, err := campaignEventsFromBody(eventBody, nextGraph)
-	if err != nil {
-		return StateTransactionReceipt{}, err
-	}
-	stateViewBody, err := RenderCampaignStateAt(nextGraph, now, events)
-	if err != nil {
-		return StateTransactionReceipt{}, err
+	stateViewBody := []byte{}
+	if !discard {
+		events, eventsErr := campaignEventsFromBody(eventBody, nextGraph)
+		if eventsErr != nil {
+			return StateTransactionReceipt{}, eventsErr
+		}
+		stateViewBody, err = RenderCampaignStateAt(nextGraph, now, events)
+		if err != nil {
+			return StateTransactionReceipt{}, err
+		}
 	}
 	stateViewDigest := "sha256:" + SHA256Bytes(stateViewBody)
 	if prepared.Request.RetiredEventJournal != "" {
@@ -203,7 +237,7 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	}
 	resultingInventory, err := store.resultingStateInventory(
 		inventory, head.Revision+1, writes, prepared.Artifacts, resultingEventJournal,
-		eventBody, prepared.Request.RetireActiveTree,
+		eventBody, transactionRetiredTrees(prepared.Request),
 	)
 	if err != nil {
 		return StateTransactionReceipt{}, err
@@ -239,16 +273,20 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	}
 	for _, artifact := range prepared.Artifacts {
 		artifactResults = append(artifactResults, StateArtifactResult{
-			Path: artifact.Path, PreviousDigest: artifact.ExpectedDigest, ContentDigest: artifact.ContentDigest,
+			Path: artifact.Path, PreviousDigest: artifact.ExpectedDigest,
+			ContentDigest: artifact.ContentDigest, Mode: artifact.Mode,
 		})
 		artifacts = append(artifacts, publicationArtifact{
-			Kind: "artifact", Target: artifact.Path, Body: artifact.Body, Mode: 0o644,
+			Kind: "artifact", Target: artifact.Path, Body: artifact.Body,
+			Mode: fs.FileMode(artifact.Mode),
 		})
 	}
-	stateViewPath := "active/" + prepared.Request.CampaignSlug + "/STATE.md"
-	artifacts = append(artifacts, publicationArtifact{
-		Kind: "derived", Target: stateViewPath, Body: stateViewBody, Mode: 0o644,
-	})
+	if !discard {
+		stateViewPath := "active/" + prepared.Request.CampaignSlug + "/STATE.md"
+		artifacts = append(artifacts, publicationArtifact{
+			Kind: "derived", Target: stateViewPath, Body: stateViewBody, Mode: 0o644,
+		})
+	}
 	artifacts = append(artifacts, publicationArtifact{Kind: "event", Target: resultingEventJournal, Body: eventBody, Mode: 0o644})
 	artifacts = append(artifacts, publicationArtifact{Kind: "inventory", Target: stateInventoryPath, Body: inventoryBody, Mode: 0o600})
 	receipt := StateTransactionReceipt{
@@ -256,7 +294,10 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		CorrelationID: prepared.Request.CorrelationID, IdempotencyKey: prepared.Request.IdempotencyKey,
 		RequestDigest: prepared.RequestDigest, PreviousHead: head, ResultingHead: resultingHead,
 		Event: event, Records: recordResults, Artifacts: artifactResults,
-		RetiredTree: prepared.Request.RetireActiveTree, GeneratedViewDigest: stateViewDigest,
+		CreatedTree:        prepared.Request.CreateActiveTree,
+		RetiredTrees:       append([]string(nil), prepared.Request.RetireActiveTrees...),
+		RetiredTreeDigests: prepared.Request.RetireTreeDigests,
+		RetiredTree:        prepared.Request.RetireActiveTree, GeneratedViewDigest: stateViewDigest,
 		CommittedAt: RFC3339UTC(now),
 	}
 	if err := sealTransactionReceipt(&receipt); err != nil {
@@ -268,9 +309,10 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	}
 	receiptTarget := ".re-discipline/state/receipts/" + SHA256String(prepared.Request.IdempotencyKey) + ".json"
 	artifacts = append(artifacts, publicationArtifact{Kind: "receipt", Target: receiptTarget, Body: receiptBody, Mode: 0o600})
-	if prepared.Request.RetireActiveTree != "" {
+	for _, retiredTree := range transactionRetiredTrees(prepared.Request) {
 		artifacts = append(artifacts, publicationArtifact{
-			Kind: "retire-tree", Target: prepared.Request.RetireActiveTree, Mode: 0o700,
+			Kind: "retire-tree", Target: retiredTree, Mode: 0o700,
+			ExpectedDigest: prepared.Request.RetireTreeDigests[retiredTree],
 		})
 	}
 	journal, journalPath, err := store.prepareTransactionJournal(prepared, head, resultingHead, receipt, artifacts)
@@ -428,14 +470,14 @@ func (store *StateStore) validateAndApplyWrites(request StateTransactionRequest,
 					handle.Revision+1, handle.RecordID, handle.RecordDigest)
 			}
 		}
-		if !write.Internal {
+		if !write.Internal && request.Action != "campaign.merge" {
 			if err := authorizeStateWrite(request, previous, write.Record); err != nil {
 				return CampaignGraph{}, err
 			}
 		}
 		reconciledExactRecord := request.Action == "reconcile.import" && previous != nil &&
 			reflect.DeepEqual(previous, write.Record)
-		if !reconciledExactRecord {
+		if !reconciledExactRecord && request.Action != "campaign.merge" {
 			if err := validateRecordTransition(previous, write.Record, request.Action, request.Authority); err != nil {
 				return CampaignGraph{}, fmt.Errorf("record %s: %w", write.RecordID, err)
 			}
@@ -732,8 +774,8 @@ func applyRecordToGraph(graph *CampaignGraph, value any) {
 	}
 }
 
-func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifacts []preparedStateArtifact, retiredTree string) (string, string, error) {
-	descriptors := make([]any, 0, len(writes)+len(artifacts)+1)
+func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifacts []preparedStateArtifact, createdTree string, retiredTrees []string) (string, string, error) {
+	descriptors := make([]any, 0, len(writes)+len(artifacts)+len(retiredTrees)+1)
 	for _, write := range writes {
 		descriptors = append(descriptors, struct {
 			Kind   string            `json:"kind"`
@@ -746,10 +788,17 @@ func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifa
 			Kind     string              `json:"kind"`
 			Artifact StateArtifactResult `json:"artifact"`
 		}{"artifact", StateArtifactResult{
-			Path: artifact.Path, PreviousDigest: artifact.ExpectedDigest, ContentDigest: artifact.ContentDigest,
+			Path: artifact.Path, PreviousDigest: artifact.ExpectedDigest,
+			ContentDigest: artifact.ContentDigest, Mode: artifact.Mode,
 		}})
 	}
-	if retiredTree != "" {
+	if createdTree != "" {
+		descriptors = append(descriptors, struct {
+			Kind string `json:"kind"`
+			Path string `json:"path"`
+		}{"create-tree", createdTree})
+	}
+	for _, retiredTree := range retiredTrees {
 		descriptors = append(descriptors, struct {
 			Kind string `json:"kind"`
 			Path string `json:"path"`
@@ -803,7 +852,8 @@ func sealTransactionReceipt(receipt *StateTransactionReceipt) error {
 	for _, artifact := range receipt.Artifacts {
 		if seenArtifacts[artifact.Path] || validateRelativeRecordPath(artifact.Path) != nil ||
 			!digestRE.MatchString(artifact.ContentDigest) ||
-			(artifact.PreviousDigest != "" && !digestRE.MatchString(artifact.PreviousDigest)) {
+			(artifact.PreviousDigest != "" && !digestRE.MatchString(artifact.PreviousDigest)) ||
+			artifact.Mode&^uint32(0o777) != 0 {
 			return errors.New("transaction receipt artifact is invalid")
 		}
 		seenArtifacts[artifact.Path] = true
@@ -813,6 +863,41 @@ func sealTransactionReceipt(receipt *StateTransactionReceipt) error {
 		if len(parts) != 2 || parts[0] != "active" || !managedSlugRE.MatchString(parts[1]) ||
 			receipt.Event.Action != "closure.finalize" {
 			return errors.New("transaction receipt active-tree retirement is invalid")
+		}
+	}
+	if receipt.CreatedTree != "" {
+		parts := strings.Split(receipt.CreatedTree, "/")
+		if len(parts) != 2 || parts[0] != "active" || !managedSlugRE.MatchString(parts[1]) ||
+			receipt.Event.Action != "campaign.merge" {
+			return errors.New("transaction receipt active-tree creation is invalid")
+		}
+	}
+	seenTrees := map[string]bool{}
+	for _, retiredTree := range receipt.RetiredTrees {
+		parts := strings.Split(retiredTree, "/")
+		if seenTrees[retiredTree] || len(parts) != 2 || parts[0] != "active" ||
+			!managedSlugRE.MatchString(parts[1]) {
+			return errors.New("transaction receipt active-tree retirement list is invalid")
+		}
+		seenTrees[retiredTree] = true
+	}
+	if len(receipt.RetiredTrees) != 0 {
+		if receipt.Event.Action == "campaign.merge" && len(receipt.RetiredTrees) < 2 {
+			return errors.New("campaign.merge receipt must retire at least two source trees")
+		}
+		if receipt.Event.Action == "campaign.discard" && len(receipt.RetiredTrees) != 1 {
+			return errors.New("campaign.discard receipt must retire exactly one source tree")
+		}
+		if !validOne(receipt.Event.Action, "campaign.merge", "campaign.discard") {
+			return errors.New("transaction receipt multi-tree retirement action is invalid")
+		}
+		if len(receipt.RetiredTreeDigests) != len(receipt.RetiredTrees) {
+			return errors.New("transaction receipt retired-tree digests are incomplete")
+		}
+		for _, tree := range receipt.RetiredTrees {
+			if !digestRE.MatchString(receipt.RetiredTreeDigests[tree]) {
+				return errors.New("transaction receipt retired-tree digest is invalid")
+			}
 		}
 	}
 	return nil
@@ -862,6 +947,42 @@ func (store *StateStore) appendEventBody(relative, previousCampaignEventID strin
 	}
 	if lastID != previousCampaignEventID {
 		return nil, ErrStateDirty
+	}
+	line, err := json.Marshal(event)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) != 0 && body[len(body)-1] != '\n' {
+		body = append(body, '\n')
+	}
+	body = append(body, line...)
+	body = append(body, '\n')
+	return body, nil
+}
+
+// appendIndependentEventBody appends a project-level destructive-operation
+// event. Its PreviousEventID follows the global state head, while this compact
+// journal intentionally contains only discard events and therefore may skip
+// intervening campaign events.
+func (store *StateStore) appendIndependentEventBody(relative string, event StateEvent) ([]byte, error) {
+	absolute := filepath.Join(store.Boundary.Root, filepath.FromSlash(relative))
+	body, err := readSingleLinkRegularFile(absolute)
+	if os.IsNotExist(err) {
+		body = nil
+	} else if err != nil {
+		return nil, err
+	}
+	for index, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var existing StateEvent
+		if err := decodeStrictJSON([]byte(line), &existing); err != nil || verifyStateEvent(existing) != nil {
+			return nil, fmt.Errorf("project event journal line %d is invalid", index+1)
+		}
+		if existing.ID == event.ID {
+			return nil, ErrIdempotencyConflict
+		}
 	}
 	line, err := json.Marshal(event)
 	if err != nil {
@@ -963,11 +1084,16 @@ func (store *StateStore) prepareJournalOperation(transactionID string, index int
 		if err != nil {
 			return journalOperation{}, err
 		}
+		if artifact.ExpectedDigest != "" && previousDigest != artifact.ExpectedDigest {
+			return journalOperation{}, fmt.Errorf(
+				"%w: retirement target %s digest is %s; expected %s",
+				ErrStateConflict, artifact.Target, previousDigest, artifact.ExpectedDigest)
+		}
 		resultDigest, err := digestDirectoryTreeWithArtifacts(target, artifact.Target, prior)
 		if err != nil {
 			return journalOperation{}, err
 		}
-		stage := fmt.Sprintf("staging/%s/retired-tree", transactionID)
+		stage := fmt.Sprintf("staging/%s/retired-tree-%04d", transactionID, index)
 		stagePath, err := store.statePath(stage)
 		if err != nil {
 			return journalOperation{}, err
@@ -1419,14 +1545,13 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 	}
 	switch head.Digest {
 	case journal.ResultingHead.Digest:
-		retiredPrefix := ""
+		retiredPrefixes := []string{}
 		for _, operation := range journal.Operations {
 			if operation.Kind == "retire-tree" {
 				if err := store.publishTreeRetirement(operation); err != nil {
 					return err
 				}
-				retiredPrefix = operation.Target + "/"
-				break
+				retiredPrefixes = append(retiredPrefixes, operation.Target+"/")
 			}
 		}
 		for _, operation := range journal.Operations {
@@ -1435,7 +1560,7 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 			}
 			// The verified staged-tree digest commits every publication under
 			// the retired prefix, whose canonical paths are intentionally gone.
-			if retiredPrefix != "" && strings.HasPrefix(operation.Target, retiredPrefix) {
+			if pathUnderAnyPrefix(operation.Target, retiredPrefixes) {
 				continue
 			}
 			target, err := store.canonicalOutputPath(operation.Target)
@@ -1462,15 +1587,14 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 		}
 		journal.Phase = "committed"
 	case journal.PreviousHead.Digest:
-		var retiredOperation *journalOperation
+		retiredOperations := []journalOperation{}
 		for index := len(journal.Operations) - 1; index >= 0; index-- {
 			operation := journal.Operations[index]
 			if operation.Kind == "retire-tree" {
 				if err := store.rollbackTreeRetirement(operation); err != nil {
 					return err
 				}
-				copy := operation
-				retiredOperation = &copy
+				retiredOperations = append(retiredOperations, operation)
 				continue
 			}
 			target, err := store.canonicalOutputPath(operation.Target)
@@ -1527,8 +1651,13 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 				}
 			}
 		}
-		if retiredOperation != nil {
-			if err := store.verifyRolledBackTree(*retiredOperation); err != nil {
+		for _, retiredOperation := range retiredOperations {
+			if err := store.verifyRolledBackTree(retiredOperation); err != nil {
+				return err
+			}
+		}
+		if journal.Receipt.CreatedTree != "" {
+			if err := store.removeEmptyCreatedCampaignTree(journal.Receipt.CreatedTree); err != nil {
 				return err
 			}
 		}
@@ -1542,6 +1671,15 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 	}
 	store.cleanupJournalStaging(*journal)
 	return nil
+}
+
+func pathUnderAnyPrefix(value string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (store *StateStore) verifyRolledBackTree(operation journalOperation) error {
@@ -1642,6 +1780,52 @@ func (store *StateStore) removeEmptyRolledBackRunWorkspace(target string) error 
 		return err
 	}
 	return syncTransactionDirectory(filepath.Dir(workspace))
+}
+
+// removeEmptyCreatedCampaignTree removes only directories left behind by a
+// rolled-back campaign.merge. Any remaining file or link is unexpected state
+// and refuses cleanup; this is deliberately not a recursive delete primitive.
+func (store *StateStore) removeEmptyCreatedCampaignTree(relative string) error {
+	parts := strings.Split(relative, "/")
+	if len(parts) != 2 || parts[0] != "active" || !managedSlugRE.MatchString(parts[1]) {
+		return errors.New("created campaign tree path is invalid")
+	}
+	root, err := store.canonicalOutputPath(relative)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%w: created campaign tree is missing or unsafe", ErrStateDirty)
+	}
+	directories := []string{}
+	err = filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		entryInfo, infoErr := entry.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		if entryInfo.Mode()&os.ModeSymlink != 0 || !entry.IsDir() {
+			return fmt.Errorf("%w: rolled-back created campaign tree still contains %s", ErrStateDirty, current)
+		}
+		directories = append(directories, current)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	sort.Slice(directories, func(i, j int) bool { return len(directories[i]) > len(directories[j]) })
+	for _, directory := range directories {
+		if err := os.Remove(directory); err != nil {
+			return err
+		}
+	}
+	return syncTransactionDirectory(filepath.Dir(root))
 }
 
 func (store *StateStore) cleanupJournalStaging(journal transactionJournal) {

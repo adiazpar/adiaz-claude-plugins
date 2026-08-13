@@ -1108,7 +1108,8 @@ The public surface should stay small and role-oriented.
 | `read` | Expand one exact finding, source, report slice, or citation handle | Read-only |
 | `trace` | Follow evidence, dependency, challenge, supersession, run, and projection edges | Read-only |
 | `context_pack_materialize` | Create an immutable run-scoped context pack | Manager/server orchestration |
-| `manager_apply` | Typed campaign, work-item, run, review, finding, and decision transitions | Manager only |
+| `campaign_merge_plan` | Validate exact source trees and return a deterministic digest-bound consolidation plan | Read-only |
+| `manager_apply` | Typed campaign, work-item, run, review, finding, decision, merge, and destructive discard transitions | Manager only |
 | `curation_submit` | Write intake batches and coverage for granted runs | Scoped curator |
 | `closure_apply` | Start, advance, verify, reopen, or finalize a closure job | Manager only |
 | `normalization_queue` | Inspect or advance durable demand-driven archive normalization work | Manager only |
@@ -1123,6 +1124,50 @@ release does not retain deprecated MCP aliases or legacy mutation paths:
 `search` becomes `query`, default results change from chunks to normalized
 cards, and neither checkpoint nor standalone truth promotion exists as an
 engine action.
+
+#### 12.3.1 Campaign topology transactions
+
+Campaign-local identities remain immutable during ordinary transitions.
+Consolidation is an explicit exception implemented as `campaign.merge`, not as
+record import, reparenting, closure, or a successor pointing at archives. A
+read-only `campaign_merge_plan` request names one absent target, at least two
+exact open or paused sources in semantic order, the current state head, and an
+explicit historical chronology. The planner validates every source graph and
+file, records its tree digest, allocates collision-safe target IDs, maps every
+artifact, reconstructs historical dates independently from migration
+timestamps, and returns one deterministic digest. Planning writes nothing.
+
+Application recomputes the plan, then rechecks the exact retained plan digest,
+expected head, and source-tree digests under the writer lock. One transaction
+creates the target tree; rewrites campaign, work-item, run, finding, intake,
+review, review-load,
+event, and path references; preserves source-qualified provenance, record
+metadata, correlations, decisions, payloads, file modes, and raw source event
+journals; publishes the target view, inventory, event, receipt, and head; and
+retires all source trees. Returned and aborted run states are copied without
+promotion. The durable target contains the plan, ID map, chronology, remapped
+historical event stream, and source artifacts. Recovery either rolls the whole
+operation forward after the committed head or restores every source and
+removes the incomplete target. Exact retries replay the receipt; changed
+requests conflict.
+
+`campaign.discard` is a separately named unsafe operation, never an implicit
+branch of closure or merge. It requires an exact campaign ID and slug, an open
+or paused target, manager authority, expected head and campaign digest, a
+non-empty reason, and the literal confirmation
+`DISCARD <campaign-id> FROM <campaign-slug>`. An optional caller-supplied tree
+digest strengthens the assertion; the engine always calculates and rechecks
+the exact tree under the writer lock. The transaction removes the active tree
+and canonical inventory membership without closure gates, projections, or an
+archive, retaining only the minimum project-level event and receipt needed to
+prove intentional destruction. Closed, missing, malformed, already-discarded,
+and concurrently modified targets have explicit, tested outcomes.
+
+Indexes, generated views, and caches do not acquire topology authority. The
+transaction publishes the target `STATE.md` (or no campaign view for discard)
+alongside the canonical inventory and head. The source-tree switch invalidates
+the prior immutable search generation through its recorded source states; the
+next reconciliation publishes a complete replacement generation.
 
 ### 12.4 State views
 
@@ -2079,7 +2124,7 @@ The 0.8 implementation resolves these former release questions:
    as an explicitly non-adversarial accident boundary.
 2. Context leases are caller-named and process-local. They maintain only
    in-memory deduplication and accounting and reset on request or process exit.
-3. The public MCP surface is exactly ten tools. Discriminated actions remain
+3. The public MCP surface is exactly eleven tools. Discriminated actions remain
    within those tools, with the same operation contracts available through the
    CLI.
 4. Finding frontmatter uses the implemented strict YAML subset and parser,

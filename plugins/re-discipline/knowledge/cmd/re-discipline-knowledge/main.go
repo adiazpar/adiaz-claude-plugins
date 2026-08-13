@@ -264,7 +264,8 @@ func run(ctx context.Context, args []string) error {
 	case "migrate-project":
 		return runMigrationCommand(ctx, args[1:])
 	case "state", "query", "read", "trace", "context-pack-materialize",
-		"manager-apply", "curation-submit", "closure-apply", "normalization-queue":
+		"manager-apply", "campaign-merge-plan", "campaign-merge", "campaign-discard",
+		"curation-submit", "closure-apply", "normalization-queue":
 		return runPeerCommand(ctx, args[0], args[1:])
 	}
 	switch args[0] {
@@ -380,7 +381,7 @@ func printJSON(value any) error {
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: re-discipline-knowledge <serve|state|query|read|trace|context-pack-materialize|manager-apply|curation-submit|closure-apply|normalization-queue|recover|ensure|project-version|preflight|status|index|replay|benchmark|normalized-vs-raw|calibrate|pin-evals|promote-profile|verify-pack|migrate-project> [options]")
+	return fmt.Errorf("usage: re-discipline-knowledge <serve|state|query|read|trace|context-pack-materialize|manager-apply|campaign-merge-plan|campaign-merge|campaign-discard|curation-submit|closure-apply|normalization-queue|recover|ensure|project-version|preflight|status|index|replay|benchmark|normalized-vs-raw|calibrate|pin-evals|promote-profile|verify-pack|migrate-project> [options]")
 }
 
 func runPeerCommand(ctx context.Context, command string, args []string) error {
@@ -412,6 +413,18 @@ func runPeerCommand(ctx context.Context, command string, args []string) error {
 			return err
 		}
 		contextPackRequest = &request
+	}
+	var campaignTopologyRequest *knowledge.ManagerApplyRequest
+	if command == "campaign-merge" || command == "campaign-discard" {
+		var request knowledge.ManagerApplyRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		wantAction := strings.ReplaceAll(command, "-", ".")
+		if request.Action != wantAction {
+			return fmt.Errorf("%s requires request action %q", command, wantAction)
+		}
+		campaignTopologyRequest = &request
 	}
 	root := strings.TrimSpace(*projectRoot)
 	if root == "" {
@@ -487,6 +500,22 @@ func runPeerCommand(ctx context.Context, command string, args []string) error {
 			return err
 		}
 		value, err := service.ManagerApply(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "campaign-merge-plan":
+		var request knowledge.CampaignMergePlanRequest
+		if err := decodeCLIRequest(*input, &request); err != nil {
+			return err
+		}
+		value, err := service.PlanCampaignMerge(ctx, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(value)
+	case "campaign-merge", "campaign-discard":
+		value, err := service.ManagerApply(ctx, *campaignTopologyRequest)
 		if err != nil {
 			return err
 		}

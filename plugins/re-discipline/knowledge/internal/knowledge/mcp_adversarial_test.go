@@ -223,7 +223,8 @@ var toolSchemaBudgets = map[string]int{
 	"context_pack_materialize": 3750,
 	"migrate_project":          8800,
 	"curation_submit":          9750,
-	"manager_apply":            23600,
+	"campaign_merge_plan":      7800,
+	"manager_apply":            25600,
 }
 
 func TestMCPToolDiscoveryStaysWithinPerToolBudgets(t *testing.T) {
@@ -336,7 +337,7 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 	t.Logf("tool discovery payload: %d bytes", len(encodedDefinitions))
 	expected := []string{
 		"state", "query", "read", "trace", "context_pack_materialize",
-		"manager_apply", "curation_submit", "closure_apply", "normalization_queue", "migrate_project",
+		"manager_apply", "campaign_merge_plan", "curation_submit", "closure_apply", "normalization_queue", "migrate_project",
 	}
 	if len(definitions) != len(expected) {
 		t.Fatalf("tool count = %d, want %d", len(definitions), len(expected))
@@ -367,7 +368,7 @@ func TestAdversarialMCPToolSchemasAndAuthoritySurface(t *testing.T) {
 				annotations["openWorldHint"] != false {
 				t.Fatalf("%s write annotations are unsafe: %#v", name, annotations)
 			}
-			wantDestructive := name == "closure_apply" || name == "migrate_project"
+			wantDestructive := name == "manager_apply" || name == "closure_apply" || name == "migrate_project"
 			if annotations["destructiveHint"] != wantDestructive {
 				t.Fatalf("%s destructive hint = %#v, want %t", name, annotations["destructiveHint"], wantDestructive)
 			}
@@ -685,8 +686,8 @@ func TestMCPV8RepresentativeRequestsAndStructuredResults(t *testing.T) {
 	}
 	toolsResult := asObject(t, rpcResponseByID(t, messages, 2)["result"])
 	tools := asArray(t, toolsResult["tools"])
-	if len(tools) != 10 {
-		t.Fatalf("tools/list returned %d tools, want 10", len(tools))
+	if len(tools) != 11 {
+		t.Fatalf("tools/list returned %d tools, want 11", len(tools))
 	}
 	state := assertSuccessfulToolResult(t, rpcResponseByID(t, messages, 3))
 	if state["mode"] != "resume" || state["campaignId"] != "C-TEST" || state["digest"] == "" {
@@ -1472,7 +1473,7 @@ func TestAdversarialPackagedWindowsBinaryMCPProtocol(t *testing.T) {
 	toolRows := asArray(t, tools["tools"])
 	expected := []string{
 		"state", "query", "read", "trace", "context_pack_materialize",
-		"manager_apply", "curation_submit", "closure_apply", "normalization_queue", "migrate_project",
+		"manager_apply", "campaign_merge_plan", "curation_submit", "closure_apply", "normalization_queue", "migrate_project",
 	}
 	if len(toolRows) != len(expected) {
 		t.Fatalf("packaged binary exposed %d tools, want %d", len(toolRows), len(expected))

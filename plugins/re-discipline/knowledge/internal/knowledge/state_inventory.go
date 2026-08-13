@@ -320,6 +320,8 @@ func canonicalInventoryCandidatePath(relative string) bool {
 		return len(parts) == 4 && parts[3] == "events.jsonl"
 	case "closure":
 		return len(parts) == 4 && strings.HasSuffix(parts[3], ".json")
+	case "merge":
+		return len(parts) >= 4
 	}
 	return false
 }
@@ -331,7 +333,7 @@ func (store *StateStore) resultingStateInventory(
 	artifacts []preparedStateArtifact,
 	eventPath string,
 	eventBody []byte,
-	retiredTree string,
+	retiredTrees []string,
 ) (StateInventory, error) {
 	entries := inventoryEntriesMap(previous)
 	if previous.HeadRevision == 0 {
@@ -362,7 +364,7 @@ func (store *StateStore) resultingStateInventory(
 		entries[artifact.Path] = artifact.ContentDigest
 	}
 	entries[eventPath] = "sha256:" + SHA256Bytes(eventBody)
-	if retiredTree != "" {
+	for _, retiredTree := range retiredTrees {
 		prefix := strings.TrimSuffix(retiredTree, "/") + "/"
 		for relative := range entries {
 			if relative == retiredTree || strings.HasPrefix(relative, prefix) {

@@ -32,6 +32,7 @@ EXPECTED_TOOLS = [
     "trace",
     "context_pack_materialize",
     "manager_apply",
+    "campaign_merge_plan",
     "curation_submit",
     "closure_apply",
     "normalization_queue",
