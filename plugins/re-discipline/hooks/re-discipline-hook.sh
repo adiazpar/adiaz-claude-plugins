@@ -256,10 +256,33 @@ normalize_path() {
 relative_path() {
   path=$1
   root=$2
+  root_norm=$(normalize_path "$root")
+  host=$(uname -s 2>/dev/null || printf 'unknown')
+  windows_posix=false
+  case "$host" in MINGW*|MSYS*|CYGWIN*) windows_posix=true ;; esac
+  drive_path=false
+  # Drive-qualified paths are meaningful to MSYS/Cygwin shells but foreign to
+  # native POSIX. Reject them before a failed dirname walk can fall back to the
+  # project directory and make an outside path appear project-relative.
+  case "$path" in
+    [A-Za-z]:/*)
+      [ "$windows_posix" = true ] || { printf '\n'; return; }
+      drive_path=true
+      ;;
+  esac
   case "$path" in /*|[A-Za-z]:/*) candidate=$path ;; *) candidate="$root/$path" ;; esac
   probe=$(dirname "$candidate")
   suffix=$(basename "$candidate")
   while [ ! -d "$probe" ]; do
+    if [ "$drive_path" = true ]; then
+      case "$probe" in
+        [A-Za-z]:)
+          probe="$probe/"
+          [ -d "$probe" ] || { printf '\n'; return; }
+          break
+          ;;
+      esac
+    fi
     parent=$(dirname "$probe")
     [ "$parent" != "$probe" ] || break
     suffix="$(basename "$probe")/$suffix"
@@ -271,8 +294,18 @@ relative_path() {
     absolute=$candidate
   fi
   absolute=$(normalize_path "$absolute")
-  root_norm=$(normalize_path "$root")
-  case "$absolute" in "$root_norm"/*) printf '%s\n' "${absolute#"$root_norm"/}" ;; *) printf '\n' ;; esac
+  if [ "$windows_posix" = true ]; then
+    absolute_fold=$(printf '%s' "$absolute" | tr '[:upper:]' '[:lower:]')
+    root_fold=$(printf '%s' "$root_norm" | tr '[:upper:]' '[:lower:]')
+    case "$absolute_fold" in
+      "$root_fold"/*)
+        printf '%s\n' "$absolute" | awk -v root="$root_norm" '{ print substr($0, length(root) + 2) }'
+        ;;
+      *) printf '\n' ;;
+    esac
+  else
+    case "$absolute" in "$root_norm"/*) printf '%s\n' "${absolute#"$root_norm"/}" ;; *) printf '\n' ;; esac
+  fi
 }
 
 protected_path() {

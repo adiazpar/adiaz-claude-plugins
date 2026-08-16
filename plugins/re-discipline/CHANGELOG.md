@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2 - 2026-08-16
+
+- Reject Windows drive-qualified patch targets on native POSIX hosts while
+  preserving canonical in-project resolution under MSYS and Cygwin shells.
+- Exercise the foreign-drive containment boundary independently on Linux and
+  macOS so host-parity tests cannot be skipped with PowerShell unavailable.
+
 ## 0.9.1 - 2026-08-16
 
 - Let ordinary record-scoped mutations rebase once under the writer lock while
