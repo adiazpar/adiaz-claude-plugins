@@ -390,7 +390,7 @@ func prepareClosureArchiveFixture(t *testing.T) (*StateStore, string, *Service, 
 	work.UpdatedAt, work.UpdatedBy, work.CorrelationID, work.Digest =
 		"2026-08-02T18:01:00Z", "manager", "corr-cancel", ""
 	work.State = "cancelled"
-	cancelled, err := store.Apply(context.Background(), StateTransactionRequest{
+	_, err = store.Apply(context.Background(), StateTransactionRequest{
 		CampaignSlug: "test-campaign", CampaignID: "C-TEST",
 		Actor: "manager", Authority: "manager", Action: "work.cancel",
 		CorrelationID: "corr-cancel", IdempotencyKey: "idem-cancel",
@@ -417,8 +417,6 @@ func prepareClosureArchiveFixture(t *testing.T) (*StateStore, string, *Service, 
 		CorrelationID: "closure-start", IdempotencyKey: "closure-start",
 		Rationale: "close the fully covered fixture", Timestamp: "2026-08-02T18:02:00Z",
 		ClosureJobID: "closure-test", ArchiveDestination: "docs/history/campaigns/2026-08-02-test-campaign",
-		ExpectedHeadRevision:    cancelled.ResultingHead.Revision,
-		ExpectedHeadDigest:      cancelled.ResultingHead.Digest,
 		ExpectedRecordDigests:   map[string]string{graph.Campaign.ID: graph.Campaign.Digest},
 		ExpectedArtifactDigests: map[string]string{},
 		FileRetention:           map[string]string{}, ProjectionDestinations: map[string]string{},

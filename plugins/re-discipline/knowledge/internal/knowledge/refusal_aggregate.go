@@ -39,18 +39,15 @@ import (
 //     including a zero-valued request, so they never short-circuit. Every one
 //     is collected.
 //
-//   - State violations need the loaded campaign graph or the committed head:
-//     compare-and-swap, revision arithmetic, transition legality, cross-record
-//     binding, authority. These keep failing fast. Once the head is stale or
-//     the campaign does not resolve, every later state check is being evaluated
-//     against a premise that has already been shown false, and its answer is
-//     not evidence about the caller's request.
+//   - State violations need the loaded campaign graph: record compare-and-swap,
+//     revision arithmetic, transition legality, cross-record binding, and
+//     authority. Project-global actions additionally bind the committed head.
+//     These keep failing fast once their canonical premise cannot be resolved.
 //
 // An aggregate therefore carries all shape violations plus at most one state
 // violation - the first one that could be established without depending on a
-// broken shape. That single state fact is worth carrying because it is almost
-// always the stale head, and a caller re-reading state to fix its shape may as
-// well be told in the same breath that its expectations moved.
+// broken shape. Ordinary record-scoped work never adds an unrelated global-head
+// fact; strict project-global actions may still report their exact-head gate.
 //
 // Aggregation never changes what is caught. Every check that refused before
 // still refuses; only the number of them delivered per response changed. Where
@@ -209,26 +206,15 @@ func (set *refusalSet) result() error {
 
 // staleHeadConflict is the engine's single stale-head message.
 //
-// It lives here rather than inline at the compare-and-swap because two places
-// now produce it: the transaction journal, where it has always been raised at
-// commit time, and the aggregate state probe, which raises it early so that a
-// caller whose request is also malformed learns both facts in one response. If
-// the two ever drifted apart, a caller would fix its shape, re-issue, and meet
-// what looks like a different failure - which is precisely the "one retry looks
-// like two distinct problems" confusion this package keeps trying to remove.
+// It lives here rather than inline because strict project-global operations may
+// reach the same gate in the transaction journal or their aggregate state
+// probe. Ordinary record-scoped transactions do not call it.
 func staleHeadConflict(expectedRevision int64, expectedDigest string, head StateHead, campaignID string) error {
-	// This is the single most frequent refusal in the engine, and until it
-	// named the way forward it read as a dead end rather than as "somebody
-	// else went first". Say what the caller must re-read, and say that
-	// nothing was written, because the second question after a conflict is
-	// always whether a partial write landed.
 	return fmt.Errorf(
-		"%w: expected head %d/%s, found %d/%s. Canonical state moved between the read that "+
-			"produced those expectations and this call, so nothing was written. Remedy: "+
+		"%w: this project-global action expected head %d/%s, found %d/%s. Canonical state "+
+			"moved between its proof and this call, so nothing was written. Remedy: "+
 			"state mode=delta campaignId=%s sinceEventId=<the eventHead you last read> "+
-			"shows exactly what changed; then re-read the affected records, rebuild "+
-			"expectedHeadRevision, expectedHeadDigest, and every expectedRecordDigests "+
-			"entry, and re-issue",
+			"shows exactly what changed; rebuild the operation's project-wide proof and re-issue",
 		ErrStateConflict, expectedRevision, expectedDigest,
 		head.Revision, head.Digest, campaignID)
 }

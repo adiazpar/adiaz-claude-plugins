@@ -167,18 +167,15 @@ func TestBudgetDoesNotReachThePersistedReceipt(t *testing.T) {
 	}
 }
 
-func TestMutationTokenBudgetRangeRefusalNamesTheWayOut(t *testing.T) {
-	for _, budget := range []int{1, 127, 8193} {
-		err := validateMutationTokenBudget("manager_apply", budget)
-		if err == nil {
-			t.Fatalf("tokenBudget %d was accepted", budget)
-		}
-		if !strings.Contains(err.Error(), "omit tokenBudget entirely") {
-			t.Errorf("range refusal does not name the way to a complete response: %v", err)
+func TestMutationTokenBudgetIsAnAdvisoryNonNegativeHint(t *testing.T) {
+	for _, budget := range []int{0, 1, 64, 8193, 100000} {
+		if err := validateMutationTokenBudget("manager_apply", budget); err != nil {
+			t.Fatalf("advisory tokenBudget %d was refused: %v", budget, err)
 		}
 	}
-	if err := validateMutationTokenBudget("manager_apply", 0); err != nil {
-		t.Fatalf("an omitted budget must mean a complete response: %v", err)
+	if err := validateMutationTokenBudget("manager_apply", -1); err == nil ||
+		!strings.Contains(err.Error(), "non-negative") {
+		t.Fatalf("negative tokenBudget returned %v", err)
 	}
 }
 

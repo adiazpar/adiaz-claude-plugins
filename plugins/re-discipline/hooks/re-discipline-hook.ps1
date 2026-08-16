@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('session-start', 'pre-tool-use', 'pre-compact', 'post-compact', 'subagent-start', 'subagent-stop', 'stop')]
+    [ValidateSet('session-start', 'pre-tool-use', 'post-tool-use', 'pre-compact', 'post-compact', 'subagent-start', 'subagent-stop', 'stop')]
     [string]$Event
 )
 
@@ -15,6 +15,7 @@ function Read-HookInput {
 
 function Get-Field {
     param($Object, [string[]]$Names, [string]$Default = '')
+    if ($null -eq $Object) { return $Default }
     foreach ($name in $Names) {
         $property = $Object.PSObject.Properties[$name]
         if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
@@ -61,18 +62,11 @@ function Get-ApplyPatchTargets {
             $target = if ($Matches[1] -ceq 'Move to') { $Matches[2] } else { $Matches[2] }
             $target = $target.Trim()
             if ([string]::IsNullOrWhiteSpace($target) -or
-                [System.IO.Path]::IsPathRooted($target) -or
-                $target -match '^[A-Za-z]:[\\/]' -or
-                $target.StartsWith('\\') -or
-                $target -match '[<>:"|?*]' -or
+                $target -match '[<>"|?*]' -or
                 $target -match '[\x00-\x1f]') {
-                return [pscustomobject]@{ Valid = $false; Targets = @(); Reason = "patch target '$target' is not a project-relative path" }
+                return [pscustomobject]@{ Valid = $false; Targets = @(); Reason = "patch target '$target' is not a supported filesystem path" }
             }
             $normalized = $target.Replace('\', '/')
-            $segments = @($normalized -split '/')
-            if ($segments.Count -eq 0 -or @($segments | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }).Count -gt 0) {
-                return [pscustomobject]@{ Valid = $false; Targets = @(); Reason = "patch target '$target' is not canonical" }
-            }
             $targets += $normalized
             continue
         }
@@ -233,29 +227,49 @@ function Get-ServerHealth {
     param([string]$Root)
     $pluginRoot = Split-Path -Parent $PSScriptRoot
     $manifestPath = Join-Path $pluginRoot 'knowledge\bin\manifest.json'
+    $pluginManifestPath = Join-Path $pluginRoot '.codex-plugin\plugin.json'
     $runtimePath = Join-Path $pluginRoot 'knowledge\bin\re-discipline-knowledge.exe'
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or -not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $pluginManifestPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
         return 'runtime unavailable'
     }
     try { $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json }
     catch { return 'runtime manifest invalid' }
-    # The contract line, not the patch level. A hook that pins the exact patch
-    # reports a mismatch on every release it did not itself change, which is the
-    # same trap that stranded the published version behind its source.
-    if ([string]$manifest.runtime.version -notmatch '^0\.8(?:\.|$)') { return 'runtime version mismatch' }
+    try { $pluginManifest = Get-Content -Raw -LiteralPath $pluginManifestPath | ConvertFrom-Json }
+    catch { return 'plugin manifest invalid' }
+    $runtimeVersion = [string]$manifest.runtime.version
+    $pluginVersion = [string]$pluginManifest.version
+    $semanticVersion = '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$'
+    if ($runtimeVersion -notmatch $semanticVersion) {
+        return "runtime manifest version '$runtimeVersion' is invalid"
+    }
+    if ($pluginVersion -notmatch $semanticVersion) {
+        return "plugin manifest version '$pluginVersion' is invalid"
+    }
+    # Local cachebusters live in SemVer build metadata and do not change the
+    # packaged runtime. Compare the complete release identity before '+'. The
+    # project-state format is independently reported by Get-ProjectStateVersion.
+    $runtimeRelease = ($runtimeVersion -split '\+', 2)[0]
+    $pluginRelease = ($pluginVersion -split '\+', 2)[0]
+    if ($runtimeRelease -cne $pluginRelease) {
+        return "runtime $runtimeVersion does not match plugin $pluginVersion"
+    }
     try {
         $null = & $runtimePath preflight --asset-root (Join-Path $pluginRoot 'knowledge') --project-root $Root 2>$null
-        if ($LASTEXITCODE -eq 0) { return 'preflight passed' }
-        return 'preflight needs attention'
+        if ($LASTEXITCODE -eq 0) { return "preflight passed (runtime $runtimeVersion)" }
+        return "preflight needs attention (runtime $runtimeVersion)"
     }
-    catch { return 'preflight unavailable' }
+    catch { return "preflight unavailable (runtime $runtimeVersion)" }
 }
 
 function Get-DeclaredRunId {
-    param($InputObject)
-    $runId = Get-Field $InputObject @('runId', 'run_id') $env:RE_DISCIPLINE_RUN_ID
+    param($InputObject, [switch]$IgnoreEnvironment)
+    $environmentRunId = if ($IgnoreEnvironment) { '' } else { $env:RE_DISCIPLINE_RUN_ID }
+    $environmentRunPath = if ($IgnoreEnvironment) { '' } else { $env:RE_DISCIPLINE_RUN_PATH }
+    $runId = Get-Field $InputObject @('runId', 'run_id') $environmentRunId
     if ([string]::IsNullOrWhiteSpace($runId)) {
-        $runPath = Get-Field $InputObject @('runPath', 'run_path') $env:RE_DISCIPLINE_RUN_PATH
+        $runPath = Get-Field $InputObject @('runPath', 'run_path') $environmentRunPath
         if (-not [string]::IsNullOrWhiteSpace($runPath)) {
             $leaf = Split-Path -Leaf $runPath.TrimEnd('\', '/')
             if ($leaf -match '^R-[0-9]{8}-[0-9]{4,}$') { $runId = $leaf }
@@ -350,6 +364,354 @@ function Get-ValidatedDraftRun {
     }
 }
 
+function Get-SubagentId {
+    param($InputObject)
+    $agentId = Get-Field $InputObject @('agent_id', 'agentId') ''
+    if (-not [string]::IsNullOrWhiteSpace($agentId)) { return $agentId }
+    foreach ($containerName in @('subagent', 'subAgent')) {
+        $container = $InputObject.PSObject.Properties[$containerName]
+        if ($null -eq $container) { continue }
+        $agentId = Get-Field $container.Value @('agent_id', 'agentId') ''
+        if (-not [string]::IsNullOrWhiteSpace($agentId)) { return $agentId }
+    }
+    return ''
+}
+
+function Test-SafeHostIdentifier {
+    param([string]$Value)
+    return -not [string]::IsNullOrWhiteSpace($Value) -and
+        $Value -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'
+}
+
+function Get-SafeDispatchDirectory {
+    param([string]$Root, [string[]]$Components, [switch]$Create)
+    try { $current = [System.IO.Path]::GetFullPath($Root) }
+    catch { return '' }
+    foreach ($component in $Components) {
+        if ($component -in @('.', '..') -or
+            $component -cnotmatch '^[A-Za-z0-9.][A-Za-z0-9._-]{0,199}$') { return '' }
+        $current = Join-Path $current $component
+        if (-not (Test-Path -LiteralPath $current)) {
+            if (-not $Create) { return '' }
+            try { $null = [System.IO.Directory]::CreateDirectory($current) }
+            catch { return '' }
+        }
+        try { $item = Get-Item -Force -LiteralPath $current }
+        catch { return '' }
+        if (-not $item.PSIsContainer -or
+            (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            return ''
+        }
+    }
+    return $current
+}
+
+function Get-DispatchSessionDirectory {
+    param([string]$Root, [string]$SessionId, [switch]$Create)
+    if (-not (Test-SafeHostIdentifier $SessionId)) { return '' }
+    return Get-SafeDispatchDirectory $Root @('.re-discipline', 'cache', 'hook-dispatch', 'v1', $SessionId) -Create:$Create
+}
+
+function Test-FirstSessionStart {
+    param([string]$Root, [string]$SessionId)
+    # A host that cannot identify its session gets a conservative emission on
+    # every real SessionStart event; never collapse unrelated unknown sessions.
+    if ($SessionId -eq 'unknown') { return $true }
+    $sessionDirectory = Get-DispatchSessionDirectory $Root $SessionId -Create
+    if ([string]::IsNullOrWhiteSpace($sessionDirectory)) { return $true }
+    $marker = Join-Path $sessionDirectory 'session-start.emitted'
+    try {
+        $stream = [System.IO.File]::Open(
+            $marker,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::Read)
+        $stream.Dispose()
+        return $true
+    }
+    catch [System.IO.IOException] {
+        try {
+            $item = Get-Item -Force -LiteralPath $marker
+            if (-not $item.PSIsContainer -and
+                (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)) {
+                return $false
+            }
+        }
+        catch {}
+        return $true
+    }
+    catch { return $true }
+}
+
+function Get-DispatchMarker {
+    param($ToolInput)
+    $message = Get-Field $ToolInput @('message', 'prompt') ''
+    if ([string]::IsNullOrWhiteSpace($message)) {
+        return [pscustomobject]@{ Present = $false; Valid = $false; Reason = ''; RunId = ''; PackDigest = '' }
+    }
+    $firstLine = ([regex]::Split($message, "\r?\n", 2))[0]
+    if (-not $firstLine.StartsWith('re-discipline-run:', [System.StringComparison]::Ordinal)) {
+        return [pscustomobject]@{ Present = $false; Valid = $false; Reason = ''; RunId = ''; PackDigest = '' }
+    }
+    if ($firstLine -cnotmatch '^re-discipline-run: (R-[0-9]{8}-[0-9]{4,}) (sha256:[0-9a-f]{64})$') {
+        return [pscustomobject]@{
+            Present = $true
+            Valid = $false
+            Reason = 'the first message line must be re-discipline-run: <R-id> <context-pack-digest>'
+            RunId = ''
+            PackDigest = ''
+        }
+    }
+    return [pscustomobject]@{
+        Present = $true
+        Valid = $true
+        Reason = ''
+        RunId = [string]$Matches[1]
+        PackDigest = [string]$Matches[2]
+    }
+}
+
+function Resolve-DispatchDraftRun {
+    param([string]$Root, [string]$RunId, [string]$PackDigest, [switch]$AllowReturned)
+    $registered = Get-RegisteredRun $Root $RunId
+    if ($null -eq $registered) { return $null }
+    $runPath = Split-Path -Parent $registered.Path
+    $workItemId = [string]$registered.Record.primaryWorkItemId
+    return Get-ValidatedDraftRun $Root $RunId $runPath $workItemId $PackDigest -AllowReturned:$AllowReturned
+}
+
+function Read-DispatchTicket {
+    param([string]$Path, [string]$ExpectedSessionId)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try { $item = Get-Item -Force -LiteralPath $Path }
+    catch { return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket cannot be inspected' } }
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Length -gt 2048) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket is unsafe or oversized' }
+    }
+    $fields = @{}
+    try { $lines = @(Get-Content -LiteralPath $Path -Encoding ASCII) }
+    catch { return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket cannot be read' } }
+    foreach ($line in $lines) {
+        if ($line -cnotmatch '^([A-Za-z][A-Za-z0-9]*)=(.*)$' -or $fields.ContainsKey($Matches[1])) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket syntax is invalid' }
+        }
+        $fields[$Matches[1]] = [string]$Matches[2]
+    }
+    $kind = 'registered'
+    if ($fields.schemaVersion -ceq '1') {
+        if ($fields.Count -ne 6) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket identity is invalid' }
+        }
+    }
+    elseif ($fields.schemaVersion -ceq '2') {
+        if ($fields.Count -ne 7 -or $fields.kind -cnotmatch '^(ordinary|registered)$') {
+            return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket identity is invalid' }
+        }
+        $kind = [string]$fields.kind
+    }
+    else {
+        return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket identity is invalid' }
+    }
+    if ($fields.sessionId -cne $ExpectedSessionId -or
+        $fields.toolUseId -cnotmatch '^[A-Za-z0-9._:-]{0,200}$' -or
+        $fields.createdUnix -cnotmatch '^[0-9]{1,20}$' -or
+        ($kind -ceq 'registered' -and
+            ($fields.runId -cnotmatch '^R-[0-9]{8}-[0-9]{4,}$' -or
+             $fields.contextPackDigest -cnotmatch '^sha256:[0-9a-f]{64}$')) -or
+        ($kind -ceq 'ordinary' -and
+            (-not [string]::IsNullOrEmpty([string]$fields.runId) -or
+             -not [string]::IsNullOrEmpty([string]$fields.contextPackDigest)))) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'dispatch ticket identity is invalid' }
+    }
+    return [pscustomobject]@{
+        Valid = $true
+        Reason = ''
+        Kind = $kind
+        RunId = $fields.runId
+        PackDigest = $fields.contextPackDigest
+        ToolUseId = $fields.toolUseId
+    }
+}
+
+function Remove-StalePendingDispatch {
+    param([string]$SessionDirectory)
+    if ([string]::IsNullOrWhiteSpace($SessionDirectory)) { return }
+    $pending = Join-Path $SessionDirectory 'pending.ticket'
+    if (-not (Test-Path -LiteralPath $pending -PathType Leaf)) { return }
+    try { $item = Get-Item -Force -LiteralPath $pending }
+    catch { return }
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return }
+    if ($item.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddSeconds(-30)) {
+        try { [System.IO.File]::Delete($pending) }
+        catch { }
+    }
+}
+
+function Reserve-DispatchTicket {
+    param(
+        [string]$Root,
+        [string]$SessionId,
+        [string]$Kind,
+        [string]$RunId,
+        [string]$PackDigest,
+        [string]$ToolUseId
+    )
+    if (-not (Test-SafeHostIdentifier $SessionId)) {
+        return [pscustomobject]@{ Success = $false; Reason = 'host session_id is missing or unsafe' }
+    }
+    if ($ToolUseId -cnotmatch '^[A-Za-z0-9._:-]{0,200}$') {
+        return [pscustomobject]@{ Success = $false; Reason = 'host tool_use_id is unsafe' }
+    }
+    if ($Kind -notin @('ordinary', 'registered') -or
+        ($Kind -ceq 'registered' -and
+            ($RunId -cnotmatch '^R-[0-9]{8}-[0-9]{4,}$' -or
+             $PackDigest -cnotmatch '^sha256:[0-9a-f]{64}$')) -or
+        ($Kind -ceq 'ordinary' -and
+            (-not [string]::IsNullOrEmpty($RunId) -or
+             -not [string]::IsNullOrEmpty($PackDigest)))) {
+        return [pscustomobject]@{ Success = $false; Reason = 'dispatch kind or run identity is invalid' }
+    }
+    $sessionDirectory = Get-DispatchSessionDirectory $Root $SessionId -Create
+    if ([string]::IsNullOrWhiteSpace($sessionDirectory)) {
+        return [pscustomobject]@{ Success = $false; Reason = 'dispatch cache path is unavailable or unsafe' }
+    }
+    $pending = Join-Path $sessionDirectory 'pending.ticket'
+    $createdUnix = [int64]([DateTime]::UtcNow - [DateTime]'1970-01-01T00:00:00Z').TotalSeconds
+    $body = @(
+        'schemaVersion=2',
+        "sessionId=$SessionId",
+        "kind=$Kind",
+        "runId=$RunId",
+        "contextPackDigest=$PackDigest",
+        "toolUseId=$ToolUseId",
+        "createdUnix=$createdUnix"
+    ) -join "`n"
+    $body += "`n"
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($body)
+    $wait = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        Remove-StalePendingDispatch $sessionDirectory
+        $stream = $null
+        try {
+            $stream = [System.IO.File]::Open($pending, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        }
+        catch [System.IO.IOException] {
+            if ($wait.ElapsedMilliseconds -ge 3500) {
+                return [pscustomobject]@{
+                    Success = $false
+                    Reason = 'the prior launch handoff did not bind within the internal dispatch window'
+                }
+            }
+            Start-Sleep -Milliseconds 25
+            continue
+        }
+        catch {
+            return [pscustomobject]@{ Success = $false; Reason = 'dispatch ticket could not be reserved' }
+        }
+        try {
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush()
+        }
+        catch {
+            try { $stream.Dispose() } catch {}
+            try { [System.IO.File]::Delete($pending) } catch {}
+            return [pscustomobject]@{ Success = $false; Reason = 'dispatch ticket could not be written' }
+        }
+        finally {
+            if ($null -ne $stream) { $stream.Dispose() }
+        }
+        return [pscustomobject]@{ Success = $true; Reason = '' }
+    }
+}
+
+function Resolve-AgentDispatch {
+    param([string]$Root, [string]$SessionId, [string]$AgentId, [switch]$AllowReturned)
+    if (-not (Test-SafeHostIdentifier $SessionId) -or -not (Test-SafeHostIdentifier $AgentId)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Reason = '' }
+    }
+    $sessionDirectory = Get-DispatchSessionDirectory $Root $SessionId
+    if ([string]::IsNullOrWhiteSpace($sessionDirectory)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Reason = '' }
+    }
+    $binding = Join-Path (Join-Path $sessionDirectory 'agents') "$AgentId.ticket"
+    if (-not (Test-Path -LiteralPath $binding -PathType Leaf)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Reason = '' }
+    }
+    $ticket = Read-DispatchTicket $binding $SessionId
+    if ($null -eq $ticket -or -not $ticket.Valid) {
+        $reason = if ($null -eq $ticket) { 'dispatch binding disappeared' } else { $ticket.Reason }
+        return [pscustomobject]@{ Found = $true; Valid = $false; Reason = $reason }
+    }
+    if ($ticket.Kind -ceq 'ordinary') {
+        return [pscustomobject]@{
+            Found = $true
+            Valid = $true
+            Reason = ''
+            Kind = 'ordinary'
+            RunId = ''
+            PackDigest = ''
+            Draft = $null
+        }
+    }
+    $draft = Resolve-DispatchDraftRun $Root $ticket.RunId $ticket.PackDigest -AllowReturned:$AllowReturned
+    if ($null -eq $draft) {
+        return [pscustomobject]@{
+            Found = $true
+            Valid = $false
+            Reason = "bound run '$($ticket.RunId)' no longer matches its registered context pack"
+        }
+    }
+    return [pscustomobject]@{
+        Found = $true
+        Valid = $true
+        Reason = ''
+        Kind = 'registered'
+        RunId = $ticket.RunId
+        PackDigest = $ticket.PackDigest
+        Draft = $draft
+    }
+}
+
+function Claim-AgentDispatch {
+    param([string]$Root, [string]$SessionId, [string]$AgentId)
+    if (-not (Test-SafeHostIdentifier $SessionId) -or -not (Test-SafeHostIdentifier $AgentId)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Reason = '' }
+    }
+    $sessionDirectory = Get-DispatchSessionDirectory $Root $SessionId
+    if ([string]::IsNullOrWhiteSpace($sessionDirectory)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Reason = '' }
+    }
+    $agentsDirectory = Get-SafeDispatchDirectory $Root @('.re-discipline', 'cache', 'hook-dispatch', 'v1', $SessionId, 'agents') -Create
+    if ([string]::IsNullOrWhiteSpace($agentsDirectory)) {
+        return [pscustomobject]@{ Found = $true; Valid = $false; Reason = 'agent binding directory is unavailable or unsafe' }
+    }
+    $pending = Join-Path $sessionDirectory 'pending.ticket'
+    $binding = Join-Path $agentsDirectory "$AgentId.ticket"
+    if (-not (Test-Path -LiteralPath $binding -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath $pending -PathType Leaf)) {
+            return [pscustomobject]@{ Found = $false; Valid = $false; Reason = '' }
+        }
+        try { [System.IO.File]::Move($pending, $binding) }
+        catch {
+            return [pscustomobject]@{ Found = $true; Valid = $false; Reason = 'pending dispatch could not be claimed atomically' }
+        }
+    }
+    return Resolve-AgentDispatch $Root $SessionId $AgentId
+}
+
+function Clear-PendingDispatchAfterTool {
+    param([string]$Root, [string]$SessionId, [string]$ToolUseId)
+    $sessionDirectory = Get-DispatchSessionDirectory $Root $SessionId
+    if ([string]::IsNullOrWhiteSpace($sessionDirectory)) { return }
+    $pending = Join-Path $sessionDirectory 'pending.ticket'
+    $ticket = Read-DispatchTicket $pending $SessionId
+    if ($null -ne $ticket -and $ticket.Valid -and $ticket.ToolUseId -cne '' -and
+        $ticket.ToolUseId -ceq $ToolUseId) {
+        try { [System.IO.File]::Delete($pending) }
+        catch { }
+    }
+}
+
 function Test-RegisteredRunWrite {
     param([string]$Root, [string]$RunId, [string]$Relative)
     $registered = Get-RegisteredRun $Root $RunId
@@ -357,7 +719,7 @@ function Test-RegisteredRunWrite {
         return [pscustomobject]@{ Allowed = $false; Reason = "run '$RunId' is not uniquely registered" }
     }
     $record = $registered.Record
-    if ([string]$record.status -notmatch '^(prepared|running|returned)$') {
+    if ([string]$record.status -notmatch '^(prepared|running)$') {
         return [pscustomobject]@{ Allowed = $false; Reason = "run '$RunId' is not writable in status '$($record.status)'" }
     }
     $runDirectory = Split-Path -Parent $registered.Path
@@ -389,6 +751,46 @@ if ($Event -eq 'pre-tool-use') {
     $toolInput = $inputObject.PSObject.Properties['tool_input']
     if ($null -eq $toolInput) { $toolInput = $inputObject.PSObject.Properties['toolInput'] }
     $toolInputValue = if ($null -ne $toolInput) { $toolInput.Value } else { $null }
+    $sessionId = Get-Field $inputObject @('session_id', 'sessionId') ''
+    $agentId = Get-SubagentId $inputObject
+    $toolUseId = Get-Field $inputObject @('tool_use_id', 'toolUseId') ''
+    if ($toolName -ieq 'spawn_agent' -or $toolName -ieq 'Agent') {
+        $marker = Get-DispatchMarker $toolInputValue
+        if (-not $marker.Present) {
+            if ([string]::IsNullOrWhiteSpace($projectRoot)) {
+                Write-JsonObject ([ordered]@{})
+            }
+            else {
+                $reservation = Reserve-DispatchTicket $projectRoot $sessionId 'ordinary' '' '' $toolUseId
+                if (-not $reservation.Success) {
+                    Write-Denial "Subagent launch could not enter the session dispatch boundary: $($reservation.Reason)."
+                }
+                else { Write-JsonObject ([ordered]@{}) }
+            }
+            exit 0
+        }
+        if (-not $marker.Valid) {
+            Write-Denial "Registered subagent launch denied: $($marker.Reason)."
+            exit 0
+        }
+        if ([string]::IsNullOrWhiteSpace($projectRoot) -or
+            (Get-ProjectStateVersion $projectRoot) -ne '0.8') {
+            Write-Denial 'Registered subagent launch denied: the current directory is not a verified re-discipline 0.8 project.'
+            exit 0
+        }
+        $draftRun = Resolve-DispatchDraftRun $projectRoot $marker.RunId $marker.PackDigest
+        if ($null -eq $draftRun) {
+            Write-Denial "Registered subagent launch denied: run '$($marker.RunId)' is not uniquely writable or does not match context pack '$($marker.PackDigest)'."
+            exit 0
+        }
+        $reservation = Reserve-DispatchTicket $projectRoot $sessionId 'registered' $marker.RunId $marker.PackDigest $toolUseId
+        if (-not $reservation.Success) {
+            Write-Denial "Registered subagent launch denied: $($reservation.Reason)."
+            exit 0
+        }
+        Write-JsonObject ([ordered]@{})
+        exit 0
+    }
     $targets = @()
     $operationLabel = 'Write/Edit'
     if ($toolName -match '^(Write|Edit)$') {
@@ -401,7 +803,7 @@ if ($Event -eq 'pre-tool-use') {
         $operationLabel = 'apply_patch'
         $patchTargets = Get-ApplyPatchTargets $toolInputValue
         if (-not $patchTargets.Valid) {
-            Write-Denial "Direct apply_patch denied: $($patchTargets.Reason). A write hook must identify every project-relative target before allowing the patch."
+            Write-Denial "Direct apply_patch denied: $($patchTargets.Reason). A write hook must identify every filesystem target before allowing the patch."
             exit 0
         }
         $targets = @($patchTargets.Targets)
@@ -423,7 +825,31 @@ if ($Event -eq 'pre-tool-use') {
         exit 0
     }
 
-    $declaredRunId = Get-DeclaredRunId $inputObject
+    $binding = Resolve-AgentDispatch $projectRoot $sessionId $agentId
+    if ($binding.Found -and -not $binding.Valid) {
+        Write-Denial "Direct $operationLabel denied: $($binding.Reason). The subagent has no usable registered run boundary."
+        exit 0
+    }
+    $declaredRunId = Get-DeclaredRunId $inputObject -IgnoreEnvironment:(-not [string]::IsNullOrWhiteSpace($agentId))
+    if ($binding.Valid) {
+        if ($binding.Kind -ceq 'ordinary') {
+            if (-not [string]::IsNullOrWhiteSpace($declaredRunId)) {
+                Write-Denial "Direct $operationLabel denied: an ordinary subagent launch cannot claim registered run '$declaredRunId'."
+                exit 0
+            }
+        }
+        else {
+            if (-not [string]::IsNullOrWhiteSpace($declaredRunId) -and $declaredRunId -cne $binding.RunId) {
+                Write-Denial "Direct $operationLabel denied: host binding names run '$($binding.RunId)' but the tool envelope names '$declaredRunId'."
+                exit 0
+            }
+            $declaredRunId = $binding.RunId
+        }
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($agentId) -and [string]::IsNullOrWhiteSpace($declaredRunId)) {
+        Write-Denial "Direct $operationLabel denied: subagent '$agentId' has no registered run binding in manager session '$sessionId'."
+        exit 0
+    }
     $projectVersion = Get-ProjectStateVersion $projectRoot
     foreach ($target in $targets) {
         $relative = Get-RelativeProjectPath $target $projectRoot
@@ -459,6 +885,18 @@ if ($Event -eq 'pre-tool-use') {
     exit 0
 }
 
+if ($Event -eq 'post-tool-use') {
+    $toolName = Get-Field $inputObject @('tool_name', 'toolName') ''
+    if (($toolName -ieq 'spawn_agent' -or $toolName -ieq 'Agent') -and
+        -not [string]::IsNullOrWhiteSpace($projectRoot)) {
+        $sessionId = Get-Field $inputObject @('session_id', 'sessionId') ''
+        $toolUseId = Get-Field $inputObject @('tool_use_id', 'toolUseId') ''
+        Clear-PendingDispatchAfterTool $projectRoot $sessionId $toolUseId
+    }
+    Write-JsonObject ([ordered]@{})
+    exit 0
+}
+
 if ([string]::IsNullOrWhiteSpace($projectRoot)) {
     Write-JsonObject ([ordered]@{})
     exit 0
@@ -471,9 +909,14 @@ $eventHead = Get-Field $inputObject @('lastEventId', 'last_event_id', 'eventHead
 $runId = Get-Field $inputObject @('runId', 'run_id') $env:RE_DISCIPLINE_RUN_ID
 $runPath = Get-Field $inputObject @('runPath', 'run_path') $env:RE_DISCIPLINE_RUN_PATH
 $packDigest = Get-Field $inputObject @('contextPackDigest', 'context_pack_digest') $env:RE_DISCIPLINE_CONTEXT_PACK_DIGEST
+$sessionId = Get-Field $inputObject @('session_id', 'sessionId') 'unknown'
 
 switch ($Event) {
     'session-start' {
+        if (-not (Test-FirstSessionStart $projectRoot $sessionId)) {
+            Write-JsonObject ([ordered]@{})
+            break
+        }
         $projectVersion = Get-ProjectStateVersion $projectRoot
         if ($projectVersion -eq '0.7') {
             Write-Context 'SessionStart' 'Legacy re-discipline 0.7 project detected. Do not invoke 0.8 lifecycle operations or edit managed state directly. Inspect migrate-project status and create a read-only preview; migration requires explicit approval of the exact plan digest and never runs at session start.'
@@ -491,7 +934,7 @@ switch ($Event) {
                     Sort-Object Name | Select-Object -First 8 | ForEach-Object { $_.Name })
             }
             $handleText = if ($handles.Count -gt 0) { $handles -join ', ' } else { 'none' }
-            Write-Context 'SessionStart' "Re-discipline 0.8 project detected; server $serverHealth. Invoke onboard and call bounded state mode orient before substantive work. Active campaign handles: $handleText. Canonical records are engine-owned; generated views and caches are derived."
+            Write-Context 'SessionStart' "Re-discipline 0.8 project detected; server $serverHealth. Session-start onboarding boundary=$sessionId. If this session has not completed onboarding, invoke onboard and call bounded state mode orient once before substantive work. After the first successful orient, onboarding is satisfied for this session: do not re-invoke the onboard skill for ordinary user messages, tool rounds, or compaction. A PostCompact bounded-state refresh is not onboarding. Re-run onboarding only for a new or resumed host session, or after an explicit runtime/state invalidation. Active campaign handles: $handleText. Canonical records are engine-owned; generated views and caches are derived."
         }
     }
     'pre-compact' {
@@ -501,24 +944,55 @@ switch ($Event) {
         Write-Context 'PostCompact' "Rehydrate with bounded state mode orient, then state mode resume for campaign=$campaign since generation=$generation or lastEvent=$eventHead. Expand only cited handles needed for the next decision."
     }
     'subagent-start' {
-        $declaredRunId = Get-Field $inputObject @('runId', 'run_id') ''
-        $declaredRunPath = Get-Field $inputObject @('runPath', 'run_path') ''
-        $declaredWorkItem = Get-Field $inputObject @('workItemId', 'work_item_id') ''
-        $declaredPackDigest = Get-Field $inputObject @('contextPackDigest', 'context_pack_digest') ''
-        $draftRun = Get-ValidatedDraftRun $projectRoot $declaredRunId $declaredRunPath $declaredWorkItem $declaredPackDigest
-        if ($null -eq $draftRun) {
-            Write-JsonObject ([ordered]@{})
+        $agentId = Get-SubagentId $inputObject
+        $dispatch = Claim-AgentDispatch $projectRoot $sessionId $agentId
+        if ($dispatch.Found) {
+            if (-not $dispatch.Valid) {
+                Write-Context 'SubagentStart' "Registered re-discipline dispatch could not be bound for session=$sessionId agent=${agentId}: $($dispatch.Reason). Do not write project or run files; return the binding failure to the manager."
+            }
+            elseif ($dispatch.Kind -ceq 'ordinary') {
+                Write-JsonObject ([ordered]@{})
+            }
+            else {
+                Write-Context 'SubagentStart' "Assigned session=$sessionId agent=$agentId run=$($dispatch.RunId) workItem=$($dispatch.Draft.WorkItemId) path=$($dispatch.Draft.Path) contextPackDigest=$($dispatch.PackDigest). Read the exact brief and verify the immutable pack. Write only report.md, lazy payload/, and explicit project grants. Do not mutate canonical state or ratify findings."
+            }
         }
         else {
-            Write-Context 'SubagentStart' "Assigned run=$declaredRunId workItem=$($draftRun.WorkItemId) path=$($draftRun.Path) contextPackDigest=$declaredPackDigest. Read the exact brief and verify the immutable pack. Write only report.md, lazy payload/, and explicit project grants. Do not mutate canonical state or ratify findings."
+            $declaredRunId = Get-Field $inputObject @('runId', 'run_id') ''
+            $declaredRunPath = Get-Field $inputObject @('runPath', 'run_path') ''
+            $declaredWorkItem = Get-Field $inputObject @('workItemId', 'work_item_id') ''
+            $declaredPackDigest = Get-Field $inputObject @('contextPackDigest', 'context_pack_digest') ''
+            $draftRun = Get-ValidatedDraftRun $projectRoot $declaredRunId $declaredRunPath $declaredWorkItem $declaredPackDigest
+            if ($null -eq $draftRun) { Write-JsonObject ([ordered]@{}) }
+            else {
+                Write-Context 'SubagentStart' "Assigned run=$declaredRunId workItem=$($draftRun.WorkItemId) path=$($draftRun.Path) contextPackDigest=$declaredPackDigest. Read the exact brief and verify the immutable pack. Write only report.md, lazy payload/, and explicit project grants. Do not mutate canonical state or ratify findings."
+            }
         }
     }
     'subagent-stop' {
-        $declaredRunId = Get-Field $inputObject @('runId', 'run_id') ''
-        $declaredRunPath = Get-Field $inputObject @('runPath', 'run_path') ''
-        $declaredWorkItem = Get-Field $inputObject @('workItemId', 'work_item_id') ''
-        $declaredPackDigest = Get-Field $inputObject @('contextPackDigest', 'context_pack_digest') ''
-        $draftRun = Get-ValidatedDraftRun $projectRoot $declaredRunId $declaredRunPath $declaredWorkItem $declaredPackDigest -AllowReturned
+        $agentId = Get-SubagentId $inputObject
+        $dispatch = Resolve-AgentDispatch $projectRoot $sessionId $agentId -AllowReturned
+        $declaredRunId = ''
+        $draftRun = $null
+        if ($dispatch.Found) {
+            if (-not $dispatch.Valid) {
+                Write-Context 'SubagentStop' "Registered re-discipline dispatch binding is invalid for session=$sessionId agent=${agentId}: $($dispatch.Reason). The manager must repair or invalidate the run through the shared engine."
+                break
+            }
+            if ($dispatch.Kind -ceq 'ordinary') {
+                Write-JsonObject ([ordered]@{})
+                break
+            }
+            $declaredRunId = $dispatch.RunId
+            $draftRun = $dispatch.Draft
+        }
+        else {
+            $declaredRunId = Get-Field $inputObject @('runId', 'run_id') ''
+            $declaredRunPath = Get-Field $inputObject @('runPath', 'run_path') ''
+            $declaredWorkItem = Get-Field $inputObject @('workItemId', 'work_item_id') ''
+            $declaredPackDigest = Get-Field $inputObject @('contextPackDigest', 'context_pack_digest') ''
+            $draftRun = Get-ValidatedDraftRun $projectRoot $declaredRunId $declaredRunPath $declaredWorkItem $declaredPackDigest -AllowReturned
+        }
         if ($null -eq $draftRun) {
             Write-JsonObject ([ordered]@{})
         }

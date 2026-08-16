@@ -1,5 +1,5 @@
 {
-  "description": "Bounded 0.8 lifecycle context and accident-oriented direct-write guardrails. Canonical safety remains in the shared state engine.",
+  "description": "One-shot session orientation, queued session/agent dispatch, and accident-oriented direct-write guardrails. Canonical safety remains in the shared state engine.",
   "hooks": {
     "SessionStart": [
       {
@@ -17,14 +17,28 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|Agent",
         "hooks": [
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" pre-tool-use",
             "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'pre-tool-use'\"",
-            "timeout": 5,
+            "timeout": 8,
             "statusMessage": "Checking re-discipline write boundary"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/re-discipline-hook.sh\" post-tool-use",
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $(if ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) { [Environment]::GetEnvironmentVariable('PLUGIN_ROOT') } else { [Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT') }) 'hooks/re-discipline-hook.ps1') 'post-tool-use'\"",
+            "timeout": 5,
+            "statusMessage": "Finalizing subagent dispatch"
           }
         ]
       }

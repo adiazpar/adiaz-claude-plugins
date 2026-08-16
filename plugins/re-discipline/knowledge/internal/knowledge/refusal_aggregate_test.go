@@ -49,11 +49,10 @@ func requireOrder(t *testing.T, message string, fragments ...string) {
 	}
 }
 
-// TestManagerApplyReportsEveryShapeViolationAtOnce is the central claim. Three
-// violations that historically arrived one per round trip - a malformed brief,
-// a missing compare-and-swap digest, and a stale head - now arrive together,
-// ordered so that the artifact problem is fixed before the bookkeeping one and
-// the canonical-state fact comes last.
+// TestManagerApplyReportsEveryShapeViolationAtOnce is the central claim. Two
+// independent payload violations that historically arrived one per round trip
+// now arrive together. A project-head change is intentionally absent: ordinary
+// record-scoped work no longer makes that a caller-visible refusal.
 func TestManagerApplyReportsEveryShapeViolationAtOnce(t *testing.T) {
 	fixture := newRunPreparationFixture(t)
 	request := fixture.request
@@ -68,19 +67,14 @@ func TestManagerApplyReportsEveryShapeViolationAtOnce(t *testing.T) {
 	if err == nil {
 		t.Fatal("a request wrong in three independent ways was accepted")
 	}
-	if got := violationCount(err); got != 3 {
-		t.Fatalf("expected 3 violations in one refusal, got %d:\n%s", got, err)
+	if got := violationCount(err); got != 2 {
+		t.Fatalf("expected 2 violations in one refusal, got %d:\n%s", got, err)
 	}
 	requireOrder(t, err.Error(),
 		"run brief must be non-empty canonical UTF-8",
-		"expectedRecordDigests",
-		"Canonical state moved between the read")
-	// The stale head keeps its identity through the aggregate. Without
-	// Unwrap() []error every caller that distinguishes "somebody else went
-	// first" from "your payload is wrong" would silently start treating a
-	// conflict as a shape bug.
-	if !errors.Is(err, ErrStateConflict) {
-		t.Fatalf("aggregated refusal lost its ErrStateConflict identity:\n%s", err)
+		"expectedRecordDigests")
+	if errors.Is(err, ErrStateConflict) {
+		t.Fatalf("an unrelated project-head change leaked back as a conflict:\n%s", err)
 	}
 }
 
@@ -106,16 +100,14 @@ func TestManagerApplySingleViolationStaysUnwrapped(t *testing.T) {
 }
 
 // TestManagerApplyAddsAtMostOneStateViolation guards the half of the split that
-// is easy to lose. Once the head is stale, every later state check is being
-// evaluated against a premise that has already been shown false, so exactly one
-// state fact may join the list and no more. A cascade would read as five
-// independent problems when there is one.
+// is easy to lose. Shape aggregation may add one canonical campaign fact, but
+// must not cascade through every later state check.
 func TestManagerApplyAddsAtMostOneStateViolation(t *testing.T) {
 	fixture := newRunPreparationFixture(t)
 	request := fixture.request
-	// Stale head, wrong actor, and a work item revision that cannot follow the
-	// canonical one: three state-side problems, of which the caller may be told
-	// exactly one.
+	// A moved project head is harmless for this action. Wrong actor and a work
+	// item revision that cannot follow the canonical one are the two real
+	// state-side problems, of which the caller may be told exactly one.
 	request.ExpectedHeadRevision = fixture.request.ExpectedHeadRevision + 7
 	request.Actor = "not-a-permitted-manager"
 	request.WorkItems[0].Revision += 5
@@ -128,7 +120,6 @@ func TestManagerApplyAddsAtMostOneStateViolation(t *testing.T) {
 	message := err.Error()
 	stateFacts := 0
 	for _, fragment := range []string{
-		"Canonical state moved between the read",
 		"is not a permitted manager of campaign",
 		"the canonical revision is",
 	} {
@@ -139,8 +130,8 @@ func TestManagerApplyAddsAtMostOneStateViolation(t *testing.T) {
 	if stateFacts != 1 {
 		t.Fatalf("expected exactly one canonical-state fact, found %d:\n%s", stateFacts, message)
 	}
-	if !errors.Is(err, ErrStateConflict) {
-		t.Fatalf("the one state fact carried was not the stale head:\n%s", message)
+	if errors.Is(err, ErrStateConflict) {
+		t.Fatalf("ordinary shape aggregation reported a global-head conflict:\n%s", message)
 	}
 }
 
@@ -231,7 +222,7 @@ func TestRunPrepareHistoricalSevenRoundTripsCollapse(t *testing.T) {
 	//   7. the brief has no trailing LF
 	//   3. the submitted work item is an update with no expectedRecordDigests
 	//      entry
-	//   4. the expected head revision is not the current one
+	// Project-head movement is no longer a refusal for run.prepare.
 	stray := fixture.request.WorkItems[0]
 	stray.ID, stray.Revision = "W-0002", 2
 	request := fixture.request
@@ -252,21 +243,20 @@ func TestRunPrepareHistoricalSevenRoundTripsCollapse(t *testing.T) {
 		"must publish the next revision of work item W-0001",
 		"run brief must be non-empty canonical UTF-8",
 		"expectedRecordDigests",
-		"Canonical state moved between the read",
 	} {
 		if !strings.Contains(err.Error(), fragment) {
 			t.Fatalf("the aggregated refusal omits %q:\n%s", fragment, err)
 		}
 	}
-	if got := violationCount(err); got != 4 {
-		t.Fatalf("expected 4 of the historical refusals in one response, got %d:\n%s", got, err)
+	if got := violationCount(err); got != 3 {
+		t.Fatalf("expected 3 actual payload refusals in one response, got %d:\n%s", got, err)
 	}
 
 	// Historical refusal 5, which is mutually exclusive with 6 and 7: with no
 	// run there is no brief to be malformed and no primaryWorkItemId for a work
 	// item to be missing against. It still refuses with a list rather than a
-	// fact, because the missing compare-and-swap digest and the stale head are
-	// independent of the run.
+	// fact, because the missing compare-and-swap digest is independent of the
+	// run.
 	withoutRun := fixture.request
 	withoutRun.Runs = nil
 	withoutRun.RunPreparation = nil
@@ -278,7 +268,7 @@ func TestRunPrepareHistoricalSevenRoundTripsCollapse(t *testing.T) {
 		t.Fatal("run.prepare with no run was accepted")
 	}
 	t.Logf("run.prepare with no runs array (%d violations):\n%s", violationCount(err), err)
-	if violationCount(err) < 3 {
+	if violationCount(err) < 2 {
 		t.Fatalf("a missing runs array still refuses one fact at a time:\n%s", err)
 	}
 }

@@ -52,6 +52,10 @@ var ClosureActions = []string{
 	"start", "status", "advance", "reopen", "restart", "verify", "finalize",
 }
 
+func closureActionRebasesHead(action string) bool {
+	return validOne(action, "start", "advance", "reopen", "restart", "verify")
+}
+
 type ClosureApplyResult struct {
 	SchemaVersion int                      `json:"schemaVersion"`
 	Action        string                   `json:"action"`
@@ -134,6 +138,15 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 	if err := store.Recover(ctx); err != nil {
 		return ClosureApplyResult{}, err
 	}
+	if closureActionRebasesHead(request.Action) {
+		revision, digest, resolveErr := resolveOrdinaryPublicationHead(
+			store, request.ExpectedHeadRevision, request.ExpectedHeadDigest, nil)
+		if resolveErr != nil {
+			return ClosureApplyResult{}, resolveErr
+		}
+		request.ExpectedHeadRevision = revision
+		request.ExpectedHeadDigest = digest
+	}
 	if request.Action == "finalize" {
 		if replay, found, err := replayRetiredClosureFinalization(store, request); err != nil {
 			return ClosureApplyResult{}, err
@@ -179,14 +192,14 @@ func (service *Service) ClosureApply(ctx context.Context, request ClosureApplyRe
 // budgetClosureApplyResult drops the derived sections of a closure receipt in a
 // fixed least-useful-first order and re-seals what remains.
 //
-// The floor is everything the next closure_apply call has to quote back:
-// Transaction.PreviousHead/ResultingHead and Transaction.Records supply
-// expectedHeadRevision, expectedHeadDigest, and every expectedRecordDigests
-// entry; Job.Stage, Job.Status, Job.Revision, and Job.Digest say which stage may
-// be targeted next and with which digest; Job.Blockers is the actionable
-// summary of why an advance was refused. Plan.CampaignRevision and Plan.Digest
-// are restart's expectedClosurePlanRevision and expectedRecordDigests entry.
-// None of those are droppable.
+// The floor is everything the next closure_apply call needs:
+// Transaction.Records supplies every expectedRecordDigests entry, while both
+// heads remain durable audit identity and finalization proof. Job.Stage,
+// Job.Status, Job.Revision, and Job.Digest say which stage may be targeted next
+// and with which digest; Job.Blockers is the actionable summary of why an
+// advance was refused. Plan.CampaignRevision and Plan.Digest are restart's
+// expectedClosurePlanRevision and expectedRecordDigests entry. None of those
+// are droppable.
 //
 // What goes is bulk that the caller either already holds or can re-read:
 // ArchiveManifest.Coverage is a whole second copy of the coverage record;
@@ -367,7 +380,8 @@ func (service *Service) startClosure(
 		Actor: request.Actor, Authority: "manager", Action: "closure.start",
 		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
 		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
-		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes,
+		ExpectedHeadDigest: request.ExpectedHeadDigest,
+		RebaseHead:         closureActionRebasesHead(request.Action), Writes: writes,
 	})
 	if err != nil {
 		return ClosureApplyResult{}, err
@@ -615,7 +629,9 @@ func (service *Service) advanceClosure(
 		Actor: request.Actor, Authority: "manager", Action: action,
 		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
 		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
-		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes, Artifacts: artifacts,
+		ExpectedHeadDigest: request.ExpectedHeadDigest,
+		RebaseHead:         closureActionRebasesHead(request.Action),
+		Writes:             writes, Artifacts: artifacts,
 	}
 	if target == "finalize" {
 		snapshots, err := closureFinalizationSnapshotArtifacts(request, writes, graph.ClosureJob.ArchiveDestination)
@@ -1186,7 +1202,8 @@ func (service *Service) reopenClosure(
 		Actor: request.Actor, Authority: "manager", Action: "closure.reopen",
 		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
 		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
-		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes,
+		ExpectedHeadDigest: request.ExpectedHeadDigest,
+		RebaseHead:         closureActionRebasesHead(request.Action), Writes: writes,
 	})
 	if err != nil {
 		return ClosureApplyResult{}, err
@@ -1379,7 +1396,8 @@ func (service *Service) restartClosure(
 		Actor: request.Actor, Authority: "manager", Action: "closure.restart",
 		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
 		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
-		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes,
+		ExpectedHeadDigest: request.ExpectedHeadDigest,
+		RebaseHead:         closureActionRebasesHead(request.Action), Writes: writes,
 	})
 	if err != nil {
 		return ClosureApplyResult{}, err
@@ -2300,9 +2318,6 @@ func (service *Service) prepareClosureArchive(
 	head, err := store.LoadHead()
 	if err != nil {
 		return ArchiveManifest{}, closureStagingManifest{}, err
-	}
-	if head.Revision != request.ExpectedHeadRevision || head.Digest != request.ExpectedHeadDigest {
-		return ArchiveManifest{}, closureStagingManifest{}, ErrStateConflict
 	}
 	files := map[string]string{}
 	bodies := map[string][]byte{}

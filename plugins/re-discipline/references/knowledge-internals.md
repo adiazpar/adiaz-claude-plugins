@@ -14,6 +14,13 @@ whole transition, writes temporary files, publishes all related records,
 appends one event chain, and regenerates affected views. A failed validation or
 publication leaves canonical state unchanged.
 
+Expected revisions and digests are scoped to the records and artifacts a
+transition actually changes. The project head serializes the journal and audit
+chain internally; ordinary manager, curator, and non-final closure stages do
+not make callers refresh it. Merge, discard, reconciliation, migration, and
+closure finalization retain project-wide head proof because their mutation
+scope is genuinely global.
+
 ## Primary Operations
 
 - `state`: bounded orient, resume, work, closure, and health views;

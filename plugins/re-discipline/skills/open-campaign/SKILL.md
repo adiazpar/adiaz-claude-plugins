@@ -26,8 +26,10 @@ change the campaign contract.
 
 ## Open Transactionally
 
-Submit `manager_apply` with action `campaign.open`, the exact current
-`expectedHeadRevision` and `expectedHeadDigest`, and an idempotency key.
+Submit `manager_apply` with action `campaign.open` and an idempotency key.
+Do not fetch or supply the project head just to open ordinary record-scoped
+work; the engine serializes publication and returns both the previous and
+resulting heads in its receipt.
 The transaction creates `campaign.json`, root records under `work-items/`, the
 event journal, and generated `STATE.md`. It must either publish all of these or
 publish none of them.

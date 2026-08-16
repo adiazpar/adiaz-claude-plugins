@@ -1,6 +1,6 @@
 {
   "name": "re-discipline",
-  "version": "0.9.0",
+  "version": "0.9.0+codex.20260816040721",
   "description": "Transactional campaigns, atomic consolidation, guarded discard, unified runs, atomic findings, bounded context, closure-gated truth, and governed retrieval.",
   "author": {
     "name": "Alex Diaz",

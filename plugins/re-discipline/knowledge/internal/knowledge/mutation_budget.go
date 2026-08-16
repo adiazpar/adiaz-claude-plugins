@@ -45,21 +45,16 @@ import (
 // When no budget is requested the response is complete, exactly as before.
 // That is deliberate: a caller that does not opt in cannot be surprised by a
 // receipt that is missing something it used to rely on.
-const (
-	mutationTokenBudgetMinimum = 128
-	mutationTokenBudgetMaximum = 8192
-)
+const mutationTokenBudgetMinimum = 128
 
-// validateMutationTokenBudget accepts zero as "return everything" and otherwise
-// holds writes to the same 128..8192 window the read tools use, so a caller does
-// not have to remember two ranges.
+// validateMutationTokenBudget accepts every non-negative response hint. The
+// identity floor is returned even when it exceeds the hint, so a small budget
+// can reduce optional detail but can never reject or strand a valid mutation.
 func validateMutationTokenBudget(tool string, budget int) error {
-	if budget == 0 || (budget >= mutationTokenBudgetMinimum && budget <= mutationTokenBudgetMaximum) {
+	if budget >= 0 {
 		return nil
 	}
-	return fmt.Errorf(
-		"%s tokenBudget must be between %d and %d; omit tokenBudget entirely for a complete response",
-		tool, mutationTokenBudgetMinimum, mutationTokenBudgetMaximum)
+	return fmt.Errorf("%s tokenBudget must be non-negative", tool)
 }
 
 // mutationTokenBudgetSchema publishes the write budget as an affordance rather
@@ -69,11 +64,14 @@ func validateMutationTokenBudget(tool string, budget int) error {
 // exactly which sections a budget may remove, so a caller can decide whether it
 // can afford to lose them before it sets the field.
 func mutationTokenBudgetSchema(droppable string) map[string]any {
-	return integerSchemaDescription(
-		mutationTokenBudgetMinimum, mutationTokenBudgetMaximum,
-		"Optional response budget; omit for the complete response. Nothing is truncated and "+
-			"ids, revisions, digests, heads, and the event id always return. Droppable: "+
-			droppable+". Each drop is named in omitted.")
+	return map[string]any{
+		"type":    "integer",
+		"minimum": 0,
+		"description": "Optional response hint; omit for the complete response. A valid mutation " +
+			"is never refused because this hint is small, nothing is truncated, and ids, revisions, " +
+			"digests, heads, and the event id always return even above the hint. Droppable: " +
+			droppable + ". Each drop is named in omitted.",
+	}
 }
 
 // estimateResponseTokens measures the response the way the transport will
@@ -152,8 +150,9 @@ func applyResponseBudget(budget int, response any, sections []budgetSection) ([]
 // input for the next transaction, one entry per written record with its id,
 // revision, and digest, and it is the single most expensive thing to have to
 // re-derive: without it the caller must re-read every record it just wrote.
-// PreviousHead and ResultingHead are expectedHeadRevision/expectedHeadDigest for
-// the next call. Event carries the event id that anchors the journal chain, and
+// PreviousHead and ResultingHead retain audit identity and provide the exact
+// proof required by the few project-global transitions. Event carries the event
+// id that anchors the journal chain, and
 // it is not trimmed field-by-field because Event.digest is computed over the
 // whole event - a partial event would carry a digest that does not verify,
 // which is precisely the falsified receipt this file refuses to produce.

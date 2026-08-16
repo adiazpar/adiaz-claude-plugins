@@ -274,7 +274,7 @@ func TestManagerRunPreparationRejectsTamperAndHalfPreparedLaunches(t *testing.T)
 		}
 	})
 
-	t.Run("pack must use the current generation", func(t *testing.T) {
+	t.Run("sealed historical generation remains a valid snapshot", func(t *testing.T) {
 		fixture := newRunPreparationFixture(t)
 		request := fixture.request
 		preparation := *request.RunPreparation
@@ -294,9 +294,8 @@ func TestManagerRunPreparationRejectsTamperAndHalfPreparedLaunches(t *testing.T)
 		run := request.Runs[0]
 		run.ContextPack = &FileHandle{Path: run.ContextPack.Path, SHA256: "sha256:" + SHA256Bytes(body)}
 		request.Runs[0] = run
-		if _, err := fixture.service.ManagerApply(context.Background(), request); err == nil ||
-			!strings.Contains(err.Error(), "no longer current") {
-			t.Fatalf("stale generation returned %v", err)
+		if _, err := fixture.service.ManagerApply(context.Background(), request); err != nil {
+			t.Fatalf("sealed historical generation snapshot was refused: %v", err)
 		}
 	})
 
@@ -309,6 +308,38 @@ func TestManagerRunPreparationRejectsTamperAndHalfPreparedLaunches(t *testing.T)
 			t.Fatalf("half-prepared delegated run returned %v", err)
 		}
 	})
+}
+
+func TestManagerRunPreparationSurvivesUnrelatedCampaignCommitWithoutRetry(t *testing.T) {
+	fixture := newRunPreparationFixture(t)
+	originalHead := StateHead{
+		Revision: fixture.request.ExpectedHeadRevision,
+		Digest:   fixture.request.ExpectedHeadDigest,
+	}
+	topologyOpenCampaign(
+		t, fixture.store, "other-campaign", "C-OTHER", "W-0001",
+		"corr-other-before-run", "idem-other-before-run")
+	currentHead, err := fixture.store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentHead.Revision == originalHead.Revision || currentHead.Digest == originalHead.Digest {
+		t.Fatal("unrelated campaign commit did not advance the project head")
+	}
+	request := fixture.request
+	request.ExpectedHeadRevision = 0
+	request.ExpectedHeadDigest = ""
+	receipt, err := fixture.service.ManagerApply(context.Background(), request)
+	if err != nil {
+		t.Fatalf("headless exact context snapshot required caller freshness work: %v", err)
+	}
+	if receipt.PreviousHead != currentHead || receipt.ResultingHead.Revision != currentHead.Revision+1 {
+		t.Fatalf("ordinary run preparation was not internally rebased: %+v", receipt)
+	}
+	graph, err := fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil || graph.Runs[fixture.request.Runs[0].ID].Status != "prepared" {
+		t.Fatalf("rebased run preparation did not commit cleanly: %v", err)
+	}
 }
 
 func TestDelegatedRunPreparationRecoversArtifactPublicationCrash(t *testing.T) {

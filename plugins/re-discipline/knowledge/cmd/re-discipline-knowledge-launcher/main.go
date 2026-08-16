@@ -29,23 +29,10 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("locate launcher: %w", err)
 	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return fmt.Errorf("resolve launcher: %w", err)
-	}
-
 	arch := windowsArchitecture()
-	runtimePath := filepath.Join(
-		filepath.Dir(executable),
-		"windows-"+arch,
-		"re-discipline-knowledge.exe",
-	)
-	info, err := os.Stat(runtimePath)
+	runtimePath, err := resolveRuntimePath(executable, arch)
 	if err != nil {
-		return fmt.Errorf("locate windows-%s runtime: %w", arch, err)
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("runtime is not a regular file: %s", runtimePath)
+		return err
 	}
 
 	command := exec.Command(runtimePath, args...)
@@ -62,6 +49,43 @@ func run(args []string) error {
 		os.Exit(exitError.ExitCode())
 	}
 	return fmt.Errorf("start runtime: %w", err)
+}
+
+// resolveRuntimePath deliberately avoids filepath.EvalSymlinks. The packaged
+// launcher only needs to trust itself and its adjacent runtime; resolving the
+// full path needlessly traverses every parent and can fail when a host grants
+// execution without granting metadata access to an ancestor directory.
+func resolveRuntimePath(executable string, arch string) (string, error) {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return "", errors.New("launcher path is empty")
+	}
+	absolute, err := filepath.Abs(executable)
+	if err != nil {
+		return "", fmt.Errorf("make launcher path absolute: %w", err)
+	}
+	executable = filepath.Clean(absolute)
+	launcherInfo, err := os.Lstat(executable)
+	if err != nil {
+		return "", fmt.Errorf("inspect launcher: %w", err)
+	}
+	if !launcherInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("launcher is not a regular file: %s", executable)
+	}
+
+	runtimePath := filepath.Join(
+		filepath.Dir(executable),
+		"windows-"+arch,
+		"re-discipline-knowledge.exe",
+	)
+	info, err := os.Lstat(runtimePath)
+	if err != nil {
+		return "", fmt.Errorf("locate windows-%s runtime: %w", arch, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("runtime is not a regular file: %s", runtimePath)
+	}
+	return runtimePath, nil
 }
 
 func windowsArchitecture() string {

@@ -42,26 +42,32 @@ type StateArtifactWrite struct {
 }
 
 type StateTransactionRequest struct {
-	CampaignSlug         string                  `json:"campaignSlug"`
-	CampaignID           string                  `json:"campaignId"`
-	Actor                string                  `json:"actor"`
-	Authority            string                  `json:"authority"`
-	Action               string                  `json:"action"`
-	Rationale            string                  `json:"rationale,omitempty"`
-	ReviewHandle         string                  `json:"reviewHandle,omitempty"`
-	CorrelationID        string                  `json:"correlationId"`
-	IdempotencyKey       string                  `json:"idempotencyKey"`
-	ExpectedHeadRevision int64                   `json:"expectedHeadRevision"`
-	ExpectedHeadDigest   string                  `json:"expectedHeadDigest"`
-	CreateActiveTree     string                  `json:"createActiveTree,omitempty"`
-	RetireActiveTrees    []string                `json:"retireActiveTrees,omitempty"`
-	RetireTreeDigests    map[string]string       `json:"retireTreeDigests,omitempty"`
-	EventJournal         string                  `json:"eventJournal,omitempty"`
-	RetireActiveTree     string                  `json:"retireActiveTree,omitempty"`
-	RetiredEventJournal  string                  `json:"retiredEventJournal,omitempty"`
-	Writes               []StateWrite            `json:"-"`
-	Artifacts            []StateArtifactWrite    `json:"-"`
-	ReviewPacket         *ReviewPacketSubmission `json:"-"`
+	CampaignSlug         string `json:"campaignSlug"`
+	CampaignID           string `json:"campaignId"`
+	Actor                string `json:"actor"`
+	Authority            string `json:"authority"`
+	Action               string `json:"action"`
+	Rationale            string `json:"rationale,omitempty"`
+	ReviewHandle         string `json:"reviewHandle,omitempty"`
+	CorrelationID        string `json:"correlationId"`
+	IdempotencyKey       string `json:"idempotencyKey"`
+	ExpectedHeadRevision int64  `json:"expectedHeadRevision"`
+	ExpectedHeadDigest   string `json:"expectedHeadDigest"`
+	// RebaseHead lets the engine move an ordinary transaction to the current
+	// project head while it owns the writer lock. It is deliberately internal:
+	// callers still submit the head they observed as provenance, while global
+	// topology and finalization operations leave this false and retain an exact
+	// head gate.
+	RebaseHead          bool                    `json:"-"`
+	CreateActiveTree    string                  `json:"createActiveTree,omitempty"`
+	RetireActiveTrees   []string                `json:"retireActiveTrees,omitempty"`
+	RetireTreeDigests   map[string]string       `json:"retireTreeDigests,omitempty"`
+	EventJournal        string                  `json:"eventJournal,omitempty"`
+	RetireActiveTree    string                  `json:"retireActiveTree,omitempty"`
+	RetiredEventJournal string                  `json:"retiredEventJournal,omitempty"`
+	Writes              []StateWrite            `json:"-"`
+	Artifacts           []StateArtifactWrite    `json:"-"`
+	ReviewPacket        *ReviewPacketSubmission `json:"-"`
 }
 
 type StateRecordResult struct {
@@ -220,6 +226,13 @@ func (store *StateStore) applyPreparedTransaction(ctx context.Context, prepared 
 }
 
 func prepareTransactionRequest(request StateTransactionRequest) (preparedTransaction, error) {
+	return prepareTransactionRequestIdentity(request, false)
+}
+
+func prepareTransactionRequestIdentity(
+	request StateTransactionRequest,
+	legacyIdentity bool,
+) (preparedTransaction, error) {
 	if !managedSlugRE.MatchString(request.CampaignSlug) || !campaignIDRE.MatchString(request.CampaignID) ||
 		strings.TrimSpace(request.Actor) == "" || !validOne(request.Authority, "manager", "investigator", "reviewer", "curator", "system") ||
 		!actionIDRE.MatchString(request.Action) || !correlationIDRE.MatchString(request.CorrelationID) ||
@@ -235,6 +248,9 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 	seenPaths := map[string]bool{}
 	seenIDs := map[string]bool{}
 	predictedEventID := eventIDForRequest(request)
+	if legacyIdentity {
+		predictedEventID = legacyEventIDForRequest(request)
+	}
 	for _, write := range request.Writes {
 		item, err := prepareStateWrite(
 			request.CampaignSlug, request.CampaignID, request.CorrelationID,
@@ -265,15 +281,7 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 	if err := validateRunPreparationArtifactBindings(request, artifacts); err != nil {
 		return preparedTransaction{}, err
 	}
-	descriptors := make([]StateTransactionWriteDescriptor, 0, len(prepared))
-	for _, write := range prepared {
-		descriptors = append(descriptors, StateTransactionWriteDescriptor{
-			Path: write.Path, ExpectedRevision: write.ExpectedRevision,
-			ExpectedDigest: write.ExpectedDigest, RecordID: write.RecordID,
-			Revision: write.Revision, RecordDigest: write.RecordDigest,
-			ContentDigest: write.ContentDigest,
-		})
-	}
+	descriptors := transactionWriteDescriptors(prepared)
 	artifactDescriptors := make([]StateTransactionArtifactDescriptor, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		artifactDescriptors = append(artifactDescriptors, StateTransactionArtifactDescriptor{
@@ -293,7 +301,16 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 		RetireActiveTree: request.RetireActiveTree, RetiredEventJournal: request.RetiredEventJournal,
 		Writes: descriptors, Artifacts: artifactDescriptors,
 	}
-	requestDigest, err := CanonicalDigest(semantic)
+	requestSemantic := semantic
+	if request.RebaseHead && !legacyIdentity {
+		// The global head is an audit/serialization pointer, not part of the
+		// identity of an ordinary record-scoped intent. Normalizing only these
+		// two fields keeps the idempotency key stable when another campaign wins
+		// the writer lock first; record and artifact expectations remain exact.
+		requestSemantic.ExpectedHeadRevision = 0
+		requestSemantic.ExpectedHeadDigest = ""
+	}
+	requestDigest, err := CanonicalDigest(requestSemantic)
 	if err != nil {
 		return preparedTransaction{}, err
 	}
@@ -302,6 +319,30 @@ func prepareTransactionRequest(request StateTransactionRequest) (preparedTransac
 		Request: request, Writes: prepared, Artifacts: artifacts,
 		RequestDigest: requestDigest, TransactionID: transactionID,
 	}, nil
+}
+
+func transactionWriteDescriptors(writes []preparedStateWrite) []StateTransactionWriteDescriptor {
+	descriptors := make([]StateTransactionWriteDescriptor, 0, len(writes))
+	for _, write := range writes {
+		descriptors = append(descriptors, StateTransactionWriteDescriptor{
+			Path: write.Path, ExpectedRevision: write.ExpectedRevision,
+			ExpectedDigest: write.ExpectedDigest, RecordID: write.RecordID,
+			Revision: write.Revision, RecordDigest: write.RecordDigest,
+			ContentDigest: write.ContentDigest,
+		})
+	}
+	return descriptors
+}
+
+func receiptAcceptsPreparedRequest(receipt StateTransactionReceipt, prepared preparedTransaction) bool {
+	if receipt.RequestDigest == prepared.RequestDigest {
+		return true
+	}
+	// Older receipts included the observed global head in request and event
+	// identity. Reconstruct that form only on the uncommon replay path; normal
+	// mutations prepare and seal their records exactly once.
+	legacy, err := prepareTransactionRequestIdentity(prepared.Request, true)
+	return err == nil && receipt.RequestDigest == legacy.RequestDigest
 }
 
 func validateRetiredEventJournal(value string) error {
@@ -560,6 +601,13 @@ func prepareStateWrite(slug, campaignID, correlationID, eventID string, resultin
 }
 
 func eventIDForRequest(request StateTransactionRequest) string {
+	suffix := strings.ToUpper(SHA256String(strings.Join([]string{
+		request.CorrelationID, request.IdempotencyKey,
+	}, "\x00"))[:12])
+	return "E-19700101-000000-" + suffix
+}
+
+func legacyEventIDForRequest(request StateTransactionRequest) string {
 	suffix := strings.ToUpper(SHA256String(strings.Join([]string{
 		request.CorrelationID, request.IdempotencyKey,
 		fmt.Sprintf("%d", request.ExpectedHeadRevision), request.ExpectedHeadDigest,

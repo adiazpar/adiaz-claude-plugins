@@ -1,12 +1,15 @@
 package knowledge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,6 +77,22 @@ func stateTestCreateWorkRequest(head StateHead, id, correlation, key string) Sta
 		Action: "work.create", CorrelationID: correlation, IdempotencyKey: key,
 		ExpectedHeadRevision: head.Revision, ExpectedHeadDigest: head.Digest,
 		Writes: []StateWrite{{Path: "active/test-campaign/work-items/" + id + ".json", Record: work}},
+	}
+}
+
+func crossProcessCreateWorkRequest(
+	head StateHead,
+	slug, campaignID, id, correlation, key string,
+) StateTransactionRequest {
+	work := stateTestWorkItem(id)
+	work.CampaignID = campaignID
+	work.CorrelationID, work.Digest = correlation, ""
+	return StateTransactionRequest{
+		CampaignSlug: slug, CampaignID: campaignID, Actor: "manager", Authority: "manager",
+		Action: "work.create", CorrelationID: correlation, IdempotencyKey: key,
+		ExpectedHeadRevision: head.Revision, ExpectedHeadDigest: head.Digest,
+		RebaseHead: true,
+		Writes:     []StateWrite{{Path: "active/" + slug + "/work-items/" + id + ".json", Record: work}},
 	}
 }
 
@@ -171,6 +190,227 @@ func TestStateTransactionConcurrentStaleWriters(t *testing.T) {
 	graph, err := store.LoadCampaignGraph("test-campaign")
 	if err != nil || len(graph.WorkItems) != 2 {
 		t.Fatalf("concurrent result graph is not a single valid successor: items=%d err=%v", len(graph.WorkItems), err)
+	}
+}
+
+func TestTransactionReceiptAcceptsLegacyHeadBoundIdentityLazily(t *testing.T) {
+	head := StateHead{Revision: 7, Digest: stateTestDigest("7")}
+	request := stateTestCreateWorkRequest(
+		head, "W-0002", "corr-legacy-replay", "idem-legacy-replay")
+	request.RebaseHead = true
+	current, err := prepareTransactionRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := prepareTransactionRequestIdentity(request, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.RequestDigest == legacy.RequestDigest {
+		t.Fatal("record-scoped identity still depends on the observed global head")
+	}
+	if !receiptAcceptsPreparedRequest(
+		StateTransactionReceipt{RequestDigest: legacy.RequestDigest}, current) {
+		t.Fatal("legacy head-bound receipt no longer replays")
+	}
+}
+
+func TestStateTransactionInternalRebaseStillRejectsSameRecordCollision(t *testing.T) {
+	store, _ := newStateTestStore(t)
+	_, opening := openStateTestCampaign(t, store)
+	requests := []StateTransactionRequest{
+		stateTestCreateWorkRequest(opening.ResultingHead, "W-0002", "corr-rebase-two-a", "idem-rebase-two-a"),
+		stateTestCreateWorkRequest(opening.ResultingHead, "W-0002", "corr-rebase-two-b", "idem-rebase-two-b"),
+	}
+	for index := range requests {
+		requests[index].RebaseHead = true
+	}
+	start := make(chan struct{})
+	errs := make([]error, len(requests))
+	var wait sync.WaitGroup
+	for index := range requests {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			<-start
+			_, errs[index] = store.Apply(context.Background(), requests[index])
+		}(index)
+	}
+	close(start)
+	wait.Wait()
+	successes, conflicts := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrStateConflict):
+			conflicts++
+		default:
+			t.Fatalf("unexpected same-record result: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("same-record collision must produce one commit and one true conflict: %v", errs)
+	}
+	graph, err := store.LoadCampaignGraph("C-TEST")
+	if err != nil || len(graph.WorkItems) != 2 || graph.Validate() != nil {
+		t.Fatalf("same-record collision corrupted the campaign: items=%d err=%v", len(graph.WorkItems), err)
+	}
+}
+
+func TestStateTransactionCrossProcessHelper(t *testing.T) {
+	if os.Getenv("RE_DISCIPLINE_CROSS_PROCESS_HELPER") != "1" {
+		return
+	}
+	revision, err := strconv.ParseInt(os.Getenv("RE_DISCIPLINE_EXPECTED_REVISION"), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewStateStore(os.Getenv("RE_DISCIPLINE_PROJECT_ROOT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed, _ := time.Parse(time.RFC3339, stateTestTime)
+	store.Now = func() time.Time { return fixed }
+	request := crossProcessCreateWorkRequest(
+		StateHead{Revision: revision, Digest: os.Getenv("RE_DISCIPLINE_EXPECTED_DIGEST")},
+		os.Getenv("RE_DISCIPLINE_CAMPAIGN_SLUG"),
+		os.Getenv("RE_DISCIPLINE_CAMPAIGN_ID"),
+		os.Getenv("RE_DISCIPLINE_WORK_ID"),
+		os.Getenv("RE_DISCIPLINE_CORRELATION_ID"),
+		os.Getenv("RE_DISCIPLINE_IDEMPOTENCY_KEY"),
+	)
+	if err := os.WriteFile(os.Getenv("RE_DISCIPLINE_READY_FILE"), []byte("ready\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := os.Stat(os.Getenv("RE_DISCIPLINE_START_FILE")); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for cross-process start barrier")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, applyErr := store.Apply(context.Background(), request)
+	result := "success"
+	if errors.Is(applyErr, ErrStateConflict) {
+		result = "conflict"
+	} else if applyErr != nil {
+		result = "error: " + applyErr.Error()
+	}
+	if err := os.WriteFile(os.Getenv("RE_DISCIPLINE_RESULT_FILE"), []byte(result+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(result, "error:") {
+		t.Fatal(result)
+	}
+}
+
+func TestStateTransactionConcurrentManagersSerializeAcrossProcesses(t *testing.T) {
+	store, root := newStateTestStore(t)
+	_, _ = openStateTestCampaign(t, store)
+	topologyOpenCampaign(t, store, "other-campaign", "C-OTHER", "W-0001", "corr-other-open", "idem-other-open")
+	head, err := store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type processCase struct {
+		slug, campaignID, workID, correlation, idempotency string
+		ready, result                                      string
+		command                                            *exec.Cmd
+		output                                             bytes.Buffer
+	}
+	cases := []processCase{
+		{
+			slug: "test-campaign", campaignID: "C-TEST", workID: "W-0002",
+			correlation: "corr-process-first", idempotency: "idem-process-first",
+		},
+		{
+			slug: "other-campaign", campaignID: "C-OTHER", workID: "W-0002",
+			correlation: "corr-process-second", idempotency: "idem-process-second",
+		},
+	}
+	barrierDirectory := t.TempDir()
+	startFile := filepath.Join(barrierDirectory, "start")
+	for index := range cases {
+		item := &cases[index]
+		item.ready = filepath.Join(barrierDirectory, "ready-"+strconv.Itoa(index))
+		item.result = filepath.Join(barrierDirectory, "result-"+strconv.Itoa(index))
+		item.command = exec.Command(os.Args[0], "-test.run=^TestStateTransactionCrossProcessHelper$", "-test.count=1")
+		item.command.Env = append(os.Environ(),
+			"RE_DISCIPLINE_CROSS_PROCESS_HELPER=1",
+			"RE_DISCIPLINE_PROJECT_ROOT="+root,
+			"RE_DISCIPLINE_EXPECTED_REVISION="+strconv.FormatInt(head.Revision, 10),
+			"RE_DISCIPLINE_EXPECTED_DIGEST="+head.Digest,
+			"RE_DISCIPLINE_CAMPAIGN_SLUG="+item.slug,
+			"RE_DISCIPLINE_CAMPAIGN_ID="+item.campaignID,
+			"RE_DISCIPLINE_WORK_ID="+item.workID,
+			"RE_DISCIPLINE_CORRELATION_ID="+item.correlation,
+			"RE_DISCIPLINE_IDEMPOTENCY_KEY="+item.idempotency,
+			"RE_DISCIPLINE_READY_FILE="+item.ready,
+			"RE_DISCIPLINE_START_FILE="+startFile,
+			"RE_DISCIPLINE_RESULT_FILE="+item.result,
+		)
+		item.command.Stdout = &item.output
+		item.command.Stderr = &item.output
+		if err := item.command.Start(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		ready := true
+		for index := range cases {
+			if _, err := os.Stat(cases[index].ready); err != nil {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cross-process writers did not reach the start barrier")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := os.WriteFile(startFile, []byte("start\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	results := make([]string, len(cases))
+	for index := range cases {
+		if err := cases[index].command.Wait(); err != nil {
+			t.Fatalf("writer %d failed: %v\n%s", index, err, cases[index].output.String())
+		}
+		body, err := os.ReadFile(cases[index].result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		results[index] = strings.TrimSpace(string(body))
+	}
+	if results[0] != "success" || results[1] != "success" {
+		t.Fatalf("disjoint cross-process commits must both finish without caller retry, got %v", results)
+	}
+	for _, item := range cases {
+		graph, err := store.LoadCampaignGraph(item.campaignID)
+		if err != nil || len(graph.WorkItems) != 2 || graph.Validate() != nil {
+			t.Fatalf("campaign %s is not a valid two-work-item successor: items=%d err=%v", item.campaignID, len(graph.WorkItems), err)
+		}
+	}
+	head, err = store.LoadHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := store.loadCommittedInventory(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drift, err := store.inventoryDrift(inventory); err != nil || len(drift) != 0 {
+		t.Fatalf("cross-process commits left canonical byte drift: drift=%v err=%v", drift, err)
 	}
 }
 

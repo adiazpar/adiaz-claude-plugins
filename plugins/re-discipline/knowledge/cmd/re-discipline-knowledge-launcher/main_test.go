@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -43,4 +45,75 @@ func TestWindowsArchitectureSelection(t *testing.T) {
 			t.Fatalf("architecture = %q, want amd64", got)
 		}
 	})
+}
+
+func TestResolveRuntimePathUsesAdjacentRegularFiles(t *testing.T) {
+	root := t.TempDir()
+	launcher := filepath.Join(root, "re-discipline-knowledge.exe")
+	runtimeDir := filepath.Join(root, "windows-amd64")
+	runtimePath := filepath.Join(runtimeDir, "re-discipline-knowledge.exe")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launcher, []byte("launcher"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runtimePath, []byte("runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveRuntimePath(launcher, "amd64")
+	if err != nil {
+		t.Fatalf("resolve runtime path: %v", err)
+	}
+	want, err := filepath.Abs(runtimePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Clean(want) {
+		t.Fatalf("runtime path = %q, want %q", got, filepath.Clean(want))
+	}
+}
+
+func TestResolveRuntimePathRejectsLinks(t *testing.T) {
+	root := t.TempDir()
+	realLauncher := filepath.Join(root, "launcher-real.exe")
+	launcher := filepath.Join(root, "re-discipline-knowledge.exe")
+	runtimeDir := filepath.Join(root, "windows-amd64")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(realLauncher, []byte("launcher"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realLauncher, launcher); err != nil {
+		t.Skipf("creating a symlink is unavailable: %v", err)
+	}
+
+	if _, err := resolveRuntimePath(launcher, "amd64"); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("linked launcher returned %v", err)
+	}
+}
+
+func TestResolveRuntimePathRejectsLinkedRuntime(t *testing.T) {
+	root := t.TempDir()
+	launcher := filepath.Join(root, "re-discipline-knowledge.exe")
+	runtimeDir := filepath.Join(root, "windows-amd64")
+	realRuntime := filepath.Join(root, "runtime-real.exe")
+	runtimePath := filepath.Join(runtimeDir, "re-discipline-knowledge.exe")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{launcher, realRuntime} {
+		if err := os.WriteFile(path, []byte("binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(realRuntime, runtimePath); err != nil {
+		t.Skipf("creating a symlink is unavailable: %v", err)
+	}
+
+	if _, err := resolveRuntimePath(launcher, "amd64"); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("linked runtime returned %v", err)
+	}
 }

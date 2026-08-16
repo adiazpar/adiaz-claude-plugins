@@ -13,9 +13,10 @@ Never silently rewrite a claim. Contrary evidence first creates a challenge.
 ## Establish The Challenge
 
 Identify the exact finding revision and contrary evidence handles. Submit
-`manager_apply` with action `finding.challenge`, the exact state-head revision
-and digest, the challenged record digest, actor, rationale, idempotency key,
-and source run or review IDs. The engine must expose affected dependents and
+`manager_apply` with action `finding.challenge`, the challenged record
+digest, actor, rationale, idempotency key, and source run or review IDs. The
+project-wide head is not a caller precondition for this record-scoped action;
+the engine serializes publication. It must expose affected dependents and
 overlay the challenge in retrieval immediately.
 
 ## Resolve By Manager Review

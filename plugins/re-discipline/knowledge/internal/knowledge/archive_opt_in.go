@@ -743,7 +743,7 @@ func replayArchiveFallbackOptIn(
 	}
 	prepared, err := prepareTransactionRequest(
 		managerStateTransactionRequest(request, writes, artifacts, reviewHandle))
-	if err != nil || prepared.RequestDigest != transactionReceipt.RequestDigest {
+	if err != nil || !receiptAcceptsPreparedRequest(transactionReceipt, prepared) {
 		return StateTransactionReceipt{}, false, ErrIdempotencyConflict
 	}
 	return transactionReceipt, true, nil

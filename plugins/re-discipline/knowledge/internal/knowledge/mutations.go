@@ -82,8 +82,8 @@ type ManagerApplyRequest struct {
 	CorrelationID           string                        `json:"correlationId"`
 	IdempotencyKey          string                        `json:"idempotencyKey"`
 	Rationale               string                        `json:"rationale,omitempty"`
-	ExpectedHeadRevision    int64                         `json:"expectedHeadRevision"`
-	ExpectedHeadDigest      string                        `json:"expectedHeadDigest"`
+	ExpectedHeadRevision    int64                         `json:"expectedHeadRevision,omitempty"`
+	ExpectedHeadDigest      string                        `json:"expectedHeadDigest,omitempty"`
 	ExpectedRecordDigests   map[string]string             `json:"expectedRecordDigests,omitempty"`
 	Campaign                *CampaignRecord               `json:"campaign,omitempty"`
 	WorkItems               []WorkItemRecord              `json:"workItems,omitempty"`
@@ -171,6 +171,10 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 	if err := store.Recover(ctx); err != nil {
 		return StateTransactionReceipt{}, err
 	}
+	request, err := resolveManagerPublicationHead(store, request)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
 	if receipt, replayed, err := replayManagerRunPreparation(store, service.Boundary, request); err != nil {
 		return StateTransactionReceipt{}, err
 	} else if replayed {
@@ -209,7 +213,7 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 	if err := validateScopedContextBudgetDelta(graph, request); err != nil {
 		return StateTransactionReceipt{}, err
 	}
-	artifacts, err := service.prepareManagerRunArtifacts(ctx, store, graph, request)
+	artifacts, err := service.prepareManagerRunArtifacts(graph, request)
 	if err != nil {
 		return StateTransactionReceipt{}, err
 	}
@@ -237,8 +241,68 @@ func managerStateTransactionRequest(
 		Rationale: request.Rationale, ReviewHandle: reviewHandle,
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadRevision: request.ExpectedHeadRevision, ExpectedHeadDigest: request.ExpectedHeadDigest,
-		Writes: writes, Artifacts: artifacts, ReviewPacket: request.ReviewPacket,
+		RebaseHead: managerActionRebasesHead(request.Action),
+		Writes:     writes, Artifacts: artifacts, ReviewPacket: request.ReviewPacket,
 	}
+}
+
+// managerActionRebasesHead is an allow-list so newly added transitions remain
+// exact-head by default until their scope has been reviewed. These actions are
+// record-scoped; merge, discard, reconcile, archive-profile changes, migration,
+// and closure finalization keep their stricter project-wide proofs.
+func managerActionRebasesHead(action string) bool {
+	return validOne(action,
+		"campaign.open", "campaign.update", "work.create", "work.update",
+		"run.prepare", "run.start", "run.return", "run.complete",
+		"closure.remediation.run.create", "review.submit", "intake.coverage.retire",
+		"finding.challenge", "finding.update", "decision.record")
+}
+
+func resolveManagerPublicationHead(
+	store *StateStore,
+	request ManagerApplyRequest,
+) (ManagerApplyRequest, error) {
+	if !managerActionRebasesHead(request.Action) {
+		return request, nil
+	}
+	var snapshot *ContextPackScope
+	if request.RunPreparation != nil {
+		snapshot = &request.RunPreparation.ContextPack.Scope
+	}
+	revision, digest, err := resolveOrdinaryPublicationHead(
+		store, request.ExpectedHeadRevision, request.ExpectedHeadDigest, snapshot)
+	if err != nil {
+		return ManagerApplyRequest{}, err
+	}
+	request.ExpectedHeadRevision = revision
+	request.ExpectedHeadDigest = digest
+	return request, nil
+}
+
+func resolveOrdinaryPublicationHead(
+	store *StateStore,
+	revision int64,
+	digest string,
+	snapshot *ContextPackScope,
+) (int64, string, error) {
+	if digestRE.MatchString(digest) && revision >= 0 {
+		return revision, digest, nil
+	}
+	if digest != "" || revision != 0 {
+		return 0, "", errors.New(
+			"optional expectedHeadRevision and expectedHeadDigest must be omitted together or supplied as one valid pair")
+	}
+	if snapshot != nil {
+		if snapshot.StateHeadRevision < 0 || !digestRE.MatchString(snapshot.StateHeadDigest) {
+			return 0, "", errors.New("run preparation context pack has invalid state-head provenance")
+		}
+		return snapshot.StateHeadRevision, snapshot.StateHeadDigest, nil
+	}
+	head, err := store.LoadHead()
+	if err != nil {
+		return 0, "", err
+	}
+	return head.Revision, head.Digest, nil
 }
 
 // SupportedManagerActions is the published manager surface in a stable order.
@@ -348,9 +412,7 @@ func describeAllowedRecordKinds(allowed map[string]bool) string {
 	return strings.Join(kinds[:len(kinds)-1], ", ") + ", and " + kinds[len(kinds)-1] + " records"
 }
 
-func (service *Service) prepareManagerRunArtifacts(
-	ctx context.Context,
-	store *StateStore,
+func (*Service) prepareManagerRunArtifacts(
 	graph CampaignGraph,
 	request ManagerApplyRequest,
 ) ([]StateArtifactWrite, error) {
@@ -368,20 +430,6 @@ func (service *Service) prepareManagerRunArtifacts(
 		return nil, err
 	}
 
-	head, err := store.LoadHead()
-	if err != nil {
-		return nil, err
-	}
-	if head.Revision != request.ExpectedHeadRevision || head.Digest != request.ExpectedHeadDigest {
-		return nil, fmt.Errorf(
-			"%w: run preparation expected state head %d/%s, and the current head is %d/%s. "+
-				"Something committed between the pack compilation and this call, so the pack no "+
-				"longer binds current state. Remedy: re-read the head with state mode=orient, "+
-				"recompile the pack with context_pack_materialize action=preview, and re-issue "+
-				"run.prepare with both",
-			ErrStateConflict, request.ExpectedHeadRevision, request.ExpectedHeadDigest,
-			head.Revision, head.Digest)
-	}
 	if graph.Campaign == nil || graph.Campaign.ID != request.CampaignID ||
 		graph.Campaign.Slug != request.CampaignSlug {
 		return nil, fmt.Errorf(
@@ -432,7 +480,7 @@ func (service *Service) prepareManagerRunArtifacts(
 	// objects by hand -- or, as happened, recompile the pack repeatedly hoping
 	// to hit the combination the engine wanted.
 	if mismatches := describeContextPackScopeMismatch(
-		preparation.ContextPack.Scope, request, graph, run, *submitted, head,
+		preparation.ContextPack.Scope, request, graph, run, *submitted,
 	); len(mismatches) != 0 {
 		return nil, fmt.Errorf(
 			"run preparation context pack scope does not bind current state: %s. The pack is "+
@@ -443,60 +491,10 @@ func (service *Service) prepareManagerRunArtifacts(
 			strings.Join(mismatches, "; "),
 			request.CampaignID, run.PrimaryWorkItemID, run.ID)
 	}
-	// The pack's role, its write grants, and the two handles it must always
-	// carry are facts about the submitted pack and the submitted run, so they
-	// are checked in collectManagerLaunchShape alongside every other shape
-	// violation rather than one per round trip here. What stays is what needs
-	// canonical state: the scope binding above, and the generation and
-	// retrieval-profile binding below.
-
-	generation, _, selected, _, err := service.ensure(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("verify current run preparation generation: %w", err)
-	}
-	models := make([]string, 0, len(selected.Models))
-	for _, model := range selected.Models {
-		models = append(models, model.ID+"@"+model.Revision)
-	}
-	// Six independent values make a pack reproducible, and only one of them
-	// usually moves. Naming the wrong one is worse than naming none - an
-	// earlier draft of this refusal quoted the profile identities on both
-	// sides, which are identical whenever it is the index generation that
-	// changed, so it read as "these two equal strings differ".
-	stale := []string{}
-	if !reflect.DeepEqual(preparation.ContextPack.Generation, CompactContextGeneration(generation)) {
-		stale = append(stale, "the index generation")
-	}
-	if preparation.ContextPack.RequestedProfile != selected.RequestedIdentity {
-		stale = append(stale, fmt.Sprintf("requestedProfile (pack %s, current %s)",
-			preparation.ContextPack.RequestedProfile, selected.RequestedIdentity))
-	}
-	if preparation.ContextPack.EffectiveProfile != selected.EffectiveIdentity {
-		stale = append(stale, fmt.Sprintf("effectiveProfile (pack %s, current %s)",
-			preparation.ContextPack.EffectiveProfile, selected.EffectiveIdentity))
-	}
-	if !reflect.DeepEqual(preparation.ContextPack.ActiveLanes, selected.ActiveLanes) {
-		stale = append(stale, fmt.Sprintf("activeLanes (pack %s, current %s)",
-			strings.Join(preparation.ContextPack.ActiveLanes, "+"),
-			strings.Join(selected.ActiveLanes, "+")))
-	}
-	if !reflect.DeepEqual(preparation.ContextPack.Models, models) {
-		stale = append(stale, fmt.Sprintf("models (pack %s, current %s)",
-			strings.Join(preparation.ContextPack.Models, "+"), strings.Join(models, "+")))
-	}
-	if !reflect.DeepEqual(preparation.ContextPack.FallbackReason, selected.FallbackReason) {
-		stale = append(stale, "the retrieval fallback reason")
-	}
-	if len(stale) != 0 {
-		return nil, fmt.Errorf(
-			"run preparation context pack generation or retrieval profile is no longer current: "+
-				"%s changed between the preview and this call. A pack that names a generation "+
-				"it was not built from cannot be reproduced later, which is the whole point of "+
-				"freezing it. Remedy: recompile with context_pack_materialize action=preview "+
-				"and re-issue %s with the fresh pack",
-			strings.Join(stale, "; "), request.Action)
-	}
-
+	// Generation and retrieval-profile fields are provenance inside the sealed
+	// pack, not leases on whatever index happens to be current at dispatch time.
+	// Requiring them to equal the latest generation made unrelated indexing
+	// activity invalidate an otherwise exact immutable launch snapshot.
 	return artifacts, nil
 }
 
@@ -511,7 +509,6 @@ func describeContextPackScopeMismatch(
 	graph CampaignGraph,
 	run RunRecord,
 	submitted WorkItemRecord,
-	head StateHead,
 ) []string {
 	mismatches := []string{}
 	add := func(field, got, want string) {
@@ -535,7 +532,6 @@ func describeContextPackScopeMismatch(
 		strconv.FormatInt(scope.StateHeadRevision, 10),
 		strconv.FormatInt(request.ExpectedHeadRevision, 10))
 	add("stateHeadDigest", scope.StateHeadDigest, request.ExpectedHeadDigest)
-	add("eventId", scope.EventID, head.EventID)
 	return mismatches
 }
 
@@ -682,7 +678,7 @@ func replayManagerRunPreparation(
 	}
 	prepared, err := prepareTransactionRequest(
 		managerStateTransactionRequest(request, writes, artifacts, reviewHandle))
-	if err != nil || prepared.RequestDigest != receipt.RequestDigest {
+	if err != nil || !receiptAcceptsPreparedRequest(receipt, prepared) {
 		return StateTransactionReceipt{}, false, ErrIdempotencyConflict
 	}
 	return receipt, true, nil
@@ -898,8 +894,8 @@ type CurationSubmitRequest struct {
 	CorrelationID         string              `json:"correlationId"`
 	IdempotencyKey        string              `json:"idempotencyKey"`
 	Rationale             string              `json:"rationale,omitempty"`
-	ExpectedHeadRevision  int64               `json:"expectedHeadRevision"`
-	ExpectedHeadDigest    string              `json:"expectedHeadDigest"`
+	ExpectedHeadRevision  int64               `json:"expectedHeadRevision,omitempty"`
+	ExpectedHeadDigest    string              `json:"expectedHeadDigest,omitempty"`
 	ExpectedRecordDigests map[string]string   `json:"expectedRecordDigests,omitempty"`
 	Intake                IntakeRecord        `json:"intake"`
 	Candidates            []FindingSubmission `json:"candidates"`
@@ -938,6 +934,13 @@ func (service *Service) curationSubmit(ctx context.Context, request CurationSubm
 	if err := store.Recover(ctx); err != nil {
 		return StateTransactionReceipt{}, err
 	}
+	revision, digest, err := resolveOrdinaryPublicationHead(
+		store, request.ExpectedHeadRevision, request.ExpectedHeadDigest, nil)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	request.ExpectedHeadRevision = revision
+	request.ExpectedHeadDigest = digest
 	graph, err := store.LoadCampaignGraph(request.CampaignID)
 	if err != nil {
 		return StateTransactionReceipt{}, err
@@ -1000,7 +1003,7 @@ func (service *Service) curationSubmit(ctx context.Context, request CurationSubm
 		Actor: request.Actor, Authority: "curator", Action: "curation.submit",
 		Rationale: request.Rationale, CorrelationID: request.CorrelationID,
 		IdempotencyKey: request.IdempotencyKey, ExpectedHeadRevision: request.ExpectedHeadRevision,
-		ExpectedHeadDigest: request.ExpectedHeadDigest, Writes: writes,
+		ExpectedHeadDigest: request.ExpectedHeadDigest, RebaseHead: true, Writes: writes,
 	})
 }
 

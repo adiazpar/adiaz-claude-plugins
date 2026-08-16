@@ -187,6 +187,11 @@ def read_version_constant(path: Path, name: str) -> str:
     return match.group(1) if match else ""
 
 
+def semver_release_identity(version: str) -> str:
+    """Return the release identity while ignoring local build metadata."""
+    return version.split("+", 1)[0]
+
+
 def declared_plugin_version(root: Path | None = None) -> str:
     """The single declared published version.
 
@@ -718,13 +723,14 @@ def validate_runtime_release(
             str(error),
         )
 
+    plugin_release = semver_release_identity(plugin_version)
     for path, version in version_sources:
-        if version != plugin_version:
+        if semver_release_identity(version) != plugin_release:
             add_violation(
                 violations,
                 "runtime-version-mismatch",
                 path,
-                f"{version!r} != plugin {plugin_version!r}",
+                f"release {version!r} != plugin release {plugin_version!r}",
             )
 
     manifest_relative = "knowledge/bin/manifest.json"

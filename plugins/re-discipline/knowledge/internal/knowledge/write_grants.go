@@ -19,6 +19,11 @@ type WriteGrant struct {
 	Path string `json:"path"`
 }
 
+type activeRunGrantSet struct {
+	RecordPath string
+	Run        RunRecord
+}
+
 var writeGrantPathRE = regexp.MustCompile(`^[A-Za-z0-9._@+#() -]+(?:/[A-Za-z0-9._@+#() -]+)*$`)
 
 // NormalizeWriteGrants validates and deterministically orders a grant set.
@@ -107,6 +112,90 @@ func grantsOverlap(left, right WriteGrant) bool {
 		return true
 	}
 	return right.Mode == "directory" && strings.HasPrefix(left.Path, right.Path+"/")
+}
+
+// validatePreparedRunWriteGrantIsolation runs while the canonical writer lock
+// is held. It prevents two prepared/running runs, including runs owned by
+// different campaigns and manager processes, from receiving overlapping
+// project write authority. The global state head remains the serialization
+// point; this check makes the conflict actionable instead of allowing two
+// independently valid run records to authorize writes to the same bytes.
+func (store *StateStore) validatePreparedRunWriteGrantIsolation(
+	inventory StateInventory,
+	prepared preparedTransaction,
+) error {
+	if !validOne(prepared.Request.Action, "run.prepare", "closure.remediation.run.create") {
+		return nil
+	}
+	proposed := make([]activeRunGrantSet, 0, 1)
+	for _, write := range prepared.Writes {
+		run, ok := write.Record.(RunRecord)
+		if !ok || !validOne(run.Status, "prepared", "running") || len(run.WriteGrants) == 0 {
+			continue
+		}
+		proposed = append(proposed, activeRunGrantSet{RecordPath: write.Path, Run: run})
+	}
+	for index, left := range proposed {
+		for priorIndex := 0; priorIndex < index; priorIndex++ {
+			if err := activeRunGrantConflict(proposed[priorIndex], left); err != nil {
+				return err
+			}
+		}
+	}
+	if len(proposed) == 0 {
+		return nil
+	}
+	for _, entry := range inventory.Entries {
+		if !canonicalRunRecordPath(entry.Path) {
+			continue
+		}
+		value, _, exists, err := store.existingRecord(entry.Path)
+		if err != nil {
+			return err
+		}
+		run, ok := value.(RunRecord)
+		if !exists || !ok {
+			return fmt.Errorf("%w: inventory run record %s could not be loaded", ErrStateDirty, entry.Path)
+		}
+		if !validOne(run.Status, "prepared", "running") || len(run.WriteGrants) == 0 {
+			continue
+		}
+		existing := activeRunGrantSet{RecordPath: entry.Path, Run: run}
+		for _, candidate := range proposed {
+			if candidate.RecordPath == existing.RecordPath {
+				continue
+			}
+			if err := activeRunGrantConflict(existing, candidate); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func canonicalRunRecordPath(value string) bool {
+	parts := strings.Split(value, "/")
+	return len(parts) == 5 && parts[0] == "active" && managedSlugRE.MatchString(parts[1]) &&
+		parts[2] == "runs" && runIDRE.MatchString(parts[3]) && parts[4] == "run.json"
+}
+
+func activeRunGrantConflict(left, right activeRunGrantSet) error {
+	for _, leftGrant := range left.Run.WriteGrants {
+		for _, rightGrant := range right.Run.WriteGrants {
+			if !grantsOverlap(leftGrant, rightGrant) {
+				continue
+			}
+			return fmt.Errorf(
+				"%w: proposed run %s grant %s:%s overlaps active run %s (%s) grant %s:%s. "+
+					"Remedy: return, abort, or invalidate the active run before reusing its path, "+
+					"or re-scope one run to non-overlapping project paths",
+				ErrStateConflict,
+				right.Run.ID, rightGrant.Mode, rightGrant.Path,
+				left.Run.ID, left.Run.Status, leftGrant.Mode, leftGrant.Path,
+			)
+		}
+	}
+	return nil
 }
 
 func managedWriteGrantPath(value string) bool {

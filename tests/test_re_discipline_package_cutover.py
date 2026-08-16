@@ -1,9 +1,12 @@
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tests.re_discipline_package_audit import audit_plugin, declared_plugin_version
@@ -29,7 +32,7 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
         profile.parent.mkdir(parents=True)
         profile.write_text("<!-- re-discipline:shared-laws v0.8.0 -->\n", encoding="ascii")
         campaign = root / "active" / "fixture"
-        (campaign / "runs" / "R-20000101-0001" / "payload").mkdir(parents=True)
+        (campaign / "runs").mkdir(parents=True)
         (campaign / "work-items").mkdir()
         (campaign / "findings").mkdir()
         (campaign / "intake").mkdir()
@@ -39,25 +42,44 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
         (root / "docs" / "truth").mkdir(parents=True)
         (root / "src").mkdir()
         (campaign / "campaign.json").write_text('{"id":"C-FIXTURE"}\n', encoding="ascii")
-        pack_digest = "sha256:" + "a" * 64
+        self.add_run(
+            root,
+            "R-20000101-0001",
+            "W-0001",
+            "a",
+            (
+                {"mode": "exact", "path": "src/main.py"},
+                {"mode": "directory", "path": "generated/output"},
+            ),
+        )
+
+    def add_run(
+        self,
+        root: Path,
+        run_id: str,
+        work_item_id: str,
+        digest_character: str,
+        write_grants: tuple[dict, ...],
+    ) -> None:
+        campaign = root / "active" / "fixture"
+        run_directory = campaign / "runs" / run_id
+        (run_directory / "payload").mkdir(parents=True)
+        pack_digest = "sha256:" + digest_character * 64
         pack_body = json.dumps(
-            {"schemaVersion": 2, "packId": "context-aaaaaaaaaaaaaaaaaaaa", "digest": pack_digest},
+            {"schemaVersion": 2, "packId": f"context-{digest_character * 20}", "digest": pack_digest},
             separators=(",", ":"),
         ) + "\n"
-        pack_path = campaign / "runs" / "R-20000101-0001" / "context-pack.json"
+        pack_path = run_directory / "context-pack.json"
         pack_path.write_text(pack_body, encoding="ascii")
-        (campaign / "runs" / "R-20000101-0001" / "run.json").write_text(
+        (run_directory / "run.json").write_text(
             json.dumps(
                 {
-                    "id": "R-20000101-0001",
-                    "primaryWorkItemId": "W-0001",
+                    "id": run_id,
+                    "primaryWorkItemId": work_item_id,
                     "status": "running",
-                    "writeGrants": [
-                        {"mode": "exact", "path": "src/main.py"},
-                        {"mode": "directory", "path": "generated/output"},
-                    ],
+                    "writeGrants": list(write_grants),
                     "contextPack": {
-                        "path": "active/fixture/runs/R-20000101-0001/context-pack.json",
+                        "path": f"active/fixture/runs/{run_id}/context-pack.json",
                         "sha256": "sha256:" + hashlib.sha256(pack_body.encode("ascii")).hexdigest(),
                     },
                 },
@@ -108,11 +130,22 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            env=self.posix_environment(executable),
         )
         if completed.returncode != 0:
             self.skipTest(f"available sh cannot execute workspace hook: {completed.stderr}")
         self.assertEqual(completed.stderr, "")
         return json.loads(completed.stdout or "{}")
+
+    def posix_environment(self, executable: str) -> dict[str, str]:
+        environment = os.environ.copy()
+        executable_path = Path(executable)
+        if executable_path.name.lower() == "sh.exe":
+            git_root = executable_path.resolve().parents[1]
+            environment["PATH"] = os.pathsep.join(
+                (str(git_root / "usr" / "bin"), str(git_root / "mingw64" / "bin"), environment.get("PATH", ""))
+            )
+        return environment
 
     def decision(self, result: dict) -> str:
         return result.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
@@ -199,6 +232,30 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                     expected,
                     self.decision(self.run_posix(project, "pre-tool-use", payload)),
                     targets,
+                )
+
+            absolute_cases = (
+                (project / "src" / "absolute.py", "allow"),
+                (project / "active" / "fixture" / "campaign.json", "deny"),
+            )
+            for target, expected in absolute_cases:
+                ps_payload = {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": self.patch_command(str(target))},
+                }
+                posix_payload = {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": self.patch_command(target.as_posix())},
+                }
+                self.assertEqual(
+                    expected,
+                    self.decision(self.run_powershell(project, "pre-tool-use", ps_payload)),
+                    str(target),
+                )
+                self.assertEqual(
+                    expected,
+                    self.decision(self.run_posix(project, "pre-tool-use", posix_payload)),
+                    target.as_posix(),
                 )
 
             malformed = {"tool_name": "apply_patch", "tool_input": {"command": "not a patch"}}
@@ -315,6 +372,215 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                 for token in ("checkpoint-campaign", "promote-truth"):
                     self.assertNotIn(token, json.dumps(ps).lower())
                     self.assertNotIn(token, json.dumps(sh).lower())
+
+    def test_session_start_reports_runtime_release_and_onboards_once_per_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            for host_name, runner in (
+                ("powershell", self.run_powershell),
+                ("posix", self.run_posix),
+            ):
+                project = parent / host_name
+                project.mkdir()
+                self.make_project(project)
+                payload = {"session_id": "session-onboarding-boundary"}
+                first = runner(project, "session-start", payload)
+                context = first.get("hookSpecificOutput", {}).get("additionalContext", "")
+                self.assertIn("runtime 0.9.0", context)
+                self.assertNotIn("runtime version mismatch", context.lower())
+                self.assertIn("orient once", context)
+                self.assertIn("do not re-invoke the onboard skill for ordinary user messages", context)
+                self.assertIn("Session-start onboarding boundary=session-onboarding-boundary", context)
+                self.assertEqual(
+                    {},
+                    runner(project, "session-start", payload),
+                    f"{host_name} emitted onboarding twice for one host session",
+                )
+                next_session = runner(
+                    project,
+                    "session-start",
+                    {"session_id": "session-onboarding-next"},
+                )
+                next_context = next_session.get("hookSpecificOutput", {}).get("additionalContext", "")
+                self.assertIn("Session-start onboarding boundary=session-onboarding-next", next_context)
+
+    def test_registered_dispatch_isolated_by_manager_session_and_agent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            runners = (
+                ("powershell", self.run_powershell, lambda path: str(path)),
+                ("posix", self.run_posix, lambda path: path.as_posix()),
+            )
+            for host_name, runner, host_path in runners:
+                project = parent / host_name
+                project.mkdir()
+                self.make_project(project)
+                self.add_run(
+                    project,
+                    "R-20000101-0002",
+                    "W-0002",
+                    "b",
+                    ({"mode": "exact", "path": "src/other.py"},),
+                )
+
+                session_one = f"{host_name}-manager-one"
+                session_two = f"{host_name}-manager-two"
+
+                def launch(session: str, tool_use_id: str, run_id: str, digest_character: str) -> dict:
+                    return runner(
+                        project,
+                        "pre-tool-use",
+                        {
+                            "session_id": session,
+                            "turn_id": f"turn-{tool_use_id}",
+                            "tool_use_id": tool_use_id,
+                            "tool_name": "spawn_agent",
+                            "tool_input": {
+                                "message": (
+                                    f"re-discipline-run: {run_id} sha256:{digest_character * 64}\n"
+                                    "Read the exact run brief and complete only the assigned work."
+                                )
+                            },
+                        },
+                    )
+
+                self.assertEqual("allow", self.decision(launch(session_one, "call-one", "R-20000101-0001", "a")))
+                self.assertEqual(
+                    "allow",
+                    self.decision(launch(session_two, "call-independent", "R-20000101-0002", "b")),
+                    "another manager session must have an independent pending slot",
+                )
+
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    queued_launch = pool.submit(
+                        launch,
+                        session_one,
+                        "call-two",
+                        "R-20000101-0002",
+                        "b",
+                    )
+                    time.sleep(0.2)
+                    start_one = runner(
+                        project,
+                        "subagent-start",
+                        {"session_id": session_one, "agent_id": "agent-one", "agent_type": "worker"},
+                    )
+                    queued_result = queued_launch.result(timeout=10)
+                self.assertEqual(
+                    "allow",
+                    self.decision(queued_result),
+                    "same-session launches must queue inside the hook rather than fail and consume a model retry",
+                )
+                start_two = runner(
+                    project,
+                    "subagent-start",
+                    {"session_id": session_two, "agent_id": "agent-two", "agent_type": "worker"},
+                )
+                context_one = start_one.get("hookSpecificOutput", {}).get("additionalContext", "")
+                context_two = start_two.get("hookSpecificOutput", {}).get("additionalContext", "")
+                self.assertIn("run=R-20000101-0001", context_one)
+                self.assertIn("agent=agent-one", context_one)
+                self.assertIn("run=R-20000101-0002", context_two)
+                self.assertIn("agent=agent-two", context_two)
+
+                start_three = runner(
+                    project,
+                    "subagent-start",
+                    {"session_id": session_one, "agent_id": "agent-three", "agent_type": "worker"},
+                )
+                self.assertIn(
+                    "run=R-20000101-0002",
+                    start_three.get("hookSpecificOutput", {}).get("additionalContext", ""),
+                )
+
+                def write(session: str, agent: str, relative_path: str, envelope_run: str = "") -> dict:
+                    payload = {
+                        "session_id": session,
+                        "tool_name": "Write",
+                        "subagent": {"agent_id": agent, "agent_type": "worker"},
+                        "tool_input": {"file_path": host_path(project / relative_path)},
+                    }
+                    if envelope_run:
+                        payload["runId"] = envelope_run
+                    return runner(project, "pre-tool-use", payload)
+
+                self.assertEqual("allow", self.decision(write(session_one, "agent-one", "src/main.py")))
+                self.assertEqual("deny", self.decision(write(session_one, "agent-one", "src/other.py")))
+                self.assertEqual("allow", self.decision(write(session_one, "agent-three", "src/other.py")))
+                self.assertEqual("deny", self.decision(write(session_one, "agent-three", "src/main.py")))
+                self.assertEqual("allow", self.decision(write(session_two, "agent-two", "src/other.py")))
+                self.assertEqual(
+                    "deny",
+                    self.decision(write(session_one, "agent-one", "src/main.py", "R-20000101-0002")),
+                    "a forged envelope run must not override the session/agent binding",
+                )
+
+                ordinary_payload = {
+                    "session_id": session_one,
+                    "turn_id": "turn-call-ordinary",
+                    "tool_use_id": "call-ordinary",
+                    "tool_name": "spawn_agent",
+                    "tool_input": {"message": "Inspect or edit ordinary project files only."},
+                }
+                self.assertEqual(
+                    "allow",
+                    self.decision(runner(project, "pre-tool-use", ordinary_payload)),
+                )
+                self.assertEqual(
+                    {},
+                    runner(
+                        project,
+                        "subagent-start",
+                        {"session_id": session_one, "agent_id": "agent-ordinary", "agent_type": "worker"},
+                    ),
+                )
+                self.assertEqual(
+                    "allow",
+                    self.decision(write(session_one, "agent-ordinary", "docs/notes.md")),
+                    "an ordinary subagent must not be forced into a campaign run",
+                )
+                self.assertEqual(
+                    "deny",
+                    self.decision(write(session_one, "agent-ordinary", "active/fixture/campaign.json")),
+                    "ordinary subagents still cannot edit engine-owned canonical state",
+                )
+                self.assertEqual(
+                    "deny",
+                    self.decision(
+                        write(
+                            session_one,
+                            "agent-ordinary",
+                            "docs/notes.md",
+                            "R-20000101-0001",
+                        )
+                    ),
+                    "an ordinary launch cannot opt itself into a registered run",
+                )
+                self.assertEqual(
+                    "deny",
+                    self.decision(write(session_one, "agent-unbound", "docs/notes.md")),
+                    "an agent that bypassed the launch registry must fail closed",
+                )
+
+                cleanup_session = f"{host_name}-failed-launch"
+                self.assertEqual(
+                    "allow",
+                    self.decision(launch(cleanup_session, "call-failed", "R-20000101-0001", "a")),
+                )
+                runner(
+                    project,
+                    "post-tool-use",
+                    {
+                        "session_id": cleanup_session,
+                        "tool_use_id": "call-failed",
+                        "tool_name": "spawn_agent",
+                    },
+                )
+                self.assertEqual(
+                    "allow",
+                    self.decision(launch(cleanup_session, "call-retry", "R-20000101-0001", "a")),
+                    "PostToolUse must clear a launch that never reached SubagentStart",
+                )
 
     def test_ordinary_or_partial_subagent_events_do_not_receive_run_contracts(self):
         with tempfile.TemporaryDirectory() as temporary:

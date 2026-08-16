@@ -274,12 +274,10 @@ func TestReturnedRunCurationRatificationIsRetrievableAcrossCampaigns(t *testing.
 	curationReceipt, err := fixture.service.CurationSubmit(ctx, CurationSubmitRequest{
 		Actor: baseCurationRequest.Actor, CampaignSlug: baseCurationRequest.CampaignSlug,
 		CampaignID: baseCurationRequest.CampaignID, CorrelationID: baseCurationRequest.CorrelationID,
-		IdempotencyKey:       baseCurationRequest.IdempotencyKey,
-		ExpectedHeadRevision: baseCurationRequest.ExpectedHeadRevision,
-		ExpectedHeadDigest:   baseCurationRequest.ExpectedHeadDigest,
-		Intake:               baseCurationRequest.Intake,
-		Candidates:           baseCurationRequest.Candidates,
-		Rows:                 baseCurationRequest.Rows,
+		IdempotencyKey: baseCurationRequest.IdempotencyKey,
+		Intake:         baseCurationRequest.Intake,
+		Candidates:     baseCurationRequest.Candidates,
+		Rows:           baseCurationRequest.Rows,
 	})
 	if err != nil {
 		t.Fatalf("submit curator findings: %v", err)
@@ -397,7 +395,7 @@ func TestReturnedRunCurationRatificationIsRetrievableAcrossCampaigns(t *testing.
 		t.Fatalf("caller-forged candidate content was accepted at review commit: %v", reviewErr)
 	}
 
-	reviewReceipt, err := fixture.service.ManagerApply(ctx, reviewRequest)
+	_, err = fixture.service.ManagerApply(ctx, reviewRequest)
 	if err != nil {
 		t.Fatalf("ratify curator findings: %v", err)
 	}
@@ -416,10 +414,8 @@ func TestReturnedRunCurationRatificationIsRetrievableAcrossCampaigns(t *testing.
 	_, err = fixture.service.ManagerApply(ctx, ManagerApplyRequest{
 		Action: "campaign.open", Actor: "manager", CampaignSlug: consumerCampaign.Slug,
 		CampaignID: consumerCampaign.ID, CorrelationID: consumerCampaign.CorrelationID,
-		IdempotencyKey:       "idem-e2e-consumer-open",
-		ExpectedHeadRevision: reviewReceipt.ResultingHead.Revision,
-		ExpectedHeadDigest:   reviewReceipt.ResultingHead.Digest,
-		Campaign:             &consumerCampaign, WorkItems: []WorkItemRecord{consumerWork},
+		IdempotencyKey: "idem-e2e-consumer-open",
+		Campaign:       &consumerCampaign, WorkItems: []WorkItemRecord{consumerWork},
 	})
 	if err != nil {
 		t.Fatalf("open consuming campaign: %v", err)

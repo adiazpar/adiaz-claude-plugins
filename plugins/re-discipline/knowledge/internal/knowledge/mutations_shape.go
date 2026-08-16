@@ -95,8 +95,9 @@ type mutationEnvelope struct {
 // missing names, in a fixed order, the envelope fields this mutation did not
 // supply. includeActor is false for manager_apply, whose actor has a sentence
 // of its own because the value must appear on a list the caller may not have
-// read yet, and pointing at that list is most of the remedy.
-func (envelope mutationEnvelope) missing(includeActor bool) []string {
+// read yet. requireHead is true only for project-global transitions; ordinary
+// record-scoped work lets the engine choose and serialize the publication head.
+func (envelope mutationEnvelope) missing(includeActor, requireHead bool) []string {
 	fields := []struct {
 		name    string
 		value   string
@@ -114,11 +115,14 @@ func (envelope mutationEnvelope) missing(includeActor bool) []string {
 			missing = append(missing, field.name)
 		}
 	}
-	if !digestRE.MatchString(envelope.ExpectedHeadDigest) {
-		missing = append(missing, "expectedHeadDigest (sha256:<64 hex>)")
-	}
-	if envelope.ExpectedHeadRevision < 0 {
-		missing = append(missing, "expectedHeadRevision (a non-negative head revision)")
+	headSupplied := envelope.ExpectedHeadDigest != "" || envelope.ExpectedHeadRevision != 0
+	if requireHead || headSupplied {
+		if !digestRE.MatchString(envelope.ExpectedHeadDigest) {
+			missing = append(missing, "expectedHeadDigest (sha256:<64 hex>)")
+		}
+		if envelope.ExpectedHeadRevision < 0 {
+			missing = append(missing, "expectedHeadRevision (a non-negative head revision)")
+		}
 	}
 	return missing
 }
@@ -127,16 +131,27 @@ func (envelope mutationEnvelope) missing(includeActor bool) []string {
 // field the request is missing. One violation rather than six: these are all
 // the same edit, read off the same state mode=orient response, and six numbered
 // items saying "you also did not send this id" is a wall, not a list.
-func collectMutationEnvelopeShape(set *refusalSet, subject string, envelope mutationEnvelope, includeActor bool) {
-	missing := envelope.missing(includeActor)
+func collectMutationEnvelopeShape(
+	set *refusalSet,
+	subject string,
+	envelope mutationEnvelope,
+	includeActor, requireHead bool,
+) {
+	missing := envelope.missing(includeActor, requireHead)
 	if len(missing) == 0 {
 		return
 	}
+	headGuidance := ""
+	if requireHead {
+		headGuidance = " state mode=orient returns the exact current head for this project-global transition;"
+	} else if envelope.ExpectedHeadDigest != "" || envelope.ExpectedHeadRevision != 0 {
+		headGuidance = " expectedHeadRevision and expectedHeadDigest are optional for this record-scoped transition, but when either is supplied they must form one valid pair;"
+	}
 	set.addf(shapeStageEnvelope,
-		"%s is a mutation and requires %s. state mode=orient returns the campaign id, slug, "+
-			"and the current head revision and digest; correlationId and idempotencyKey are "+
+		"%s is a mutation and requires %s.%s state mode=orient returns the campaign id and slug; "+
+			"correlationId and idempotencyKey are "+
 			"caller-chosen and must be stable across retries of this same transition",
-		subject, strings.Join(missing, ", "))
+		subject, strings.Join(missing, ", "), headGuidance)
 }
 
 func collectManagerEnvelopeShape(set *refusalSet, request ManagerApplyRequest) {
@@ -151,7 +166,7 @@ func collectManagerEnvelopeShape(set *refusalSet, request ManagerApplyRequest) {
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadDigest:   request.ExpectedHeadDigest,
 		ExpectedHeadRevision: request.ExpectedHeadRevision,
-	}, false)
+	}, false, !managerActionRebasesHead(request.Action))
 }
 
 // collectCampaignOpenPayload splits the one precondition campaign.open used to
@@ -634,11 +649,9 @@ func collectCoverageRetirementPayload(set *refusalSet, request ManagerApplyReque
 // firstManagerStateViolation adds at most one canonical-state fact to an
 // aggregate that is already refusing on shape.
 //
-// It exists because the stale head is the single most common refusal in the
-// engine and the one most likely to be true at the same time as a payload
-// mistake: the caller read state, spent a while building a large request, got
-// some of it wrong, and in the meantime something else committed. Telling it
-// both at once means one re-read instead of two.
+// Project-global actions still use an exact head, while ordinary actions let
+// the engine serialize publication. For the strict actions, reporting a stale
+// head alongside a payload mistake avoids a second round trip.
 //
 // It is strictly bounded to one violation, and it runs only when the shape pass
 // already refused, so the successful path is untouched and pays nothing for it.
@@ -654,13 +667,17 @@ func (service *Service) firstManagerStateViolation(ctx context.Context, request 
 	if err := store.Recover(ctx); err != nil {
 		return nil
 	}
-	head, err := store.LoadHead()
-	if err != nil {
-		return nil
-	}
-	if head.Revision != request.ExpectedHeadRevision || head.Digest != request.ExpectedHeadDigest {
-		return staleHeadConflict(
-			request.ExpectedHeadRevision, request.ExpectedHeadDigest, head, request.CampaignID)
+	if !managerActionRebasesHead(request.Action) &&
+		digestRE.MatchString(request.ExpectedHeadDigest) &&
+		request.ExpectedHeadRevision >= 0 {
+		head, err := store.LoadHead()
+		if err != nil {
+			return nil
+		}
+		if head.Revision != request.ExpectedHeadRevision || head.Digest != request.ExpectedHeadDigest {
+			return staleHeadConflict(
+				request.ExpectedHeadRevision, request.ExpectedHeadDigest, head, request.CampaignID)
+		}
 	}
 	if request.Action == "campaign.open" {
 		// There is no campaign to load yet, and authority for the first
@@ -723,7 +740,7 @@ func validateCurationRequestShape(request CurationSubmitRequest) (CurationPacket
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadDigest:   request.ExpectedHeadDigest,
 		ExpectedHeadRevision: request.ExpectedHeadRevision,
-	}, true)
+	}, true, false)
 	if len(request.WorkItems) != 0 {
 		set.add(shapeStageComposition, errors.New(
 			"curators may propose spawned work-item ids in intake but only manager review may create work records"))
@@ -815,7 +832,7 @@ func collectClosureRequestShape(set *refusalSet, request ClosureApplyRequest) {
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadDigest:   request.ExpectedHeadDigest,
 		ExpectedHeadRevision: request.ExpectedHeadRevision,
-	}, true)
+	}, true, !closureActionRebasesHead(request.Action))
 	if timestamp, err := time.Parse(time.RFC3339Nano, request.Timestamp); err != nil ||
 		timestamp.Location() != time.UTC {
 		set.addf(shapeStageEnvelope,

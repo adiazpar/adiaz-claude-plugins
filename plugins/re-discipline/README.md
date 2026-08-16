@@ -47,7 +47,9 @@ registered in the run record.
 
 ## Lifecycle
 
-1. `onboard` calls bounded `state(mode="orient")` and a scoped `resume`.
+1. At host session start, `onboard` calls bounded `state(mode="orient")` and a
+   scoped `resume` once. It is not repeated for ordinary prompts, tool rounds,
+   or compaction in the same session.
 2. `open-campaign` opens a campaign and root work atomically.
 3. `delegate` prepares one run for one primary work item and verifies its
    immutable context pack before dispatch.
@@ -120,16 +122,46 @@ PowerShell and POSIX hooks provide symmetric orientation, compaction handles,
 run context, return checks, and Stop warnings. `PreToolUse` treats Claude Code
 `Write`/`Edit` and Codex `apply_patch` as the same write-class guard: it denies
 accidental direct access to engine-owned campaign and truth paths while
-allowing a run report and lazy payload. When the host supplies a current run
-ID, the hooks resolve its canonical `run.json` and permit ordinary project
-writes only through its sealed exact-path or bounded-directory grants;
-unknown, ambiguous, and terminal runs fail closed. `SubagentStart` and
-`SubagentStop` remain silent for ordinary host subagents. They inject run
-context or a return check only when explicit dispatch metadata resolves one
-unique registered run and matches that run's immutable context-pack identity.
-This accident boundary is not adversarial authentication.
+allowing a run report and lazy payload. Relative and absolute editor paths are
+normalized against the verified project root before the same containment
+decision; path spelling is not an authority boundary. When the host supplies a
+current run ID, the hooks resolve its canonical `run.json` and permit ordinary
+project writes only through its sealed exact-path or bounded-directory grants;
+unknown, ambiguous, and terminal runs fail closed. A registered native launch
+starts its message with
+`re-discipline-run: <run-id> <context-pack-digest>`. The launch hook reserves a
+session-local ticket, and `SubagentStart` binds it to the host agent ID.
+Ordinary launches receive an ordinary binding and remain free to edit
+non-canonical project files; they are not forced into campaign runs. Concurrent
+launch calls in one manager session queue only inside this launch-to-start
+handoff instead of returning a model-visible retry. Already-bound agents
+execute concurrently, with each write resolved through its own
+session/agent/run binding. Separate manager sessions have separate dispatch
+state, and an agent that bypassed launch registration fails closed instead of
+inheriting a process-global run identity. `SubagentStart` and `SubagentStop`
+remain silent for ordinary host subagents. This accident boundary is not
+adversarial authentication.
 Safety remains in engine validation, reconciliation, atomic publication, and
 replay even when hooks are omitted.
+
+Multiple manager processes may work in one project. The canonical engine uses
+a project-wide OS file lock, a crash-recoverable journal, and a global audit
+head for every commit. The lock is an internal publication seam, not a
+caller-managed retry protocol: ordinary manager and curator transactions that
+touch disjoint records queue briefly and rebase to the current head inside the
+same engine call. They do not require `expectedHeadRevision` or
+`expectedHeadDigest` from the caller. Their record revisions, record digests,
+artifact digests, and write grants remain exact, so a true collision on shared
+state is still rejected. Context packs are immutable scoped snapshots; an
+unrelated campaign commit or later retrieval-index generation does not expire
+one. Destructive topology changes, migration, reconciliation, and closure
+finalization retain exact project-head gates.
+
+The engine also refuses `run.prepare` when its project write grants overlap
+those of any `prepared` or `running` run in any campaign. Returned and
+terminal runs release those project grants. Mutation `tokenBudget` values are
+response hints: optional sections may be omitted whole, but a small hint never
+refuses a valid commit and the complete identity floor is always returned.
 
 ## Worked Example
 
@@ -147,11 +179,11 @@ retains the complete records and receipt digests.
 ## Failed Transition Example
 
 If a manager reviews intake revision 3 while another manager has already
-published revision 4, the engine rejects the stale request. No review, finding,
-or event is partially written. The caller resumes from the new event head,
-rechecks the changed row, and retries with a new expected revision while
-retaining the same idempotency key only when the semantic request is
-identical.
+published revision 4 of that same intake, the engine rejects the exact-record
+collision. No review, finding, or event is partially written. A commit to an
+unrelated campaign does not cause this refusal; only the changed record does.
+The caller rereads and rechecks the changed intake before deciding whether a
+new semantic transition is still valid.
 
 ## Migration
 

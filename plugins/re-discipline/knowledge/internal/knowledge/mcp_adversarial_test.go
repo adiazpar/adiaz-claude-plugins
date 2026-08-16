@@ -227,6 +227,21 @@ var toolSchemaBudgets = map[string]int{
 	"manager_apply":            25600,
 }
 
+func TestOrdinaryMutationSchemasDoNotRequireGlobalHead(t *testing.T) {
+	for _, definition := range toolDefinitions() {
+		name, _ := definition["name"].(string)
+		if name != "manager_apply" && name != "curation_submit" {
+			continue
+		}
+		schema, _ := definition["inputSchema"].(map[string]any)
+		required, _ := schema["required"].([]string)
+		if containsString(required, "expectedHeadRevision") ||
+			containsString(required, "expectedHeadDigest") {
+			t.Fatalf("%s still makes the engine's global publication head a caller precondition: %v", name, required)
+		}
+	}
+}
+
 func TestMCPToolDiscoveryStaysWithinPerToolBudgets(t *testing.T) {
 	definitions := toolDefinitions()
 	measured := map[string]int{}

@@ -91,7 +91,7 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	if receipt, found, err := store.loadIdempotencyReceipt(prepared.Request.IdempotencyKey); err != nil {
 		return StateTransactionReceipt{}, err
 	} else if found {
-		if receipt.RequestDigest != prepared.RequestDigest {
+		if !receiptAcceptsPreparedRequest(receipt, prepared) {
 			// The caller reused a key with different content. Both readings are
 			// plausible from outside -- a genuine retry whose payload drifted, or
 			// a new transition that copied the previous key -- and they have
@@ -107,12 +107,28 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		return receipt, nil
 	}
 	if head.Revision != prepared.Request.ExpectedHeadRevision || head.Digest != prepared.Request.ExpectedHeadDigest {
-		// The wording lives in staleHeadConflict because the aggregate shape
-		// pass raises the same conflict earlier, and a caller that meets it
-		// twice must meet the same sentence twice. See refusal_aggregate.go.
-		return StateTransactionReceipt{}, staleHeadConflict(
-			prepared.Request.ExpectedHeadRevision, prepared.Request.ExpectedHeadDigest,
-			head, prepared.Request.CampaignID)
+		if !prepared.Request.RebaseHead {
+			// Destructive and project-global operations retain exact-head proof.
+			return StateTransactionReceipt{}, staleHeadConflict(
+				prepared.Request.ExpectedHeadRevision, prepared.Request.ExpectedHeadDigest,
+				head, prepared.Request.CampaignID)
+		}
+		rebasedRequest := prepared.Request
+		rebasedRequest.ExpectedHeadRevision = head.Revision
+		rebasedRequest.ExpectedHeadDigest = head.Digest
+		rebased, rebaseErr := prepareTransactionRequest(rebasedRequest)
+		if rebaseErr != nil {
+			return StateTransactionReceipt{}, fmt.Errorf("rebase ordinary transaction: %w", rebaseErr)
+		}
+		if rebased.RequestDigest != prepared.RequestDigest ||
+			rebased.TransactionID != prepared.TransactionID {
+			return StateTransactionReceipt{}, errors.New(
+				"ordinary transaction identity changed during internal head rebase")
+		}
+		prepared = rebased
+	}
+	if err := store.validatePreparedRunWriteGrantIsolation(inventory, prepared); err != nil {
+		return StateTransactionReceipt{}, err
 	}
 	if err := store.validateArtifactExpectations(prepared.Artifacts); err != nil {
 		return StateTransactionReceipt{}, err
