@@ -216,6 +216,8 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                 (("active/fixture/runs/R-20000101-0001/payload/probe.txt",), {"runId": "R-20000101-0001"}, "allow"),
                 (("../outside.txt",), {}, "deny"),
                 (("C:/outside.txt",), {}, "deny"),
+                ((r"C:\outside.txt",), {}, "deny"),
+                (("C:outside.txt",), {}, "deny"),
             )
             for targets, identity, expected in cases:
                 payload = {
@@ -337,20 +339,22 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                 self.decision(self.run_posix(project, "pre-tool-use", content_only_run_output)),
             )
 
-    def test_posix_apply_patch_rejects_foreign_windows_absolute_target(self):
+    def test_posix_apply_patch_rejects_foreign_windows_path_forms(self):
         # This must run independently of PowerShell availability so Linux and
         # macOS exercise the foreign-drive path boundary in their native sh.
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             self.make_project(project)
-            payload = {
-                "tool_name": "apply_patch",
-                "tool_input": {"command": self.patch_command("C:/outside.txt")},
-            }
-            self.assertEqual(
-                "deny",
-                self.decision(self.run_posix(project, "pre-tool-use", payload)),
-            )
+            for target in ("C:/outside.txt", r"C:\outside.txt", "C:outside.txt"):
+                payload = {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": self.patch_command(target)},
+                }
+                self.assertEqual(
+                    "deny",
+                    self.decision(self.run_posix(project, "pre-tool-use", payload)),
+                    target,
+                )
 
     def test_lifecycle_hook_outputs_are_bounded_and_semantically_symmetric(self):
         posix_hook = (HOOKS / "re-discipline-hook.sh").read_text(encoding="ascii")

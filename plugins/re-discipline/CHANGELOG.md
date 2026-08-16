@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3 - 2026-08-16
+
+- Keep PowerShell on native Unix from reinterpreting Windows-rooted patch
+  targets as project-relative paths.
+- Reject ambiguous drive-relative and backslash-rooted targets consistently
+  across PowerShell and POSIX hook hosts.
+
 ## 0.9.2 - 2026-08-16
 
 - Reject Windows drive-qualified patch targets on native POSIX hosts while

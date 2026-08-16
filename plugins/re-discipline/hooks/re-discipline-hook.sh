@@ -269,6 +269,7 @@ relative_path() {
       [ "$windows_posix" = true ] || { printf '\n'; return; }
       drive_path=true
       ;;
+    [A-Za-z]:*|\\*) printf '\n'; return ;;
   esac
   case "$path" in /*|[A-Za-z]:/*) candidate=$path ;; *) candidate="$root/$path" ;; esac
   probe=$(dirname "$candidate")

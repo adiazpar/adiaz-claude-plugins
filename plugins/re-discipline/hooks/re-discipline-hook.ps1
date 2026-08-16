@@ -125,6 +125,12 @@ function Write-Denial {
 function Get-RelativeProjectPath {
     param([string]$Path, [string]$Root)
     if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return '' }
+    $windowsHost = [System.IO.Path]::DirectorySeparatorChar -eq '\'
+    # Drive-relative paths are ambiguous even on Windows. Drive-rooted and
+    # backslash-rooted paths are foreign on native Unix and must not be joined
+    # beneath the project root as if they were ordinary relative paths.
+    if ($Path -match '^[A-Za-z]:(?:$|[^\\/])') { return '' }
+    if (-not $windowsHost -and ($Path -match '^[A-Za-z]:[\\/]' -or $Path.StartsWith('\'))) { return '' }
     try {
         $absolute = if ([System.IO.Path]::IsPathRooted($Path)) {
             [System.IO.Path]::GetFullPath($Path)
