@@ -386,7 +386,7 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                 payload = {"session_id": "session-onboarding-boundary"}
                 first = runner(project, "session-start", payload)
                 context = first.get("hookSpecificOutput", {}).get("additionalContext", "")
-                self.assertIn("runtime 0.9.0", context)
+                self.assertIn(f"runtime {declared_plugin_version(ROOT)}", context)
                 self.assertNotIn("runtime version mismatch", context.lower())
                 self.assertIn("orient once", context)
                 self.assertIn("do not re-invoke the onboard skill for ordinary user messages", context)

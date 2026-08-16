@@ -3,7 +3,10 @@ import re
 import unittest
 from pathlib import Path
 
-from tests.re_discipline_package_audit import declared_plugin_version
+from tests.re_discipline_package_audit import (
+    declared_plugin_version,
+    semver_release_identity,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,7 +97,9 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
         declared = declared_plugin_version(ROOT)
         self.assertRegex(declared, r"^0\.(?:8|9)\.\d+$")
         self.assertEqual(claude["version"], declared)
-        self.assertEqual(codex["version"], declared)
+        # Codex local-development installs add build metadata as a cache key;
+        # that suffix does not change the published release identity.
+        self.assertEqual(semver_release_identity(codex["version"]), declared)
         for manifest in (claude, codex):
             description = manifest["description"].lower()
             self.assertIn("transactional", description)
@@ -208,7 +213,16 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
         hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())
         self.assertEqual(
             set(hooks["hooks"]),
-            {"SessionStart", "PreToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", "Stop"},
+            {
+                "SessionStart",
+                "PreToolUse",
+                "PostToolUse",
+                "PreCompact",
+                "PostCompact",
+                "SubagentStart",
+                "SubagentStop",
+                "Stop",
+            },
         )
         for event, registrations in hooks["hooks"].items():
             command = registrations[0]["hooks"][0]

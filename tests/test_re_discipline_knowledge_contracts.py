@@ -170,7 +170,8 @@ class ReDisciplineKnowledgeContractTests(unittest.TestCase):
         runtime = (PLUGIN / "references" / "runtime-adapters.md").read_text()
         self.assertIn("accident boundary", readme)
         self.assertIn("Safety remains in engine validation", readme)
-        self.assertIn("Hosts without reliable hook delivery", runtime)
+        # Markdown wrapping is presentation, not part of this safety contract.
+        self.assertIn("Hosts without reliable hook delivery", " ".join(runtime.split()))
 
     def test_memory_and_profile_governance_remain_explicit(self):
         memory = self.skill("review-memory")
