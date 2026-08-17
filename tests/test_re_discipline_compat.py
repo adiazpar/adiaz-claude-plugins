@@ -234,6 +234,14 @@ class ReDisciplineCompatibilityTests(unittest.TestCase):
             self.assertIn("run.return", text)
             self.assertIn("state mode orient", text)
             self.assertNotIn("semantic checkpoint", text.lower())
+        self.assertIn(
+            "collaboration.spawn_agent",
+            hooks["hooks"]["PreToolUse"][0]["matcher"],
+        )
+        self.assertIn(
+            "collaboration.spawn_agent",
+            hooks["hooks"]["PostToolUse"][0]["matcher"],
+        )
 
     def test_readme_documents_success_and_failed_transition(self):
         text = (PLUGIN / "README.md").read_text()

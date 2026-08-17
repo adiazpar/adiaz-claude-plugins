@@ -236,6 +236,21 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                     targets,
                 )
 
+            namespaced_apply_patch = {
+                "tool_name": "functions.apply_patch",
+                "tool_input": {"command": self.patch_command("docs/namespaced-note.md")},
+            }
+            self.assertEqual(
+                "allow",
+                self.decision(
+                    self.run_powershell(project, "pre-tool-use", namespaced_apply_patch)
+                ),
+            )
+            self.assertEqual(
+                "allow",
+                self.decision(self.run_posix(project, "pre-tool-use", namespaced_apply_patch)),
+            )
+
             absolute_cases = (
                 (project / "src" / "absolute.py", "allow"),
                 (project / "active" / "fixture" / "campaign.json", "deny"),
@@ -445,7 +460,13 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                 session_one = f"{host_name}-manager-one"
                 session_two = f"{host_name}-manager-two"
 
-                def launch(session: str, tool_use_id: str, run_id: str, digest_character: str) -> dict:
+                def launch(
+                    session: str,
+                    tool_use_id: str,
+                    run_id: str,
+                    digest_character: str,
+                    tool_name: str = "spawn_agent",
+                ) -> dict:
                     return runner(
                         project,
                         "pre-tool-use",
@@ -453,7 +474,7 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                             "session_id": session,
                             "turn_id": f"turn-{tool_use_id}",
                             "tool_use_id": tool_use_id,
-                            "tool_name": "spawn_agent",
+                            "tool_name": tool_name,
                             "tool_input": {
                                 "message": (
                                     f"re-discipline-run: {run_id} sha256:{digest_character * 64}\n"
@@ -463,7 +484,19 @@ class ReDisciplinePackageCutoverTests(unittest.TestCase):
                         },
                     )
 
-                self.assertEqual("allow", self.decision(launch(session_one, "call-one", "R-20000101-0001", "a")))
+                self.assertEqual(
+                    "allow",
+                    self.decision(
+                        launch(
+                            session_one,
+                            "call-one",
+                            "R-20000101-0001",
+                            "a",
+                            "collaboration.spawn_agent",
+                        )
+                    ),
+                    "the Codex namespaced spawn tool must reserve the same registered dispatch",
+                )
                 self.assertEqual(
                     "allow",
                     self.decision(launch(session_two, "call-independent", "R-20000101-0002", "b")),

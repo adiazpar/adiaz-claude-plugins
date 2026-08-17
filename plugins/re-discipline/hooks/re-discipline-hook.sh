@@ -4,6 +4,14 @@ set -eu
 event=${1:-}
 input=$(cat)
 
+tool_operation_name() {
+  value=${1:-}
+  value=${value##*.}
+  value=${value##*::}
+  value=${value##*/}
+  printf '%s' "$value"
+}
+
 json_object_string() {
   container=$1
   requested=$2
@@ -829,13 +837,14 @@ root=$(find_root "$cwd")
 if [ "$event" = pre-tool-use ]; then
   tool=$(json_envelope_string tool_name)
   [ -n "$tool" ] || tool=$(json_envelope_string toolName)
+  tool_operation=$(tool_operation_name "$tool")
   session_id=$(json_envelope_string session_id)
   [ -n "$session_id" ] || session_id=$(json_envelope_string sessionId)
   agent_id=$(subagent_id)
   tool_use_id=$(json_envelope_string tool_use_id)
   [ -n "$tool_use_id" ] || tool_use_id=$(json_envelope_string toolUseId)
 
-  case "$tool" in
+  case "$tool_operation" in
     spawn_agent|Agent)
       dispatch_marker
       if [ "$marker_present" != true ]; then
@@ -873,7 +882,7 @@ if [ "$event" = pre-tool-use ]; then
 
   targets=
   operation_label=Write/Edit
-  case "$tool" in
+  case "$tool_operation" in
     Write|Edit)
       path=$(json_tool_string file_path 2>/dev/null || true)
       [ -n "$path" ] || path=$(json_tool_string filePath 2>/dev/null || true)
@@ -955,7 +964,7 @@ $normalized_target"; else targets=$normalized_target; fi
   for target in $targets; do
     rel=$(relative_path "$target" "$root")
     if [ -z "$rel" ]; then
-      if [ "$tool" = apply_patch ]; then
+      if [ "$tool_operation" = apply_patch ]; then
         IFS=$old_ifs
         emit_deny "Direct apply_patch denied: target '$target' is outside the verified project root or cannot be normalized."
         exit 0
@@ -994,7 +1003,8 @@ fi
 if [ "$event" = post-tool-use ]; then
   tool=$(json_envelope_string tool_name)
   [ -n "$tool" ] || tool=$(json_envelope_string toolName)
-  case "$tool" in
+  tool_operation=$(tool_operation_name "$tool")
+  case "$tool_operation" in
     spawn_agent|Agent)
       if [ -n "$root" ]; then
         session_id=$(json_envelope_string session_id)

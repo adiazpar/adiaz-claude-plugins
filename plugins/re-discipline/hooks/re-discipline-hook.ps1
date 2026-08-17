@@ -25,6 +25,13 @@ function Get-Field {
     return $Default
 }
 
+function Get-ToolOperationName {
+    param([string]$ToolName)
+    if ([string]::IsNullOrWhiteSpace($ToolName)) { return '' }
+    $parts = @($ToolName -split '(?:::|[./])')
+    return [string]$parts[$parts.Count - 1]
+}
+
 function Get-ApplyPatchTargets {
     param($ToolInput)
     if ($null -eq $ToolInput) {
@@ -754,13 +761,14 @@ $projectRoot = Find-ProjectRoot $cwd
 
 if ($Event -eq 'pre-tool-use') {
     $toolName = Get-Field $inputObject @('tool_name', 'toolName') ''
+    $toolOperation = Get-ToolOperationName $toolName
     $toolInput = $inputObject.PSObject.Properties['tool_input']
     if ($null -eq $toolInput) { $toolInput = $inputObject.PSObject.Properties['toolInput'] }
     $toolInputValue = if ($null -ne $toolInput) { $toolInput.Value } else { $null }
     $sessionId = Get-Field $inputObject @('session_id', 'sessionId') ''
     $agentId = Get-SubagentId $inputObject
     $toolUseId = Get-Field $inputObject @('tool_use_id', 'toolUseId') ''
-    if ($toolName -ieq 'spawn_agent' -or $toolName -ieq 'Agent') {
+    if ($toolOperation -ieq 'spawn_agent' -or $toolOperation -ieq 'Agent') {
         $marker = Get-DispatchMarker $toolInputValue
         if (-not $marker.Present) {
             if ([string]::IsNullOrWhiteSpace($projectRoot)) {
@@ -799,13 +807,13 @@ if ($Event -eq 'pre-tool-use') {
     }
     $targets = @()
     $operationLabel = 'Write/Edit'
-    if ($toolName -match '^(Write|Edit)$') {
+    if ($toolOperation -match '^(Write|Edit)$') {
         $path = ''
         if ($null -ne $toolInput) { $path = Get-Field $toolInput.Value @('file_path', 'filePath', 'path') '' }
         if ([string]::IsNullOrWhiteSpace($path)) { $path = Get-Field $inputObject @('file_path', 'filePath', 'path') '' }
         if (-not [string]::IsNullOrWhiteSpace($path)) { $targets = @($path) }
     }
-    elseif ($toolName -ieq 'apply_patch') {
+    elseif ($toolOperation -ieq 'apply_patch') {
         $operationLabel = 'apply_patch'
         $patchTargets = Get-ApplyPatchTargets $toolInputValue
         if (-not $patchTargets.Valid) {
@@ -823,7 +831,7 @@ if ($Event -eq 'pre-tool-use') {
         exit 0
     }
     if ($targets.Count -eq 0) {
-        if ($toolName -ieq 'apply_patch') {
+        if ($toolOperation -ieq 'apply_patch') {
             Write-Denial 'Direct apply_patch denied: no write target could be identified.'
             exit 0
         }
@@ -860,7 +868,7 @@ if ($Event -eq 'pre-tool-use') {
     foreach ($target in $targets) {
         $relative = Get-RelativeProjectPath $target $projectRoot
         if ([string]::IsNullOrWhiteSpace($relative)) {
-            if ($toolName -ieq 'apply_patch') {
+            if ($toolOperation -ieq 'apply_patch') {
                 Write-Denial "Direct apply_patch denied: target '$target' is outside the verified project root or cannot be normalized."
                 exit 0
             }
@@ -893,7 +901,8 @@ if ($Event -eq 'pre-tool-use') {
 
 if ($Event -eq 'post-tool-use') {
     $toolName = Get-Field $inputObject @('tool_name', 'toolName') ''
-    if (($toolName -ieq 'spawn_agent' -or $toolName -ieq 'Agent') -and
+    $toolOperation = Get-ToolOperationName $toolName
+    if (($toolOperation -ieq 'spawn_agent' -or $toolOperation -ieq 'Agent') -and
         -not [string]::IsNullOrWhiteSpace($projectRoot)) {
         $sessionId = Get-Field $inputObject @('session_id', 'sessionId') ''
         $toolUseId = Get-Field $inputObject @('tool_use_id', 'toolUseId') ''

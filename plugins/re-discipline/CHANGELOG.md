@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Normalize namespaced Codex tool names at the hook boundary so registered
+  workers launched through `collaboration.spawn_agent` receive their run
+  binding while namespaced write tools retain the same grant enforcement.
+
 ## 0.9.4 - 2026-08-16
 
 - Make run report paths engine-owned: manager transitions submit only the
