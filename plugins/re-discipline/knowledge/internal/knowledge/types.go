@@ -15,7 +15,7 @@ const (
 	// The one definition of the published version. The packager, the package
 	// audit, and .github/scripts/re-discipline-sync-version.py all derive
 	// from this; a release is this line plus a manifest sync.
-	RuntimeVersion = "0.9.5"
+	RuntimeVersion = "0.9.6"
 	// ParserVersion also binds the derived finding-index identity model. The
 	// campaign-key suffix forces one rebuild when campaign-local F-* IDs replace
 	// the former accidental project-global key.

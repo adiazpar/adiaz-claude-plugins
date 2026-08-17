@@ -640,7 +640,7 @@ func validateRunPreparationArtifactBindings(
 func validateClosureArtifactPath(slug, value string) error {
 	activeStaging := "active/" + slug + "/closure/staging/"
 	switch {
-	case value == "docs/INDEX.md":
+	case validClosureNavigationPath(value):
 	case strings.HasPrefix(value, "docs/truth/"):
 		return validateTruthDestination(value)
 	case strings.HasPrefix(value, "docs/backlog/"), strings.HasPrefix(value, "docs/playbooks/"):

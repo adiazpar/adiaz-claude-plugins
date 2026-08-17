@@ -30,13 +30,13 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:3f5ffceb1fd073e638ef1edf4a28d6702eeede5787cccd74664febf493180373",
+        "digest": "sha256:e8478a958fee95d03cb8afa53c012cfa02f2202afc91983e835f70b6b1f3dfa0",
         "status": "passed",
-        "evaluatedAt": "2026-08-17T11:06:41Z",
+        "evaluatedAt": "2026-08-17T12:05:43Z",
         "evalFingerprint": "sha256:c248ee7ac3bfc2075e4154d2d47da692ee0179b52529dcf7c00b041449cecea1",
         "corpusFingerprint": "sha256:fc7c2805dfd5daa2a5ea86f8951f1512acbf2a0c4ea3333f34df0514379e4117",
         "modelFingerprint": "sha256:f8654dc6bc0274fcc627476617fdd445626ca9e17c7d1717669e6deccaecb7be",
-        "runtimeFingerprint": "sha256:e4e21ec3bb6ea82ea8e4eba215d43cf2f72b311543777789d276f1e2180ffcb2",
+        "runtimeFingerprint": "sha256:53de95732e92d9b972ff5f3d69f716d8277d4b434d63fcf2719f8eb04825f434",
         "chunkerVersion": "section-block-v6-finding-freshness",
         "parserVersion": "markdown-finding-v2-identifier-v1-campaign-key-v1"
       }
@@ -66,13 +66,13 @@
       },
       "benchmark": {
         "suite": "packaged-conformance-v1",
-        "digest": "sha256:12df095b8521c64dc61eb6186b40719f3afbca149efbf69c9e74f557b4e288c5",
+        "digest": "sha256:3c0c0701c345deaf4c82babf202494f6b0f57587c1d5a0e356ac424e9090585d",
         "status": "passed",
-        "evaluatedAt": "2026-08-17T11:06:41Z",
+        "evaluatedAt": "2026-08-17T12:05:43Z",
         "evalFingerprint": "sha256:c248ee7ac3bfc2075e4154d2d47da692ee0179b52529dcf7c00b041449cecea1",
         "corpusFingerprint": "sha256:fc7c2805dfd5daa2a5ea86f8951f1512acbf2a0c4ea3333f34df0514379e4117",
         "modelFingerprint": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "runtimeFingerprint": "sha256:e4e21ec3bb6ea82ea8e4eba215d43cf2f72b311543777789d276f1e2180ffcb2",
+        "runtimeFingerprint": "sha256:53de95732e92d9b972ff5f3d69f716d8277d4b434d63fcf2719f8eb04825f434",
         "chunkerVersion": "section-block-v6-finding-freshness",
         "parserVersion": "markdown-finding-v2-identifier-v1-campaign-key-v1"
       }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.6 - 2026-08-17
+
+- Treat the five engine-managed documentation indexes as navigation artifacts
+  before applying the stricter canonical truth-finding path rule, allowing a
+  truth-projecting closure to finalize without admitting loose truth files.
+
 ## 0.9.5 - 2026-08-17
 
 - Normalize namespaced Codex tool names at the hook boundary so registered

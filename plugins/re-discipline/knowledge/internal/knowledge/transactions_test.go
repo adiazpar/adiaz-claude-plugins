@@ -502,6 +502,30 @@ func TestStateTransactionClosureArtifactSharesCommit(t *testing.T) {
 	}
 }
 
+func TestClosureArtifactPathAllowsOnlyManagedTruthNavigationOrFindings(t *testing.T) {
+	for _, value := range []string{
+		"docs/INDEX.md",
+		"docs/history/INDEX.md",
+		"docs/truth/INDEX.md",
+		"docs/backlog/INDEX.md",
+		"docs/playbooks/INDEX.md",
+		"docs/truth/findings/test-campaign/F-0001.md",
+	} {
+		if err := validateClosureArtifactPath("test-campaign", value); err != nil {
+			t.Errorf("managed closure artifact %s was refused: %v", value, err)
+		}
+	}
+	for _, value := range []string{
+		"docs/truth/topic.md",
+		"docs/truth/findings/F-0001.md",
+		"docs/truth/findings/other-campaign/F-0001.txt",
+	} {
+		if err := validateClosureArtifactPath("test-campaign", value); err == nil {
+			t.Errorf("noncanonical truth artifact %s was accepted", value)
+		}
+	}
+}
+
 func TestStateStoreIgnoresDerivedCacheDeletion(t *testing.T) {
 	store, root := newStateTestStore(t)
 	_, opening := openStateTestCampaign(t, store)
