@@ -103,7 +103,7 @@ func TestReturnedRunCurationRatificationIsRetrievableAcrossCampaigns(t *testing.
 		returned.RecordMeta, "2026-08-02T18:02:00Z", "manager", running.CorrelationID)
 	returned.Status = "returned"
 	returned.ReturnedAt = "2026-08-02T18:02:00Z"
-	returned.Report = &FileHandle{Path: reportPath, SHA256: "sha256:" + SHA256Bytes(report)}
+	returned.Report = &FileHandle{SHA256: "sha256:" + SHA256Bytes(report)}
 	returned.ResultSummary = "Verified the frame registry locator."
 	work = graph.WorkItems["W-0001"]
 	priorWorkDigest = work.Digest
@@ -124,6 +124,11 @@ func TestReturnedRunCurationRatificationIsRetrievableAcrossCampaigns(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	if reportHandle := graph.Runs[runID].Report; reportHandle == nil ||
+		reportHandle.Path != reportPath || reportHandle.SHA256 != "sha256:"+SHA256Bytes(report) {
+		t.Fatalf("run.return did not persist the engine-derived report handle: %+v", reportHandle)
+	}
+	returned = graph.Runs[runID]
 	if graph.WorkItems[continuousCurationWorkID(runID)].Assignee != "knowledge-curator" {
 		t.Fatal("returned run did not create its engine-owned curation queue")
 	}

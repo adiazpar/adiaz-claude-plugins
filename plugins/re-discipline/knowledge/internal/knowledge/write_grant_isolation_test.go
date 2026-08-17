@@ -120,7 +120,7 @@ func grantIsolationReturnRun(
 	returned.RecordMeta = grantIsolationAdvanceMeta(returned.RecordMeta, running.CorrelationID)
 	returned.Status = "returned"
 	returned.ReturnedAt = stateTestTime
-	returned.Report = &FileHandle{Path: reportPath, SHA256: "sha256:" + SHA256Bytes(report)}
+	returned.Report = &FileHandle{SHA256: "sha256:" + SHA256Bytes(report)}
 	returned.ResultSummary = "Completed the write-boundary fixture."
 	work = graph.WorkItems[workID]
 	priorWorkDigest = work.Digest

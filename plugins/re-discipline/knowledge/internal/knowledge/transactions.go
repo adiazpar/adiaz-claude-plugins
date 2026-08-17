@@ -560,6 +560,18 @@ func prepareStateWrite(slug, campaignID, correlationID, eventID string, resultin
 		return preparedStateWrite{}, err
 	}
 	write.Record = injectTransactionOwnedFields(write.Record, eventID, resultingHeadRevision)
+	switch run := write.Record.(type) {
+	case RunRecord:
+		if err := validateRunHandleLocations(slug, run); err != nil {
+			return preparedStateWrite{}, err
+		}
+	case *RunRecord:
+		if run != nil {
+			if err := validateRunHandleLocations(slug, *run); err != nil {
+				return preparedStateWrite{}, err
+			}
+		}
+	}
 	record, body, err := sealStateRecord(write.Record, write.Path)
 	if err != nil {
 		return preparedStateWrite{}, err

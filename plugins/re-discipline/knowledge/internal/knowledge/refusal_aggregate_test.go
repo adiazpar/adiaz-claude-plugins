@@ -401,7 +401,7 @@ func TestRunReturnShapeRulesSurvivedTheMoveOutOfAugmentation(t *testing.T) {
 	withoutReport.Runs[0].Report = nil
 	err := validateManagerActionPayload(
 		withoutReport, managerActionKinds["run.return"], Configuration{})
-	if err == nil || !strings.Contains(err.Error(), "frozen report handle") {
+	if err == nil || !strings.Contains(err.Error(), "report SHA-256") {
 		t.Fatalf("run.return without a frozen report handle was accepted: %v", err)
 	}
 

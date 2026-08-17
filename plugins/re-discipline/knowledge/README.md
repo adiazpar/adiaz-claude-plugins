@@ -231,6 +231,13 @@ so the engine derives both when they are omitted. Supplied handles are still
 compared byte for byte, which keeps compare-and-swap available to an
 independent verifier that computes the same canonical bytes.
 
+`run.return` takes the report SHA-256 but never a report path. The engine owns
+the run workspace, derives `active/<slug>/runs/<run-id>/report.md`, verifies the
+bytes at that location against the submitted digest, and freezes the resulting
+handle. Later ordinary run transitions likewise submit the digest without a
+path; exact reconciliation is the only operation that imports a complete
+canonical run record.
+
 A pack refuses to compile when its mandatory scoped context - the campaign
 objective, scope, exclusions, success and closure criteria, and the work-item
 problem and acceptance criteria - cannot fit the requested budget. The refusal

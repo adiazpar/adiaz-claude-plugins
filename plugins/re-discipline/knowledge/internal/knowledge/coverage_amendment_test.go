@@ -868,7 +868,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	returned.RecordMeta = lifecycleAdvanceMeta(
 		returned.RecordMeta, "2026-08-02T18:02:00Z", "manager", running.CorrelationID)
 	returned.Status, returned.ReturnedAt = "returned", "2026-08-02T18:02:00Z"
-	returned.Report = &FileHandle{Path: reportPath, SHA256: reportDigest}
+	returned.Report = &FileHandle{SHA256: reportDigest}
 	returned.ResultSummary = "Verified the frame registry locator."
 	work = graph.WorkItems["W-0001"]
 	priorWork = work.Digest
@@ -885,6 +885,11 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	if err != nil {
 		t.Fatalf("return the run: %v", err)
 	}
+	graph, err = fixture.store.LoadCampaignGraph("C-TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned = graph.Runs[runID]
 
 	correlation := "corr-retire-curation"
 	ids := []string{"F-0101", "F-0102"}

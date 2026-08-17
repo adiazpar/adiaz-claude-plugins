@@ -465,6 +465,7 @@ func invalidateReturnedRun(
 		invalidated.RecordMeta, at, "manager", returned.CorrelationID)
 	invalidated.Status, invalidated.TerminalAt = "invalidated", at
 	invalidated.InvalidatedBy = invalidatedBy
+	invalidated.Report = &FileHandle{SHA256: returned.Report.SHA256}
 	work := graph.WorkItems[returned.PrimaryWorkItemID]
 	priorWork := work.Digest
 	work.RecordMeta = lifecycleAdvanceMeta(work.RecordMeta, at, "manager", returned.CorrelationID)

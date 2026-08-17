@@ -20,6 +20,11 @@ Never label a run reviewed, ratified, or current by editing report text. The
 engine freezes its digest at return; curation and immutable manager reviews
 create later records.
 
+On `run.return`, submit only the report SHA-256. The report path is not caller
+input: the engine derives `active/<slug>/runs/<run-id>/report.md`, verifies the
+bytes there against the digest, and freezes that canonical handle. Supplying a
+report path is refused before any state is written.
+
 ## Status Views
 
 Orientation should fit one screen and name campaign handles, focus, blocked or

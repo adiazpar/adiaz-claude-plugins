@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.4 - 2026-08-16
+
+- Make run report paths engine-owned: manager transitions submit only the
+  report SHA-256, while one typed run-workspace constructor derives and
+  verifies the canonical handle.
+- Reject caller-supplied report paths before publication and enforce canonical
+  brief, context-pack, and report locations at the transaction boundary.
+- Remove the unreleased report-relocation action and its special transaction
+  path.
+
 ## 0.9.3 - 2026-08-16
 
 - Keep PowerShell on native Unix from reinterpreting Windows-rooted patch

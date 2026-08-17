@@ -83,7 +83,7 @@ func returnNormalizationSourceRun(
 	returned.RecordMeta = lifecycleAdvanceMeta(
 		returned.RecordMeta, "2026-08-02T18:02:00Z", "manager", returned.CorrelationID)
 	returned.Status, returned.ReturnedAt = "returned", "2026-08-02T18:02:00Z"
-	returned.Report = &FileHandle{Path: reportPath, SHA256: "sha256:" + SHA256Bytes(report)}
+	returned.Report = &FileHandle{SHA256: "sha256:" + SHA256Bytes(report)}
 	returned.ResultSummary = "The bounded probe produced no durable claim."
 	work = graph.WorkItems[returned.PrimaryWorkItemID]
 	priorWork = work.Digest
@@ -239,9 +239,7 @@ func completeTerminallyJudgedNormalization(
 	returned.RecordMeta = lifecycleAdvanceMeta(
 		returned.RecordMeta, "2026-08-02T18:05:00Z", "manager", returned.CorrelationID)
 	returned.Status, returned.ReturnedAt = "returned", "2026-08-02T18:05:00Z"
-	returned.Report = &FileHandle{
-		Path: curatorReportPath, SHA256: "sha256:" + SHA256Bytes(curatorReport),
-	}
+	returned.Report = &FileHandle{SHA256: "sha256:" + SHA256Bytes(curatorReport)}
 	returned.ResultSummary = "Complete source coverage found no durable claim."
 	work = graph.WorkItems[workID]
 	priorWork = work.Digest

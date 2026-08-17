@@ -1096,7 +1096,7 @@ func toolDefinitions() []map[string]any {
 		"tokenBudget":             mutationTokenBudgetSchema("artifact rows"),
 	})
 	hoistManagerRecordDefinitions(managerSchema)
-	describeRunLaunchHandles(managerSchema)
+	describeManagerRunHandles(managerSchema)
 
 	curationSchema := reflectedToolSchema(curationSubmitToolInput{})
 	curatorRunSchema := reflectedJSONSchema(reflect.TypeOf(RunRecord{}))
@@ -1382,9 +1382,9 @@ func hoistManagerRecordDefinitions(schema map[string]any) {
 	})
 }
 
-// describeRunLaunchHandles publishes the one thing about run.prepare a caller
-// cannot infer from the reflected shape: both launch handles are optional, and
-// omitting them is the normal path.
+// describeManagerRunHandles publishes the run-handle ownership rules that the
+// reflected canonical record shape cannot express. Launch handles are optional
+// on preparation; report paths are never manager input.
 //
 // The engine derives and seals brief.md and context-pack.json itself -- the
 // brief digest even covers a write-grant block the engine appends after the
@@ -1395,7 +1395,7 @@ func hoistManagerRecordDefinitions(schema map[string]any) {
 // renders as an absent entry in `required` and nothing more. Say it where
 // callers look, so the affordance is reachable without first tripping a
 // refusal.
-func describeRunLaunchHandles(schema map[string]any) {
+func describeManagerRunHandles(schema map[string]any) {
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
 		return
@@ -1421,6 +1421,13 @@ func describeRunLaunchHandles(schema map[string]any) {
 	setSchemaProperties(item, map[string]any{
 		"brief":       launchHandle("brief.md, including the write-grant block it appends,"),
 		"contextPack": launchHandle("canonical context-pack.json"),
+		"report": func() map[string]any {
+			return objectSchema(map[string]any{
+				"sha256": map[string]any{
+					"type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+				},
+			}, []string{"sha256"})
+		}(),
 	})
 }
 

@@ -23,12 +23,12 @@ import (
 // instead of one per round trip.
 
 // validateManagerRequestShape collects every violation the request alone
-// reveals and, on the way, performs the two request-only transformations the
-// engine owes the caller: deriving the run launch handles it is allowed to omit
-// (DESIGN.md P4) and queueing the curation work a returned run implies.
+// reveals and, on the way, performs the request-only transformations the
+// engine owes the caller: deriving omitted launch handles, deriving the report
+// path from the run identity, and queueing the curation work a return implies.
 //
 // Those transformations are done here rather than before validation because
-// both of them read fields whose shape is checked here, and doing them first
+// they read fields whose shape is checked here, and doing them first
 // meant a malformed brief refused from inside a helper whose job is derivation,
 // as a single fact, before the payload had been looked at once. The derivation
 // is gated on its own inputs being clean and skipped otherwise, so a request
@@ -66,6 +66,12 @@ func validateManagerRequestShape(
 		} else {
 			request = completed
 		}
+	}
+	completed, err := completeRunReportHandles(request)
+	if err != nil {
+		set.add(shapeStageArtifact, err)
+	} else {
+		request = completed
 	}
 	// The curation queue a run.return implies is engine-owned, so it is
 	// appended before per-record validation and validated with everything else.
@@ -477,6 +483,12 @@ func collectManagerRunPayload(set *refusalSet, request ManagerApplyRequest, prep
 		return
 	}
 	run := request.Runs[0]
+	if run.Report != nil && run.Report.Path != "" {
+		set.addf(shapeStagePayload,
+			"%s must not supply report.path for run %s; the report path is engine-owned. "+
+				"Submit only report.sha256 and the engine derives active/<slug>/runs/<run-id>/report.md",
+			request.Action, run.ID)
+	}
 	if len(request.WorkItems) != 0 {
 		// Only asked when work items were sent at all. With an empty array the
 		// requirement above already says the whole answer, and repeating it as
@@ -532,9 +544,9 @@ func collectManagerRunPayload(set *refusalSet, request ManagerApplyRequest, prep
 	// of them; the helper is now free to be a pure transformation.
 	if run.Report == nil {
 		set.add(shapeStagePayload, errors.New(
-			"run.return requires a returned run with a frozen report handle: the immutable "+
-				"report the drafter left behind. Remedy: set the run record's report to the "+
-				"path and sha256 of the returned report before submitting"))
+			"run.return requires a returned run with the report SHA-256: the immutable "+
+				"report the drafter left behind. Remedy: set report.sha256 and omit "+
+				"report.path; the engine derives the canonical path"))
 	}
 	if run.Role != "curator" {
 		queueID := continuousCurationWorkID(run.ID)

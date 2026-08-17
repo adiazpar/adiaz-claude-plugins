@@ -91,8 +91,10 @@ grade, review state, and validity are independent fields.
 
 After coverage and decisions are accepted, submit the run's terminal
 transition through `manager_apply` with expected revisions and an idempotency
-key. A blocked run must identify its blocker and resulting work item. Never
-mutate the frozen report to change its epistemic status.
+key. Submit only the frozen report SHA-256 on that run revision; the engine
+re-derives its canonical path and refuses a supplied `report.path`. A blocked
+run must identify its blocker and resulting work item. Never mutate the frozen
+report to change its epistemic status.
 
 `returned` is the state in which a curator intake may be submitted for a run
 without qualification, and nothing transitions back to it, so the engine

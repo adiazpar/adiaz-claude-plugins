@@ -24,7 +24,10 @@ canonicalize both before invocation.
    recruiting destination.
 5. External dispatch receives an existing run; the adapter cannot create or
    mutate workflow records.
-6. Return freezes a report digest and queues curation; it does not review.
+6. Return accepts the report SHA-256, derives the exact canonical run-local
+   `active/<slug>/runs/<run-id>/report.md` path, verifies those bytes, and
+   queues curation; it does not review. A manager-supplied report path is
+   refused before publication.
 
 ## Hook Parity
 

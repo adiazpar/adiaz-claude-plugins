@@ -110,6 +110,7 @@ func completeReturnedRun(
 	completed.RecordMeta = lifecycleAdvanceMeta(
 		completed.RecordMeta, "2026-08-02T18:08:00Z", "manager", returned.CorrelationID)
 	completed.Status, completed.TerminalAt = "completed", "2026-08-02T18:08:00Z"
+	completed.Report = &FileHandle{SHA256: returned.Report.SHA256}
 	work := graph.WorkItems[returned.PrimaryWorkItemID]
 	priorWork := work.Digest
 	work.RecordMeta = lifecycleAdvanceMeta(

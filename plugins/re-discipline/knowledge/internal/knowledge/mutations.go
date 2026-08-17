@@ -157,9 +157,9 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 		return service.managerCampaignDiscard(ctx, request)
 	}
 	// One pass, every violation the request alone reveals, before any write.
-	// The returned request carries the two engine-owned derivations - the run
-	// launch handles a caller may omit, and the curation work item a returned
-	// run implies - which is why it replaces the caller's copy from here on.
+	// The returned request carries the engine-owned run handles and the curation
+	// work item a returned run implies, which is why it replaces the caller's
+	// copy from here on.
 	// See mutations_shape.go.
 	request, shapeErr := validateManagerRequestShape(request, allowedKinds, service.Configuration)
 	if shapeErr != nil {
@@ -369,8 +369,9 @@ var managerActionObligations = map[string]string{
 	"work.update":      "Submit at least one next work-item revision.",
 	"run.prepare": "Submit the prepared run, its primary work item, and the runPreparation " +
 		"brief and context pack.",
-	"run.start":  "Submit the running run and its primary work item.",
-	"run.return": "Submit the returned run with a frozen report handle and its primary work item.",
+	"run.start": "Submit the running run and its primary work item.",
+	"run.return": "Submit the returned run with the report SHA-256 and its primary work item; " +
+		"the engine derives the report path.",
 	"run.complete": "Submit the terminal run, its primary work item, and any findings the " +
 		"review ratified.",
 	"closure.remediation.run.create": "Submit the prepared remediation run, its primary work " +
@@ -570,20 +571,29 @@ func buildRunLaunchArtifacts(request ManagerApplyRequest) (runLaunchArtifacts, e
 	if err != nil {
 		return runLaunchArtifacts{}, fmt.Errorf("serialize run preparation context pack: %w", err)
 	}
-	runPrefix := "active/" + request.CampaignSlug + "/runs/" + run.ID + "/"
+	workspace, err := newCanonicalRunWorkspace(request.CampaignSlug, run.ID)
+	if err != nil {
+		return runLaunchArtifacts{}, err
+	}
+	briefHandle, err := workspace.handle(runBriefHandle, "sha256:"+SHA256Bytes(briefBody))
+	if err != nil {
+		return runLaunchArtifacts{}, err
+	}
+	packHandle, err := workspace.handle(runContextPackHandle, "sha256:"+SHA256Bytes(packBody))
+	if err != nil {
+		return runLaunchArtifacts{}, err
+	}
 	overrideBody := []byte(strings.TrimSpace(migrationDrafterOverrideTemplate) + "\n")
 	return runLaunchArtifacts{
 		Override: StateArtifactWrite{
-			Path:          runPrefix + "AGENTS.override.md",
+			Path:          workspace.root + "/AGENTS.override.md",
 			ContentDigest: "sha256:" + SHA256Bytes(overrideBody), Body: overrideBody,
 		},
 		Brief: StateArtifactWrite{
-			Path:          runPrefix + "brief.md",
-			ContentDigest: "sha256:" + SHA256Bytes(briefBody), Body: briefBody,
+			Path: briefHandle.Path, ContentDigest: briefHandle.SHA256, Body: briefBody,
 		},
 		Pack: StateArtifactWrite{
-			Path:          runPrefix + "context-pack.json",
-			ContentDigest: "sha256:" + SHA256Bytes(packBody), Body: packBody,
+			Path: packHandle.Path, ContentDigest: packHandle.SHA256, Body: packBody,
 		},
 	}, nil
 }
@@ -618,6 +628,34 @@ func completeRunPreparationHandles(request ManagerApplyRequest) (ManagerApplyReq
 	if run.ContextPack == nil {
 		run.ContextPack = &FileHandle{Path: launch.Pack.Path, SHA256: launch.Pack.ContentDigest}
 	}
+	request.Runs = append([]RunRecord(nil), request.Runs...)
+	request.Runs[0] = run
+	return request, nil
+}
+
+// completeRunReportHandles replaces the digest-only report input on every
+// ordinary run transition with the one canonical handle the run can own. A
+// caller cannot choose or redirect the report path; reconcile.import remains
+// separate because its purpose is to submit an exact canonical record.
+func completeRunReportHandles(request ManagerApplyRequest) (ManagerApplyRequest, error) {
+	if !validOne(request.Action,
+		"run.prepare", "run.start", "run.return", "run.complete",
+		"closure.remediation.run.create") || len(request.Runs) != 1 {
+		return request, nil
+	}
+	run := request.Runs[0]
+	if run.Report == nil {
+		return request, nil
+	}
+	workspace, err := newCanonicalRunWorkspace(request.CampaignSlug, run.ID)
+	if err != nil {
+		return request, err
+	}
+	report, err := workspace.handle(runReportHandle, run.Report.SHA256)
+	if err != nil {
+		return request, err
+	}
+	run.Report = &report
 	request.Runs = append([]RunRecord(nil), request.Runs...)
 	request.Runs[0] = run
 	return request, nil
@@ -1087,6 +1125,9 @@ func verifyRunHandles(
 	run RunRecord,
 	transactionArtifacts map[string]StateArtifactWrite,
 ) error {
+	if err := validateRunHandleLocations(slug, run); err != nil {
+		return err
+	}
 	for label, handle := range map[string]*FileHandle{
 		"brief": run.Brief, "context pack": run.ContextPack, "report": run.Report,
 	} {

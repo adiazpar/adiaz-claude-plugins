@@ -162,6 +162,85 @@ func ValidateRunTransition(previous *RunRecord, next RunRecord) error {
 	return nil
 }
 
+type runHandleKind uint8
+
+const (
+	runBriefHandle runHandleKind = iota
+	runContextPackHandle
+	runReportHandle
+)
+
+// canonicalRunWorkspace is the only constructor for paths owned by one run.
+// Callers name the campaign and run and, for file handles, supply a digest;
+// they never assemble an active/<slug>/runs/<run-id> path themselves.
+type canonicalRunWorkspace struct {
+	root string
+}
+
+func newCanonicalRunWorkspace(slug, runID string) (canonicalRunWorkspace, error) {
+	if !runIDRE.MatchString(runID) {
+		return canonicalRunWorkspace{}, fmt.Errorf("invalid run id %q", runID)
+	}
+	root, err := canonicalStatePath(slug, "runs", runID, "")
+	if err != nil {
+		return canonicalRunWorkspace{}, err
+	}
+	return canonicalRunWorkspace{root: root}, nil
+}
+
+func (workspace canonicalRunWorkspace) path(kind runHandleKind) (string, error) {
+	filename := ""
+	switch kind {
+	case runBriefHandle:
+		filename = "brief.md"
+	case runContextPackHandle:
+		filename = "context-pack.json"
+	case runReportHandle:
+		filename = "report.md"
+	default:
+		return "", fmt.Errorf("unsupported run handle kind %d", kind)
+	}
+	return workspace.root + "/" + filename, nil
+}
+
+func (workspace canonicalRunWorkspace) handle(kind runHandleKind, digest string) (FileHandle, error) {
+	path, err := workspace.path(kind)
+	if err != nil {
+		return FileHandle{}, err
+	}
+	return FileHandle{Path: path, SHA256: digest}, nil
+}
+
+func validateRunHandleLocations(slug string, run RunRecord) error {
+	workspace, err := newCanonicalRunWorkspace(slug, run.ID)
+	if err != nil {
+		return err
+	}
+	for _, item := range []struct {
+		label  string
+		handle *FileHandle
+		kind   runHandleKind
+	}{
+		{"brief", run.Brief, runBriefHandle},
+		{"context pack", run.ContextPack, runContextPackHandle},
+		{"report", run.Report, runReportHandle},
+	} {
+		if item.handle == nil {
+			continue
+		}
+		expected, err := workspace.path(item.kind)
+		if err != nil {
+			return err
+		}
+		if item.handle.Path != expected {
+			return fmt.Errorf(
+				"run %s %s handle %s is outside its canonical run workspace; expected %s",
+				run.ID, item.label, item.handle.Path, expected)
+		}
+	}
+	return nil
+}
+
 func isTerminalRun(status string) bool {
 	return validOne(status, "completed", "blocked", "aborted", "invalidated")
 }
