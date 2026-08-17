@@ -361,6 +361,22 @@ func collectManagerActionPayload(
 	configuration Configuration,
 ) {
 	archiveAction := request.Action == "knowledge.archive-fallback.opt-in"
+	relocationAction := request.Action == "truth.relocate"
+	if len(request.TruthRelocations) != 0 && !relocationAction {
+		set.addf(shapeStageComposition,
+			"manager action %s cannot carry truthRelocations; only truth.relocate accepts them. "+
+				"Remedy: drop the field, or re-issue as truth.relocate",
+			request.Action)
+	}
+	if relocationAction && len(request.TruthRelocations) == 0 {
+		set.add(shapeStageComposition, errors.New(
+			"truth.relocate requires truthRelocations: "+managerActionObligation("truth.relocate")))
+	}
+	if len(request.TruthRelocations) > maxTruthRelocations {
+		set.addf(shapeStageComposition,
+			"truth.relocate accepts at most %d truthRelocations per atomic transition",
+			maxTruthRelocations)
+	}
 	if request.ArchiveFallbackDecision != nil && !archiveAction {
 		set.addf(shapeStageComposition,
 			"manager action %s cannot carry archiveFallbackDecision; only "+
@@ -410,7 +426,7 @@ func collectManagerActionPayload(
 		}
 		total += count
 	}
-	if total == 0 && !archiveAction {
+	if total == 0 && !archiveAction && !relocationAction {
 		// A rationale is transaction metadata journaled with every transition;
 		// it is not itself a record. Naming the accepted kinds and the concrete
 		// obligation keeps a caller from concluding that the action is broken.
@@ -437,6 +453,30 @@ func collectManagerActionPayload(
 					"ratifies a retrieval policy and writes no campaign record. Remedy: drop "+
 					"every typed record, runPreparation, and reviewPacket from this request and "+
 					"submit any record changes as their own transitions"))
+		}
+	case "truth.relocate":
+		if total != 0 || request.RunPreparation != nil || request.ReviewPacket != nil ||
+			request.ArchiveFallbackDecision != nil || request.CampaignMerge != nil ||
+			request.CampaignDiscard != nil {
+			set.add(shapeStageComposition, errors.New(
+				"truth.relocate may carry only truthRelocations; it normalizes existing truth "+
+					"artifacts and writes no campaign record. Remedy: drop every typed record and "+
+					"unrelated special payload from this request"))
+		}
+		seenSources := map[string]bool{}
+		for _, relocation := range request.TruthRelocations {
+			if err := validateRelocatableTruthSource(relocation.Source); err != nil {
+				set.addf(shapeStagePayload, "truth relocation source %q: %v", relocation.Source, err)
+			}
+			if !digestRE.MatchString(relocation.ExpectedDigest) {
+				set.addf(shapeStagePayload,
+					"truth relocation %s requires expectedDigest as lowercase sha256:<64 hex>",
+					relocation.Source)
+			}
+			if seenSources[relocation.Source] {
+				set.addf(shapeStagePayload, "truth relocation repeats source %s", relocation.Source)
+			}
+			seenSources[relocation.Source] = true
 		}
 	case "run.prepare", "run.start", "run.return", "run.complete", "closure.remediation.run.create":
 		collectManagerRunPayload(set, request, preparationAction)

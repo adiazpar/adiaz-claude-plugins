@@ -6,6 +6,35 @@ import (
 	"testing"
 )
 
+func TestTruthDiscoveryHasOneAuthoritativeRecordSystem(t *testing.T) {
+	root := makeAdversarialProject(t)
+	writeFindingFixtureFile(t, root, "docs/truth/splits/F-0088.md", []byte(
+		"# Migrated atomic findings\n\n- [Compatibility view](../findings/F-0088.md)\n"))
+	writeFindingFixtureFile(t, root, "docs/truth/legacy-claim.md", []byte(
+		"# Legacy claim\n\nThis compact projection must not become truth authority.\n"))
+
+	boundary, err := NewBoundary(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := DiscoverSources(boundary, DefaultKnowledgeSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundIndex := false
+	for _, source := range inventory.Documents {
+		switch source.Path {
+		case "docs/truth/INDEX.md":
+			foundIndex = source.Tier == "navigation" && source.SourceKind == ""
+		case "docs/truth/splits/F-0088.md", "docs/truth/legacy-claim.md":
+			t.Fatalf("non-canonical truth document entered retrieval: %#v", source)
+		}
+	}
+	if !foundIndex {
+		t.Fatal("truth index was not retained as navigation")
+	}
+}
+
 func TestTruthFindingIsTypedQueriedByDefaultAndExactlyReadable(t *testing.T) {
 	root := makeAdversarialProject(t)
 	reportPath := "active/fixture-campaign/runs/R-20260802-0088/report.md"

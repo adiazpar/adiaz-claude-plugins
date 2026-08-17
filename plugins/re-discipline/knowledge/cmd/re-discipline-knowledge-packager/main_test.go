@@ -32,6 +32,19 @@ func TestSupportedTargetMatrixIsCompleteAndOrdered(t *testing.T) {
 	}
 }
 
+func TestCapturedProjectSourceClassPreservesMeasurementTaxonomy(t *testing.T) {
+	cases := map[string]string{
+		"docs/truth/findings/F-0042.md":                  "truth",
+		"docs/truth/legacy-topic.md":                     "truth",
+		"docs/history/campaigns/example/findings/F-1.md": "history",
+	}
+	for path, want := range cases {
+		if got := capturedProjectSourceClass(path); got != want {
+			t.Errorf("capturedProjectSourceClass(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestStrictJSONDecoderRejectsDuplicateKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "duplicate.json")
 	if err := os.WriteFile(path, []byte(`{"value":1,"value":2}`), 0o644); err != nil {

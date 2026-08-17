@@ -21,6 +21,14 @@ import (
 	"time"
 )
 
+const (
+	adversarialEnginePath      = "docs/truth/findings/fixture-truth/F-9001.md"
+	adversarialPortabilityPath = "docs/truth/findings/fixture-truth/F-9002.md"
+	adversarialConsumerPath    = "docs/truth/findings/fixture-truth/F-9003.md"
+	adversarialHashPath        = "docs/truth/findings/fixture-truth/F-9004.md"
+	adversarialLiteralHashPath = "docs/playbooks/hash#fragment.md"
+)
+
 func adversarialAssetRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -65,6 +73,52 @@ func copyTestFile(t *testing.T, source, target string) {
 	if err := os.WriteFile(target, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeAdversarialTruthFinding(
+	t *testing.T,
+	root, id, relative, subject, claim string,
+	relations FindingRelations,
+) {
+	t.Helper()
+	document := testFindingDocument()
+	document.Record.ID = id
+	document.Record.CampaignID = "C-FIXTURE-TRUTH"
+	document.Record.Path = relative
+	document.Record.Subject = subject
+	document.Record.Claim = claim
+	document.Record.Relations = relations
+	document.Record.SourceRuns = []string{"R-20260802-0001"}
+	document.Record.Evidence = []EvidenceReference{{
+		Path:      "active/fixture-campaign/runs/R-20260802-0001/report.md",
+		SHA256:    "sha256:" + SHA256Bytes([]byte("immutable-unnormalized-run-report\n")),
+		StartLine: 1, EndLine: 1, SourceRun: "R-20260802-0001",
+	}}
+	document.Record.ReviewState = "manager-ratified"
+	document.Record.Validity = "current"
+	document.Record.Projection = "truth"
+	relationBody := "Relations are encoded in the canonical record."
+	claimLinks := ""
+	for _, findingID := range relations.DependsOn {
+		claimLinks += "\n\n[Depends on " + findingID + "](./" + findingID + ".md)"
+		relationBody += "\n- [Depends on " + findingID + "](./" + findingID + ".md)"
+	}
+	document.Record.Body = "# Claim\n" + claim + claimLinks +
+		"\n\n## Applies when\nThe adversarial fixture is active." +
+		"\n\n## Does not establish\nProduction behavior." +
+		"\n\n## Evidence\nSee the immutable fixture report." +
+		"\n\n## Reproduction\nRun the bounded fixture query." +
+		"\n\n## Relations\n" + relationBody
+	document.SyntheticQuestions = []string{
+		"Which canonical fixture record answers this question?",
+		"What does the maintained adversarial truth establish?",
+		"Where is the exact fixture result recorded?",
+	}
+	body, err := RenderFindingDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFindingFixtureFile(t, root, relative, body)
 }
 
 func makeAdversarialProject(t *testing.T) string {
@@ -122,39 +176,36 @@ The test fixture uses the supported managed-project contract.
 		filepath.Join(assetRoot, "profiles", "balanced-v1.json"),
 		filepath.Join(root, ".re-discipline", "knowledge", "retrieval-profile.json"),
 	)
+	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "runs", "R-20260802-0001", "report.md"), "immutable-unnormalized-run-report\n")
 
 	writeTestFile(t, filepath.Join(root, "docs", "INDEX.md"), `# Knowledge index
 
-- [Engine truth](truth/engine.md)
-- [Consumer truth](truth/consumer.md)
+- [Engine truth](truth/findings/fixture-truth/F-9001.md)
+- [Consumer truth](truth/findings/fixture-truth/F-9003.md)
 `)
 	writeTestFile(t, filepath.Join(root, "docs", "truth", "INDEX.md"), `# Truth index
 
-- [Engine](engine.md)
-- [Consumer](consumer.md)
-- [Portability](portability.md)
+- [Engine](findings/fixture-truth/F-9001.md)
+- [Consumer](findings/fixture-truth/F-9003.md)
+- [Portability](findings/fixture-truth/F-9002.md)
 `)
-	writeTestFile(t, filepath.Join(root, "docs", "truth", "engine.md"), `# Engine contract
-
-The exact engine identifier is A1B2C3D4.
-
-Frame serialization uses a checksum before durable commit.
-
-The canonical protocol name is engine-frame-v7.
-`)
-	writeTestFile(t, filepath.Join(root, "docs", "truth", "portability.md"), `# Portability contract
-
-Portable consumers derive stable signatures from maintained recipes.
-`)
-	writeTestFile(t, filepath.Join(root, "docs", "truth", "consumer.md"), `# Consumer contract
-
-The consumer reads engine-frame-v7 and validates stable signatures.
-
-depends-on: portability.md
-
-See [the portability contract](portability.md).
-`)
-	writeTestFile(t, filepath.Join(root, "docs", "truth", "hash#fragment.md"), `# Literal hash path
+	writeAdversarialTruthFinding(t, root, "F-9001", adversarialEnginePath,
+		"fixture.engine-contract",
+		"The exact engine identifier is A1B2C3D4. Frame serialization uses a checksum before durable commit. The canonical protocol name is engine-frame-v7.",
+		FindingRelations{})
+	writeAdversarialTruthFinding(t, root, "F-9002", adversarialPortabilityPath,
+		"fixture.portability-contract",
+		"Portable consumers derive stable signatures from maintained recipes.",
+		FindingRelations{})
+	writeAdversarialTruthFinding(t, root, "F-9003", adversarialConsumerPath,
+		"fixture.consumer-contract",
+		"The consumer reads engine-frame-v7 and validates stable signatures; it depends on [the portability contract](./F-9002.md).",
+		FindingRelations{DependsOn: []string{"F-9002"}})
+	writeAdversarialTruthFinding(t, root, "F-9004", adversarialHashPath,
+		"fixture.literal-hash-path",
+		"literal-hash-path-iota proves that a hash character belongs to the source identity.",
+		FindingRelations{})
+	writeTestFile(t, filepath.Join(root, filepath.FromSlash(adversarialLiteralHashPath)), `# Literal hash path
 
 literal-hash-path-iota proves that a # character belongs to the file name.
 `)
@@ -180,8 +231,6 @@ review-ledger-hold-sigma still needs a decisive observation.
 `)
 	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "notes.md"), "must-not-index-active-notes\n")
 	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "subagents", "run-01", "report.md"), "legacy-report-must-not-index\n")
-	writeTestFile(t, filepath.Join(root, "active", "fixture-campaign", "runs", "R-20260802-0001", "report.md"), "immutable-unnormalized-run-report\n")
-
 	writeTestFile(t, filepath.Join(root, ".re-discipline", "memory", "INDEX.md"), "# Shared memory index\n")
 	writeTestFile(t, filepath.Join(root, ".re-discipline", "memory", "topics", "navigation.md"), `# Navigation recall
 
@@ -644,7 +693,8 @@ func TestAdversarialSourceTiersSecretsAndBoundary(t *testing.T) {
 		".re-discipline/memory/INDEX.md":             "navigation",
 		".re-discipline/memory/topics/navigation.md": "memory",
 		"docs/INDEX.md":                              "navigation",
-		"docs/truth/engine.md":                       "truth",
+		"docs/truth/INDEX.md":                        "navigation",
+		adversarialEnginePath:                        "truth",
 		"docs/history/retired.md":                    "history",
 		"docs/backlog/experiment.md":                 "backlog",
 		// Raw run reports are immutable provenance fallback, never normalized
@@ -785,7 +835,7 @@ func TestAdversarialAtomicReplacementAndGenerationRecovery(t *testing.T) {
 			t.Fatal("unchanged corpus unexpectedly rebuilt")
 		}
 
-		engine := filepath.Join(root, "docs", "truth", "engine.md")
+		engine := filepath.Join(root, "docs", "history", "retired.md")
 		file, err := os.OpenFile(engine, os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			t.Fatal(err)
@@ -1020,11 +1070,11 @@ func TestAdversarialExactFTSGraphCitationsBudgetsAndReplay(t *testing.T) {
 	defer db.Close()
 
 	exact, err := rankExact(ctx, db, "A1B2C3D4", []string{"truth"}, nil, 400)
-	if err != nil || len(exact) == 0 || exact[0].Chunk.Path != "docs/truth/engine.md" {
+	if err != nil || len(exact) == 0 || exact[0].Chunk.Path != adversarialEnginePath {
 		t.Fatalf("exact lane missed technical identifier: rows=%#v err=%v", exact, err)
 	}
 	fts, err := rankFTS(ctx, db, "frame serialization checksum", []string{"truth"}, nil, 200)
-	if err != nil || len(fts) == 0 || fts[0].Chunk.Path != "docs/truth/engine.md" {
+	if err != nil || len(fts) == 0 || fts[0].Chunk.Path != adversarialEnginePath {
 		t.Fatalf("FTS lane missed engine truth: rows=%#v err=%v", fts, err)
 	}
 	if len(selected.Models) != 1 ||
@@ -1035,7 +1085,7 @@ func TestAdversarialExactFTSGraphCitationsBudgetsAndReplay(t *testing.T) {
 	if err != nil || len(dense) == 0 {
 		t.Fatalf("dense lane did not execute against indexed vectors: rows=%d err=%v", len(dense), err)
 	}
-	consumer, err := rankExact(ctx, db, "docs/truth/consumer.md", []string{"truth"}, nil, 400)
+	consumer, err := rankExact(ctx, db, "depends on the portability contract", []string{"truth"}, nil, 400)
 	if err != nil || len(consumer) == 0 {
 		t.Fatalf("direct path lookup missed graph seed: %v", err)
 	}
@@ -1048,13 +1098,13 @@ func TestAdversarialExactFTSGraphCitationsBudgetsAndReplay(t *testing.T) {
 	for _, row := range graph {
 		graphPaths[row.Chunk.Path] = true
 	}
-	if !graphPaths["docs/truth/portability.md"] {
+	if !graphPaths[adversarialPortabilityPath] {
 		t.Fatalf("dependency/link graph did not expand to portability truth: %v", graphPaths)
 	}
 
 	options := SearchOptions{
 		Query: "A1B2C3D4", QueryClass: "exact", AllowedTiers: []string{"truth"},
-		Limit: 12, TokenBudget: 512,
+		Limit: 12, TokenBudget: 1024,
 		// The full execution identity this asserts is exactly what a compact
 		// response drops as re-derivable; ask for the canonical form.
 		Verbosity: VerbosityVerbose,
@@ -1161,7 +1211,7 @@ func TestAdversarialExactFTSGraphCitationsBudgetsAndReplay(t *testing.T) {
 	}
 	assertAdversarialRuntimeIdentity(t, statusGeneration.Runtime)
 
-	hashRead, err := service.Read(ctx, ReadOptions{Path: "docs/truth/hash#fragment.md"})
+	hashRead, err := service.Read(ctx, ReadOptions{Path: adversarialLiteralHashPath})
 	if err != nil {
 		t.Fatalf("managed path containing # was not readable: %v", err)
 	}
@@ -1188,7 +1238,7 @@ func TestAdversarialExactFTSGraphCitationsBudgetsAndReplay(t *testing.T) {
 
 func TestAdversarialReadRequiresBoundedRangeForLargeSources(t *testing.T) {
 	root := makeAdversarialProject(t)
-	const relative = "docs/truth/large-source.md"
+	const relative = "docs/playbooks/large-source.md"
 	content := "# Large source\n\n" + strings.Repeat(
 		"bounded-read-payload-0123456789\n", 80000)
 	if len(content) < 2*1024*1024 || int64(len(content)) >= maxSourceBytes {
@@ -1384,7 +1434,7 @@ func TestAdversarialRecallWritesProposalsOnlyAndPendingIsNeverRetrieved(t *testi
 	service := newAdversarialService(t, root, nil)
 	ctx := context.Background()
 	topicPath := filepath.Join(root, ".re-discipline", "memory", "topics", "navigation.md")
-	truthPath := filepath.Join(root, "docs", "truth", "engine.md")
+	truthPath := filepath.Join(root, filepath.FromSlash(adversarialEnginePath))
 	topicBefore, _ := os.ReadFile(topicPath)
 	truthBefore, _ := os.ReadFile(truthPath)
 
@@ -1392,7 +1442,7 @@ func TestAdversarialRecallWritesProposalsOnlyAndPendingIsNeverRetrieved(t *testi
 		ctx,
 		"Candidate workflow shortcut",
 		"proposal-only-marker-theta must remain provisional.",
-		[]string{"docs/truth/engine.md"},
+		[]string{adversarialEnginePath},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1408,7 +1458,7 @@ func TestAdversarialRecallWritesProposalsOnlyAndPendingIsNeverRetrieved(t *testi
 		ctx,
 		"Candidate workflow shortcut",
 		"proposal-only-marker-theta must remain provisional.",
-		[]string{"docs/truth/engine.md"},
+		[]string{adversarialEnginePath},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1479,10 +1529,10 @@ func TestAdversarialEvaluationCasesAreStrictAndSplitByTopic(t *testing.T) {
 		  "queryClass":"exact",
 		  "allowedTiers":["truth"],
 		  "corpusSnapshot":"fixture:adversarial",
-		  "expectedPaths":["docs/truth/engine.md"],
-		  "minimumEvidencePaths":["docs/truth/engine.md"],
+		  "expectedPaths":["docs/truth/findings/fixture-truth/F-9001.md"],
+		  "minimumEvidencePaths":["docs/truth/findings/fixture-truth/F-9001.md"],
 		  "hardNegativePaths":[],
-		  "expectedCitations":["docs/truth/engine.md"],
+		  "expectedCitations":["docs/truth/findings/fixture-truth/F-9001.md"],
 		  "forbiddenTiers":["history"],
 		  "tokenBudget":512,
 		  "answerable":true,
@@ -1498,9 +1548,9 @@ func TestAdversarialEvaluationCasesAreStrictAndSplitByTopic(t *testing.T) {
 		writeTestJSON(t, path, EvalCase{
 			ID: "case-one", Role: "manager", Topic: "topic-one", Split: "random",
 			Query: "A1B2C3D4", QueryClass: "exact", AllowedTiers: []string{"truth"},
-			CorpusSnapshot: "fixture:adversarial", ExpectedPaths: []string{"docs/truth/engine.md"},
-			MinimumEvidencePaths: []string{"docs/truth/engine.md"},
-			ExpectedCitations:    []string{"docs/truth/engine.md"},
+			CorpusSnapshot: "fixture:adversarial", ExpectedPaths: []string{adversarialEnginePath},
+			MinimumEvidencePaths: []string{adversarialEnginePath},
+			ExpectedCitations:    []string{adversarialEnginePath},
 			ForbiddenTiers:       []string{"history"}, TokenBudget: 512,
 			Answerable: boolPointer(true),
 		})
@@ -1515,17 +1565,17 @@ func TestAdversarialEvaluationCasesAreStrictAndSplitByTopic(t *testing.T) {
 			{
 				ID: "dev-one", Role: "manager", Topic: "leaked-topic", Split: "development",
 				Query: "A1B2C3D4", QueryClass: "exact", AllowedTiers: []string{"truth"},
-				CorpusSnapshot: "fixture:adversarial", ExpectedPaths: []string{"docs/truth/engine.md"},
-				MinimumEvidencePaths: []string{"docs/truth/engine.md"},
-				ExpectedCitations:    []string{"docs/truth/engine.md"}, TokenBudget: 512,
+				CorpusSnapshot: "fixture:adversarial", ExpectedPaths: []string{adversarialEnginePath},
+				MinimumEvidencePaths: []string{adversarialEnginePath},
+				ExpectedCitations:    []string{adversarialEnginePath}, TokenBudget: 512,
 				Answerable: boolPointer(true),
 			},
 			{
 				ID: "holdout-one", Role: "manager", Topic: "leaked-topic", Split: "holdout",
 				Query: "engine frame", QueryClass: "conceptual", AllowedTiers: []string{"truth"},
-				CorpusSnapshot: "fixture:adversarial", ExpectedPaths: []string{"docs/truth/engine.md"},
-				MinimumEvidencePaths: []string{"docs/truth/engine.md"},
-				ExpectedCitations:    []string{"docs/truth/engine.md"}, TokenBudget: 512,
+				CorpusSnapshot: "fixture:adversarial", ExpectedPaths: []string{adversarialEnginePath},
+				MinimumEvidencePaths: []string{adversarialEnginePath},
+				ExpectedCitations:    []string{adversarialEnginePath}, TokenBudget: 512,
 				Answerable: boolPointer(true),
 			},
 		})
@@ -1737,19 +1787,24 @@ func TestAdversarialPackagedBenchmarkDigestAndMetrics(t *testing.T) {
 
 func TestAdversarialCalibrationUsesDevelopmentThenFrozenHoldoutWithoutActivation(t *testing.T) {
 	root := makeAdversarialProject(t)
+	service := newAdversarialService(t, root, nil)
+	generation, _, _, _, err := service.ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeCalibrationCases(t, root, []EvalCase{
 		{
 			ID: "development-dependency", Role: "manager", Topic: "development-dependency",
 			Split: "development", Query: "consumer depends-on portability", QueryClass: "dependency",
-			AllowedTiers: []string{"truth"}, CorpusSnapshot: "fixture:development",
+			AllowedTiers: []string{"truth"}, CorpusSnapshot: generation.CorpusFingerprint,
 			ExpectedPaths: []string{
-				"docs/truth/consumer.md", "docs/truth/portability.md",
+				adversarialConsumerPath, adversarialPortabilityPath,
 			},
 			MinimumEvidencePaths: []string{
-				"docs/truth/consumer.md", "docs/truth/portability.md",
+				adversarialConsumerPath, adversarialPortabilityPath,
 			},
 			ExpectedCitations: []string{
-				"docs/truth/consumer.md", "docs/truth/portability.md",
+				adversarialConsumerPath, adversarialPortabilityPath,
 			},
 			ForbiddenTiers: []string{"history"}, TokenBudget: 1024,
 			Answerable: boolPointer(true),
@@ -1757,10 +1812,10 @@ func TestAdversarialCalibrationUsesDevelopmentThenFrozenHoldoutWithoutActivation
 		{
 			ID: "holdout-exact", Role: "manager", Topic: "holdout-engine",
 			Split: "holdout", Query: "A1B2C3D4", QueryClass: "exact",
-			AllowedTiers: []string{"truth"}, CorpusSnapshot: "fixture:holdout",
-			ExpectedPaths:        []string{"docs/truth/engine.md"},
-			MinimumEvidencePaths: []string{"docs/truth/engine.md"},
-			ExpectedCitations:    []string{"docs/truth/engine.md"},
+			AllowedTiers: []string{"truth"}, CorpusSnapshot: generation.CorpusFingerprint,
+			ExpectedPaths:        []string{adversarialEnginePath},
+			MinimumEvidencePaths: []string{adversarialEnginePath},
+			ExpectedCitations:    []string{adversarialEnginePath},
 			ForbiddenTiers:       []string{"history"}, TokenBudget: 512,
 			Answerable: boolPointer(true),
 		},
@@ -1770,7 +1825,6 @@ func TestAdversarialCalibrationUsesDevelopmentThenFrozenHoldoutWithoutActivation
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := newAdversarialService(t, root, nil)
 	report, err := service.Calibrate(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1867,20 +1921,25 @@ func TestAdversarialCalibrationUsesDevelopmentThenFrozenHoldoutWithoutActivation
 
 func TestAdversarialProfilePromotionAuthenticatesCandidateAndRecomputesEvidence(t *testing.T) {
 	root := makeAdversarialProject(t)
+	service := newAdversarialService(t, root, nil)
+	generation, _, _, _, err := service.ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeCalibrationCases(t, root, []EvalCase{
 		{
 			ID: "development-promotion", Role: "manager", Topic: "promotion-development",
 			Split: "development", Query: "consumer depends-on portability",
 			QueryClass: "dependency", AllowedTiers: []string{"truth"},
-			CorpusSnapshot: "fixture:promotion-development",
+			CorpusSnapshot: generation.CorpusFingerprint,
 			ExpectedPaths: []string{
-				"docs/truth/consumer.md", "docs/truth/portability.md",
+				adversarialConsumerPath, adversarialPortabilityPath,
 			},
 			MinimumEvidencePaths: []string{
-				"docs/truth/consumer.md", "docs/truth/portability.md",
+				adversarialConsumerPath, adversarialPortabilityPath,
 			},
 			ExpectedCitations: []string{
-				"docs/truth/consumer.md", "docs/truth/portability.md",
+				adversarialConsumerPath, adversarialPortabilityPath,
 			},
 			ForbiddenTiers: []string{"history"}, TokenBudget: 1024,
 			Answerable: boolPointer(true),
@@ -1888,15 +1947,14 @@ func TestAdversarialProfilePromotionAuthenticatesCandidateAndRecomputesEvidence(
 		{
 			ID: "holdout-promotion", Role: "drafter", Topic: "promotion-holdout",
 			Split: "holdout", Query: "A1B2C3D4", QueryClass: "exact",
-			AllowedTiers: []string{"truth"}, CorpusSnapshot: "fixture:promotion-holdout",
-			ExpectedPaths:        []string{"docs/truth/engine.md"},
-			MinimumEvidencePaths: []string{"docs/truth/engine.md"},
-			ExpectedCitations:    []string{"docs/truth/engine.md"},
+			AllowedTiers: []string{"truth"}, CorpusSnapshot: generation.CorpusFingerprint,
+			ExpectedPaths:        []string{adversarialEnginePath},
+			MinimumEvidencePaths: []string{adversarialEnginePath},
+			ExpectedCitations:    []string{adversarialEnginePath},
 			ForbiddenTiers:       []string{"history"}, TokenBudget: 512,
 			Answerable: boolPointer(true),
 		},
 	})
-	service := newAdversarialService(t, root, nil)
 	report, err := service.Calibrate(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -2838,7 +2896,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		}
 		search, err := service.Search(ctx, SearchOptions{
 			Query: "A1B2C3D4", QueryClass: "exact",
-			AllowedTiers: []string{"truth"}, Limit: 5, TokenBudget: 512,
+			AllowedTiers: []string{"truth"}, Limit: 5, TokenBudget: 1024,
 			// The generation-scoped URI is the handle under test here.
 			Verbosity: VerbosityVerbose,
 		})
@@ -2847,7 +2905,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		}
 		var engine *SearchResult
 		for index := range search.Results {
-			if search.Results[index].Citation.Path == "docs/truth/engine.md" {
+			if search.Results[index].Citation.Path == adversarialEnginePath {
 				engine = &search.Results[index]
 				break
 			}
@@ -2855,7 +2913,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		if engine == nil {
 			t.Fatal("fixture search did not return the engine chunk")
 		}
-		enginePath := filepath.Join(root, "docs", "truth", "engine.md")
+		enginePath := filepath.Join(root, filepath.FromSlash(adversarialEnginePath))
 		original, err := os.ReadFile(enginePath)
 		if err != nil {
 			t.Fatal(err)
@@ -2889,7 +2947,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		root := makeAdversarialProject(t)
 		required := make([]string, 0, 17)
 		for index := 0; index < 17; index++ {
-			path := fmt.Sprintf("docs/truth/required-%02d.md", index)
+			path := fmt.Sprintf("docs/playbooks/required-%02d.md", index)
 			required = append(required, path)
 			writeTestFile(t, filepath.Join(root, filepath.FromSlash(path)),
 				fmt.Sprintf("# Required %02d\n\nrequired-cap-marker-%02d\n", index, index))
@@ -2897,7 +2955,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		service := newAdversarialService(t, root, nil)
 		_, err := service.ContextPackRequired(
 			context.Background(), "required cap", "manager",
-			[]string{"truth"}, 2048, required,
+			[]string{"playbook"}, 2048, required,
 		)
 		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "card cap") {
 			t.Fatalf("required paths bypassed maxCards or failed unclearly: %v", err)
@@ -2907,7 +2965,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 	t.Run("concurrent mutation never creates a mixed-generation pack", func(t *testing.T) {
 		root := makeAdversarialProject(t)
 		service := newAdversarialService(t, root, nil)
-		enginePath := filepath.Join(root, "docs", "truth", "engine.md")
+		enginePath := filepath.Join(root, filepath.FromSlash(adversarialEnginePath))
 		original, err := os.ReadFile(enginePath)
 		if err != nil {
 			t.Fatal(err)
@@ -2942,7 +3000,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 					Target: ContextPackTarget{Kind: "project"},
 					Task:   "engine frame checksum", Role: "drafter",
 					Tiers: []string{"truth"}, TokenBudget: 1024,
-					RequiredPaths: []string{"docs/truth/engine.md"},
+					RequiredPaths: []string{adversarialEnginePath},
 				})
 			if err != nil {
 				continue
@@ -2974,7 +3032,7 @@ func TestAdversarialReadAndRequiredContextStayOnOneFreshGeneration(t *testing.T)
 		}
 		stable, err := service.ContextPackRequired(
 			context.Background(), "engine frame checksum", "drafter",
-			[]string{"truth"}, 1024, []string{"docs/truth/engine.md"},
+			[]string{"truth"}, 1024, []string{adversarialEnginePath},
 		)
 		if err != nil {
 			t.Fatalf("service did not recover after source mutation stopped: %v", err)
@@ -2996,10 +3054,10 @@ func adversarialProjectBenchmarkCases(corpusFingerprint string) []EvalCase {
 			Query: "A1B2C3D4", QueryClass: "exact", AllowedTiers: []string{"truth"},
 			CorpusSnapshot: corpusFingerprint,
 			ExpectedPaths: []string{
-				"docs/truth/engine.md",
+				adversarialEnginePath,
 			},
-			MinimumEvidencePaths: []string{"docs/truth/engine.md"},
-			ExpectedCitations:    []string{"docs/truth/engine.md"},
+			MinimumEvidencePaths: []string{adversarialEnginePath},
+			ExpectedCitations:    []string{adversarialEnginePath},
 			ForbiddenTiers:       []string{"history"},
 			TokenBudget:          1024, Answerable: boolPointer(true),
 		},
@@ -3009,11 +3067,11 @@ func adversarialProjectBenchmarkCases(corpusFingerprint string) []EvalCase {
 			Query: "stable signatures maintained recipes", QueryClass: "conceptual",
 			AllowedTiers:   []string{"truth"},
 			CorpusSnapshot: corpusFingerprint,
-			ExpectedPaths:  []string{"docs/truth/portability.md"},
+			ExpectedPaths:  []string{adversarialPortabilityPath},
 			MinimumEvidencePaths: []string{
-				"docs/truth/portability.md",
+				adversarialPortabilityPath,
 			},
-			ExpectedCitations: []string{"docs/truth/portability.md"},
+			ExpectedCitations: []string{adversarialPortabilityPath},
 			ForbiddenTiers:    []string{"history"},
 			TokenBudget:       1024, Answerable: boolPointer(true),
 		},
@@ -3190,8 +3248,8 @@ func TestAdversarialProjectBenchmarkUsesRatifiedProjectEvalsAndCacheOnly(t *test
 		".re-discipline/knowledge/policy.jsonc",
 		".re-discipline/knowledge/retrieval-profile.json",
 		".re-discipline/knowledge/evals/project-benchmark.json",
-		"docs/truth/engine.md",
-		"docs/truth/portability.md",
+		adversarialEnginePath,
+		adversarialPortabilityPath,
 	}
 	before := map[string][]byte{}
 	for _, relative := range canonicalPaths {
@@ -3394,12 +3452,12 @@ func TestAdversarialProjectBenchmarkHardGatesGateSafetyNotQuality(t *testing.T) 
 	// documents outrank the deliberately unrelated required document. Context-pack
 	// evaluation still injects the required path explicitly.
 	for index := 0; index < 32; index++ {
-		writeTestFile(t, filepath.Join(
-			root, "docs", "truth", fmt.Sprintf("quality-distractor-%02d.md", index),
-		), fmt.Sprintf(`# Quality distractor %02d
-
-A1B2C3D4 checksum evidence engine frame serialization.
-`, index))
+		id := fmt.Sprintf("F-%04d", 9100+index)
+		path := "docs/truth/findings/fixture-truth/" + id + ".md"
+		writeAdversarialTruthFinding(t, root, id, path,
+			fmt.Sprintf("fixture.quality-distractor-%02d", index),
+			fmt.Sprintf("A1B2C3D4 checksum evidence engine frame serialization distractor %02d.", index),
+			FindingRelations{})
 	}
 	service := newAdversarialService(t, root, nil)
 	generation, _, _, _, err := service.ensure(context.Background())
@@ -3418,9 +3476,9 @@ A1B2C3D4 checksum evidence engine frame serialization.
 		Topic: "project-benchmark-quality-shortfall", Split: "development",
 		Query: "A1B2C3D4 checksum evidence", QueryClass: "conceptual", AllowedTiers: []string{"truth"},
 		CorpusSnapshot:       generation.CorpusFingerprint,
-		ExpectedPaths:        []string{"docs/truth/hash#fragment.md"},
-		MinimumEvidencePaths: []string{"docs/truth/hash#fragment.md"},
-		ExpectedCitations:    []string{"docs/truth/hash#fragment.md"},
+		ExpectedPaths:        []string{adversarialHashPath},
+		MinimumEvidencePaths: []string{adversarialHashPath},
+		ExpectedCitations:    []string{adversarialHashPath},
 		ForbiddenTiers:       []string{"history"},
 		TokenBudget:          1024, Answerable: boolPointer(true),
 	})
@@ -3524,15 +3582,39 @@ func TestProjectNonInferiorityKeepsHardGatesSeparate(t *testing.T) {
 func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.T) {
 	root := makeAdversarialProject(t)
 	service := newAdversarialService(t, root, nil)
-	valid, err := service.ContextPack(
+	valid, err := service.ContextPackRequired(
 		context.Background(), "engine frame checksum", "drafter",
-		[]string{"truth"}, 1024,
+		[]string{"truth", "playbook"}, 2048, []string{adversarialLiteralHashPath},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := VerifyContextPackValue(valid); err != nil {
 		t.Fatalf("valid context pack failed verification: %v", err)
+	}
+	provenanceIndex := -1
+	for index := range valid.Cards {
+		if valid.Cards[index].Metadata["path"] == adversarialLiteralHashPath {
+			provenanceIndex = index
+			break
+		}
+	}
+	if provenanceIndex < 0 {
+		t.Fatal("valid fixture pack omitted its required generation-bound provenance card")
+	}
+	requiredHandles := map[string]bool{}
+	for _, handle := range valid.RequiredHandles {
+		requiredHandles[handle] = true
+	}
+	nonRequiredIndex := -1
+	for index := range valid.Cards {
+		if !requiredHandles[valid.Cards[index].Handle] {
+			nonRequiredIndex = index
+			break
+		}
+	}
+	if nonRequiredIndex < 0 {
+		t.Fatal("valid fixture pack omitted a non-required card for allowlist validation")
 	}
 	rehash := func(t *testing.T, pack ContextPack) ContextPack {
 		t.Helper()
@@ -3550,20 +3632,20 @@ func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.
 		{
 			name: "tier outside allowlist",
 			mutate: func(pack *ContextPack) {
-				pack.Cards[0].SourceClass = "history"
-				pack.Cards[0].Metadata["tier"] = "history"
+				pack.Cards[nonRequiredIndex].SourceClass = "history"
+				pack.Cards[nonRequiredIndex].Metadata["tier"] = "history"
 			},
 		},
 		{
 			name: "traversing provenance path",
 			mutate: func(pack *ContextPack) {
-				pack.Cards[0].Metadata["path"] = "../outside.md"
+				pack.Cards[provenanceIndex].Metadata["path"] = "../outside.md"
 			},
 		},
 		{
 			name: "malformed provenance hash",
 			mutate: func(pack *ContextPack) {
-				pack.Cards[0].Metadata["passageHash"] = "sha256:bad"
+				pack.Cards[provenanceIndex].Metadata["passageHash"] = "sha256:bad"
 			},
 		},
 		{
@@ -3606,7 +3688,7 @@ func TestAdversarialRehashedContextPackStillRequiresSemanticValidity(t *testing.
 		{
 			name: "invalid generation follow-up handle",
 			mutate: func(pack *ContextPack) {
-				pack.Cards[0].Handle = "re-discipline://forged"
+				pack.Cards[provenanceIndex].Handle = "re-discipline://forged"
 			},
 		},
 	}
@@ -3686,11 +3768,11 @@ func TestAdversarialProjectEvalLoaderEnforcesBoundarySizeAndAggregateCorpus(t *t
 			Query: "A1B2C3D4", QueryClass: "exact",
 			AllowedTiers:   []string{"truth"},
 			CorpusSnapshot: "fixture:aggregate-evals",
-			ExpectedPaths:  []string{"docs/truth/engine.md"},
+			ExpectedPaths:  []string{adversarialEnginePath},
 			MinimumEvidencePaths: []string{
-				"docs/truth/engine.md",
+				adversarialEnginePath,
 			},
-			ExpectedCitations: []string{"docs/truth/engine.md"},
+			ExpectedCitations: []string{adversarialEnginePath},
 			ForbiddenTiers:    []string{"history"},
 			TokenBudget:       512, Answerable: boolPointer(true),
 		}

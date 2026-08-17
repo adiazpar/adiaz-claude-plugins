@@ -67,16 +67,16 @@ func DiscoverSources(boundary Boundary, settings KnowledgeSettings) (SourceInven
 	classes := []sourceClass{
 		{Path: ".re-discipline/project-profile.md", Tier: "profile", Enabled: true},
 		{Path: "docs/INDEX.md", Tier: "navigation", Enabled: true},
+		{Path: "docs/truth/INDEX.md", Tier: "navigation", Enabled: settings.Sources.Truth},
 		// Goals index the campaigns serving one outcome and where their
 		// durable results went. They make no claims, so they carry no
 		// epistemic weight and sit in navigation alongside the indexes. They
 		// live in docs/ because a goal outlives its campaigns.
 		{Path: "docs/goals", Tier: "navigation", Recursive: true, Enabled: true},
-		{Path: "docs/truth", Tier: "truth", Recursive: true, Enabled: settings.Sources.Truth},
-		// Promoted atomic findings retain their canonical record and exact
-		// evidence handles under docs/truth/findings. The broad truth class above
-		// still indexes their Markdown projection; this more-specific class marks
-		// the same path as a typed finding for card retrieval.
+		// Promoted atomic findings are the sole authoritative truth source.
+		// docs/truth/INDEX.md is navigation, while legacy migration split views
+		// under docs/truth/splits remain human-readable compatibility artifacts
+		// and deliberately do not enter retrieval as a second claim system.
 		{
 			Path: "docs/truth/findings", Tier: "truth", Recursive: true, Pattern: "F-*.md",
 			SourceKind: "finding", Enabled: settings.Sources.Truth,
@@ -389,6 +389,10 @@ func validFindingSourcePath(boundary Boundary, absolute string, cutoverCache map
 	if len(parts) == 4 && parts[0] == "docs" && parts[1] == "truth" &&
 		parts[2] == "findings" {
 		return findingIDRE.MatchString(strings.TrimSuffix(parts[3], filepath.Ext(parts[3])))
+	}
+	if len(parts) == 5 && parts[0] == "docs" && parts[1] == "truth" &&
+		parts[2] == "findings" && managedSlugRE.MatchString(parts[3]) {
+		return findingIDRE.MatchString(strings.TrimSuffix(parts[4], filepath.Ext(parts[4])))
 	}
 	if len(parts) == 4 && parts[0] == "active" &&
 		managedSlugRE.MatchString(parts[1]) && parts[2] == "findings" {

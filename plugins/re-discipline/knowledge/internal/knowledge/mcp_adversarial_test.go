@@ -917,16 +917,12 @@ func TestAdversarialMCPServiceCacheIsCanonicalAndRootIsolated(t *testing.T) {
 	t.Setenv("CLAUDE_PROJECT_DIR", "")
 	firstRoot := makeAdversarialProject(t)
 	secondRoot := makeAdversarialProject(t)
-	writeTestFile(
-		t,
-		filepath.Join(firstRoot, "docs", "truth", "engine.md"),
-		"# First project\n\nroot-isolation-first-alpha\n",
-	)
-	writeTestFile(
-		t,
-		filepath.Join(secondRoot, "docs", "truth", "engine.md"),
-		"# Second project\n\nroot-isolation-second-beta\n",
-	)
+	writeAdversarialTruthFinding(t, firstRoot, "F-9001", adversarialEnginePath,
+		"fixture.first-project", "root-isolation-first-alpha identifies the first project.",
+		FindingRelations{})
+	writeAdversarialTruthFinding(t, secondRoot, "F-9001", adversarialEnginePath,
+		"fixture.second-project", "root-isolation-second-beta identifies the second project.",
+		FindingRelations{})
 	firstCanonical, err := validateManagedRoot(firstRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -966,11 +962,11 @@ func TestAdversarialMCPServiceCacheIsCanonicalAndRootIsolated(t *testing.T) {
 		t.Fatalf("service cache keys are not canonical project roots: %#v", server.services)
 	}
 
-	firstRead, err := first.Read(context.Background(), ReadOptions{Path: "docs/truth/engine.md"})
+	firstRead, err := first.Read(context.Background(), ReadOptions{Path: adversarialEnginePath})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondRead, err := second.Read(context.Background(), ReadOptions{Path: "docs/truth/engine.md"})
+	secondRead, err := second.Read(context.Background(), ReadOptions{Path: adversarialEnginePath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1044,7 +1040,7 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 		"role":          "drafter",
 		"allowedTiers":  []string{"truth"},
 		"tokenBudget":   1024,
-		"requiredPaths": []string{"docs/truth/engine.md"},
+		"requiredPaths": []string{adversarialEnginePath},
 	}
 	missing := map[string]any{}
 	for key, value := range arguments {
@@ -1073,7 +1069,7 @@ func TestAdversarialMCPRequiredContextAndAtomicMaterialization(t *testing.T) {
 	for _, value := range cards {
 		card := asObject(t, value)
 		metadata := asObject(t, card["metadata"])
-		if metadata["path"] == "docs/truth/engine.md" && card["handle"] != "" {
+		if metadata["path"] == adversarialEnginePath && card["handle"] != "" {
 			foundRequired = true
 		}
 	}
@@ -1242,7 +1238,7 @@ func TestAdversarialMalformedConfigurationHasReadOnlyStatusAndFailsClosed(t *tes
 				t.Fatal("search did not fail closed for malformed configuration")
 			}
 			if _, err := service.Read(
-				context.Background(), ReadOptions{Path: "docs/truth/engine.md"}); err == nil {
+				context.Background(), ReadOptions{Path: adversarialEnginePath}); err == nil {
 				t.Fatal("read did not fail closed for malformed configuration")
 			}
 			if _, err := service.ReconcileIndex(context.Background()); err == nil {

@@ -1644,6 +1644,10 @@ func verifyLaneShipmentGate(moduleRoot string) error {
 	if err := validateProjectLaneEvidence(moduleRoot, report, receipt); err != nil {
 		return err
 	}
+	currentEvalFingerprint, err := packagedEvalFingerprint(moduleRoot)
+	if err != nil {
+		return err
+	}
 
 	requested := map[string]bool{}
 	for _, row := range profile.EffectiveProfiles {
@@ -1675,11 +1679,15 @@ func verifyLaneShipmentGate(moduleRoot string) error {
 			// Runtime agreement is still enforced, and enforced where it
 			// protects a reader rather than a packager: the certification
 			// environment requires the packaged profile's evidence to match the
-			// runtime actually executing, and reports it stale otherwise. What
-			// this gate owns is that the shipped profile is bound to the lane
-			// measurement's eval, model, corpus, and suite identity, which the
-			// remaining checks cover exactly.
-			if !ok || row.Benchmark.EvalFingerprint != receipt.EvalFingerprint ||
+			// runtime actually executing, and reports it stale otherwise.
+			//
+			// The lane report's evaluation fingerprint is historical for the
+			// same reason: it identifies the exact fixture used to make the lane
+			// decision. A release may strengthen or relocate current conformance
+			// cases without rewriting that evidence. Bind the shipped profile to
+			// the current canonical case files here, while the report/decision
+			// validators preserve the lane decision's original eval identity.
+			if !ok || row.Benchmark.EvalFingerprint != currentEvalFingerprint ||
 				row.Benchmark.ModelFingerprint != evidenceProfile.ModelFingerprint ||
 				!validSHA256Identity(row.Benchmark.RuntimeFingerprint) ||
 				!validSHA256Identity(row.Benchmark.Digest) ||
@@ -1727,6 +1735,27 @@ func verifyLaneShipmentGate(moduleRoot string) error {
 		return errors.New("rerank removal decision is incomplete")
 	}
 	return nil
+}
+
+func packagedEvalFingerprint(moduleRoot string) (string, error) {
+	cases, err := knowledge.LoadEvalCases(filepath.Join(
+		moduleRoot, "evals", "conformance", "cases.json"))
+	if err != nil {
+		return "", fmt.Errorf("load current packaged passage cases: %w", err)
+	}
+	findingSuite, err := knowledge.LoadFindingEvalSuite(filepath.Join(
+		moduleRoot, "evals", "conformance", "finding-cases.json"))
+	if err != nil {
+		return "", fmt.Errorf("load current packaged finding cases: %w", err)
+	}
+	digest, err := knowledge.CanonicalDigest(struct {
+		PassageCases []knowledge.EvalCase       `json:"passageCases"`
+		FindingSuite knowledge.FindingEvalSuite `json:"findingSuite"`
+	}{cases, findingSuite})
+	if err != nil {
+		return "", fmt.Errorf("digest current packaged evaluation corpus: %w", err)
+	}
+	return digest, nil
 }
 
 func decodeStrictJSONFile(path, label string, target any) ([]byte, error) {
@@ -2282,7 +2311,7 @@ func deriveProjectLaneMeasurement(
 				TargetPath: path, BaselineRelevantRank: projectOutcomeRank(eval.Baseline),
 				DenseRelevantRank: rank,
 				TargetDisjoint:    eval.VocabularyPolicy == "target-disjoint-v1",
-				SourceClass:       projectSourceClass(path), AddedHardGateRegressions: 0,
+				SourceClass:       capturedProjectSourceClass(path), AddedHardGateRegressions: 0,
 			})
 		}
 	}
@@ -2589,7 +2618,12 @@ func bestProjectRelevantPath(outcome projectLaneOutcome) (string, int, bool) {
 	return outcome.RelevantPaths[bestIndex], outcome.RelevantRanks[bestIndex], true
 }
 
-func projectSourceClass(path string) string {
+// capturedProjectSourceClass reproduces the taxonomy sealed into the frozen
+// 2026-08-03 project-lane measurement. It is not a live source classifier;
+// DiscoverSources owns current retrieval authority. Reinterpreting historical
+// paths with today's taxonomy would mutate the meaning of signed evidence.
+func capturedProjectSourceClass(path string) string {
+	path = filepath.ToSlash(filepath.Clean(path))
 	for _, candidate := range []struct {
 		prefix string
 		class  string

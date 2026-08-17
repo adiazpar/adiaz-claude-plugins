@@ -188,11 +188,27 @@ func (service *Service) readIndexedFindingExact(
 		statement += ` AND f.campaign_id=?`
 		args = append(args, campaignID)
 	}
+	statement += ` ORDER BY f.campaign_id`
+	rows, err := db.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return ExactReadResponse{}, err
+	}
+	defer rows.Close()
 	var path, indexedHash string
-	if err := db.QueryRowContext(ctx, statement, args...).Scan(&path, &indexedHash); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ExactReadResponse{}, os.ErrNotExist
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return ExactReadResponse{}, err
 		}
+		return ExactReadResponse{}, os.ErrNotExist
+	}
+	if err := rows.Scan(&path, &indexedHash); err != nil {
+		return ExactReadResponse{}, err
+	}
+	if rows.Next() {
+		return ExactReadResponse{}, fmt.Errorf(
+			"finding %s is ambiguous across campaigns; supply campaignId", findingID)
+	}
+	if err := rows.Err(); err != nil {
 		return ExactReadResponse{}, err
 	}
 	body, currentHash, err := ReadProjectFile(service.Boundary, path)
@@ -234,23 +250,39 @@ func (service *Service) readIndexedEvidenceExact(
 		return ExactReadResponse{}, err
 	}
 	defer db.Close()
-	statement := `SELECT e.finding_id,e.path,e.sha256,e.start_line,e.end_line,
+	statement := `SELECT f.id,e.path,e.sha256,e.start_line,e.end_line,
 		e.object_key,e.source_run FROM finding_evidence e
-		JOIN findings f ON f.id=e.finding_id WHERE e.handle=?`
+		JOIN findings f ON f.key=e.finding_key WHERE e.handle=?`
 	args := []any{handle}
 	if campaignID != "" {
 		statement += ` AND f.campaign_id=?`
 		args = append(args, campaignID)
 	}
+	statement += ` ORDER BY f.campaign_id`
+	rows, err := db.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return ExactReadResponse{}, err
+	}
+	defer rows.Close()
 	var findingID string
 	var evidence EvidenceReference
-	if err := db.QueryRowContext(ctx, statement, args...).Scan(
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return ExactReadResponse{}, err
+		}
+		return ExactReadResponse{}, os.ErrNotExist
+	}
+	if err := rows.Scan(
 		&findingID, &evidence.Path, &evidence.SHA256, &evidence.StartLine,
 		&evidence.EndLine, &evidence.ObjectKey, &evidence.SourceRun,
 	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ExactReadResponse{}, os.ErrNotExist
-		}
+		return ExactReadResponse{}, err
+	}
+	if rows.Next() {
+		return ExactReadResponse{}, fmt.Errorf(
+			"evidence handle %s is ambiguous across campaigns; supply campaignId", handle)
+	}
+	if err := rows.Err(); err != nil {
 		return ExactReadResponse{}, err
 	}
 	if EvidenceHandle(findingID, evidence) != handle {

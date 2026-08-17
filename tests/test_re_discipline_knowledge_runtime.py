@@ -481,7 +481,10 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             .replace("{{ONE_LINE_FRAMING}}", "dual-host packaged runtime fixture")
             .replace("{{MISSION}}", "Verify portable shared knowledge.")
             .replace("{{DOMAIN_DESCRIPTION}}", "Packaged runtime integration.")
-            .replace("{{SOURCE_OF_RECORD}}", "docs/truth/runtime.md")
+            .replace(
+                "{{SOURCE_OF_RECORD}}",
+                "docs/truth/findings/runtime-integration/F-0101.md",
+            )
             .replace("{{TOOLING}}", "Packaged MCP server.")
             .replace("{{BINARIES_AND_PATHS}}", "No machine-local paths.")
             .replace("{{ENVIRONMENT}}", "Isolated test process.")
@@ -497,13 +500,23 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
             encoding="utf-8",
         )
         (truth / "INDEX.md").write_text(
-            "# Truth Index\n\n- [Runtime](runtime.md)\n",
+            "# Truth Index\n\n"
+            "- [Runtime](findings/runtime-integration/F-0101.md)\n",
             encoding="utf-8",
         )
-        (truth / "runtime.md").write_text(
-            "# Runtime truth\n\n"
-            "The exact dual-host runtime identifier is packaged-runtime-iota-7391.\n",
-            encoding="utf-8",
+        finding = truth / "findings" / "runtime-integration" / "F-0101.md"
+        finding.parent.mkdir(parents=True)
+        shutil.copyfile(
+            PLUGIN
+            / "knowledge"
+            / "evals"
+            / "conformance"
+            / "fixture"
+            / "docs"
+            / "truth"
+            / "findings"
+            / "F-0101.md",
+            finding,
         )
 
     def launch_environment(self, temporary: Path) -> tuple[dict[str, str], Path, Path]:
@@ -637,7 +650,7 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
                     "arguments": {
                         "projectRoot": str(project),
                         "selector": "path",
-                        "value": "docs/truth/runtime.md",
+                        "value": "docs/truth/findings/runtime-integration/F-0101.md",
                         "tokenBudget": 512,
                     },
                 },
@@ -683,8 +696,11 @@ class ReDisciplineKnowledgeRuntimeIntegrationTests(unittest.TestCase):
         read = responses[4]["result"]
         self.assertFalse(read["isError"], read)
         read_body = read["structuredContent"]
-        self.assertEqual(read_body["path"], "docs/truth/runtime.md")
-        self.assertIn("packaged-runtime-iota-7391", read_body["content"])
+        self.assertEqual(
+            read_body["path"],
+            "docs/truth/findings/runtime-integration/F-0101.md",
+        )
+        self.assertIn("celadonquartzaurora", read_body["content"])
         self.assertRegex(read_body["sha256"], r"^sha256:[0-9a-f]{64}$")
         self.assertRegex(read_body["digest"], r"^sha256:[0-9a-f]{64}$")
         return state_body["digest"], read_body["sha256"]

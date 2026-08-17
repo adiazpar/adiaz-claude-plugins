@@ -59,19 +59,21 @@ func TestFindingRetrievalSurfacesTypedStaleDependentAlert(t *testing.T) {
 	}
 	defer db.Close()
 	for _, statement := range []string{
-		`CREATE TABLE findings (id TEXT PRIMARY KEY, verified_at TEXT NOT NULL)`,
-		`CREATE TABLE finding_relations (source_id TEXT NOT NULL, target_id TEXT NOT NULL, kind TEXT NOT NULL)`,
-		`INSERT INTO findings(id,verified_at) VALUES('F-0001','2026-09-01'),('F-0002','2026-07-01'),('F-0003','2026-08-01')`,
-		`INSERT INTO finding_relations(source_id,target_id,kind) VALUES('F-0001','F-0002','depends-on'),('F-0002','F-0003','depends-on')`,
+		`CREATE TABLE findings (key TEXT PRIMARY KEY, verified_at TEXT NOT NULL)`,
+		`CREATE TABLE finding_relations (source_key TEXT NOT NULL, target_key TEXT NOT NULL, kind TEXT NOT NULL)`,
+		`INSERT INTO findings(key,verified_at) VALUES('C-TEST/F-0001','2026-09-01'),('C-TEST/F-0002','2026-07-01'),('C-TEST/F-0003','2026-08-01')`,
+		`INSERT INTO finding_relations(source_key,target_key,kind) VALUES('C-TEST/F-0001','C-TEST/F-0002','depends-on'),('C-TEST/F-0002','C-TEST/F-0003','depends-on')`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			t.Fatal(err)
 		}
 	}
-	dependent := &findingCandidate{record: FindingRecord{ID: "F-0001"}, sourceClass: "truth"}
-	dependency := &findingCandidate{record: FindingRecord{ID: "F-0002"}, sourceClass: "truth"}
-	root := &findingCandidate{record: FindingRecord{ID: "F-0003"}, sourceClass: "truth"}
-	eligible := map[string]*findingCandidate{"F-0001": dependent, "F-0002": dependency, "F-0003": root}
+	dependent := &findingCandidate{record: FindingRecord{ID: "F-0001", CampaignID: "C-TEST"}, sourceClass: "truth"}
+	dependency := &findingCandidate{record: FindingRecord{ID: "F-0002", CampaignID: "C-TEST"}, sourceClass: "truth"}
+	root := &findingCandidate{record: FindingRecord{ID: "F-0003", CampaignID: "C-TEST"}, sourceClass: "truth"}
+	eligible := map[string]*findingCandidate{
+		dependent.storageKey(): dependent, dependency.storageKey(): dependency, root.storageKey(): root,
+	}
 	visible, err := expandFindingRelations(context.Background(), db,
 		[]*findingCandidate{dependent, dependency, root}, eligible, 3)
 	if err != nil {

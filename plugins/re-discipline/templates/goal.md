@@ -18,7 +18,7 @@ This is navigation, not evidence. A goal links campaigns serving one outcome.
 
 ## Truth Produced
 
-- `docs/truth/<subsystem>/<file>.md` - <claim>
+- `docs/truth/findings/<campaign-slug>/<F-id>.md` - <approved finding claim>
 
 ## Carried Across Campaigns
 

@@ -47,7 +47,7 @@ func TestSearchOversizedTopPassageDoesNotStarveSmallerCandidates(t *testing.T) {
 		// sized into (or near) the defect window.
 		writeTestFile(
 			t,
-			filepath.Join(root, "docs", "truth",
+			filepath.Join(root, "docs", "playbooks",
 				fmt.Sprintf("oversized-%02d.md", index)),
 			buildMarkerBody(marker, size))
 
@@ -55,7 +55,7 @@ func TestSearchOversizedTopPassageDoesNotStarveSmallerCandidates(t *testing.T) {
 		// correct packer must return it whenever the large one is skipped.
 		writeTestFile(
 			t,
-			filepath.Join(root, "docs", "truth",
+			filepath.Join(root, "docs", "playbooks",
 				fmt.Sprintf("compact-%02d.md", index)),
 			"# Compact "+marker+"\n\n"+marker+" appears in a short passage.\n")
 	}
@@ -64,7 +64,7 @@ func TestSearchOversizedTopPassageDoesNotStarveSmallerCandidates(t *testing.T) {
 
 	for index, marker := range markers {
 		search, err := service.Search(context.Background(), SearchOptions{
-			Query: marker, QueryClass: "exact", AllowedTiers: []string{"truth"},
+			Query: marker, QueryClass: "exact", AllowedTiers: []string{"playbook"},
 			Limit: 10, TokenBudget: 1024,
 		})
 		if err != nil {

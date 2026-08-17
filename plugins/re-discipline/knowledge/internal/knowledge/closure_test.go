@@ -350,17 +350,35 @@ func TestTruthProjectionVerifiesEvidenceAndArchiveManifestCoverage(t *testing.T)
 	graph.Intakes[intake.ID] = intake
 	finding := graph.Findings["F-0001"]
 	finding.Evidence[0].SHA256 = reportDigest
-	finding.Digest, _ = CanonicalDigest(finding)
+	finding.Body = "# Claim\n\nThe implementation is complete.\n\n" +
+		"## Applies when\n\nThe tested plugin build is in scope.\n\n" +
+		"## Does not establish\n\nOther builds remain untested.\n\n" +
+		"## Evidence\n\nSee the exact report range.\n\n" +
+		"## Reproduction\n\nRepeat the cited test.\n\n" +
+		"## Relations\n\nNo relations are asserted.\n"
+	document := FindingDocument{
+		Record: finding,
+		SyntheticQuestions: []string{
+			"What is complete?", "What evidence proves completion?", "When does this apply?",
+		},
+		QuestionsReviewed: true,
+	}
+	finding.Digest, _ = findingDocumentDigest(document)
+	document.Record = finding
 	graph.Findings[finding.ID] = finding
 	boundary, err := NewBoundary(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := BuildTruthProjection(boundary, finding, "docs/truth/plugin-complete.md")
+	projection, err := BuildTruthProjection(
+		boundary, document, canonicalTruthDestination("test-campaign", "F-0001"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !digestRE.MatchString(projection.ContentDigest) || !strings.Contains(string(projection.Body), "sourceFinding: \"F-0001\"") {
+	parsed, parseErr := ParseFindingDocument(projection.Body, projection.Destination)
+	if !digestRE.MatchString(projection.ContentDigest) || parseErr != nil ||
+		parsed.Record.ID != "F-0001" || parsed.Record.CampaignID != "C-TEST" ||
+		parsed.Record.Projection != "truth" || parsed.Record.ReviewState != "manager-ratified" {
 		t.Fatalf("truth projection is incomplete: %#v", projection)
 	}
 
@@ -417,7 +435,25 @@ func TestTruthProjectionRejectsChangedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := BuildTruthProjection(boundary, graph.Findings["F-0001"], "docs/truth/plugin-complete.md"); err == nil {
+	finding := graph.Findings["F-0001"]
+	finding.Body = "# Claim\n\nThe implementation is complete.\n\n" +
+		"## Applies when\n\nThe tested plugin build is in scope.\n\n" +
+		"## Does not establish\n\nOther builds remain untested.\n\n" +
+		"## Evidence\n\nSee the exact report range.\n\n" +
+		"## Reproduction\n\nRepeat the cited test.\n\n" +
+		"## Relations\n\nNo relations are asserted.\n"
+	document := FindingDocument{
+		Record: finding,
+		SyntheticQuestions: []string{
+			"What is complete?", "What evidence proves completion?", "When does this apply?",
+		},
+		QuestionsReviewed: true,
+	}
+	finding.Digest, _ = findingDocumentDigest(document)
+	document.Record = finding
+	if _, err := BuildTruthProjection(
+		boundary, document,
+		canonicalTruthDestination("test-campaign", "F-0001")); err == nil {
 		t.Fatal("truth projection accepted evidence whose digest changed")
 	}
 }

@@ -77,6 +77,7 @@ type FindingQueryResponse struct {
 }
 
 type findingCandidate struct {
+	key               string
 	record            FindingRecord
 	path              string
 	sourceClass       string
@@ -90,6 +91,16 @@ type findingCandidate struct {
 	relationAdds      []string
 	relationGroup     string
 	strongestEvidence string
+}
+
+func (candidate *findingCandidate) storageKey() string {
+	if candidate == nil {
+		return ""
+	}
+	if candidate.key != "" {
+		return candidate.key
+	}
+	return findingStorageKey(candidate.record.CampaignID, candidate.record.ID)
 }
 
 // QueryFindingCards is the 0.8 public finding-first retrieval surface.
@@ -182,7 +193,8 @@ func (retriever Retriever) QueryFindingCards(ctx context.Context, options Findin
 	trace.CandidateOmitted = normalizedCandidateCount - len(traceCandidates)
 	for _, candidate := range traceCandidates {
 		trace.Candidates = append(trace.Candidates, FindingCandidateTrace{
-			FindingID: candidate.record.ID, LaneRanks: cloneRanks(candidate.laneRanks),
+			FindingID:    candidate.record.ID,
+			LaneRanks:    cloneRanks(candidate.laneRanks),
 			FusionScore:  candidate.fusion,
 			RelationAdds: append([]string(nil), candidate.relationAdds...),
 		})
@@ -435,10 +447,10 @@ func defaultFindingFilter(values []string, defaults ...string) map[string]bool {
 }
 
 func loadFindingCandidates(ctx context.Context, db *sql.DB, options FindingQueryOptions) (map[string]*findingCandidate, []*findingCandidate, error) {
-	rows, err := db.QueryContext(ctx, `SELECT f.id,f.campaign_id,f.kind,f.subject,f.claim,
+	rows, err := db.QueryContext(ctx, `SELECT f.key,f.id,f.campaign_id,f.kind,f.subject,f.claim,
 		f.scope_json,f.evidence_grade,f.review_state,f.validity,f.projection,
 		f.record_digest,f.body,f.source_class,f.verified_at,d.path
-		FROM findings f JOIN documents d ON d.id=f.document_id ORDER BY f.id`)
+		FROM findings f JOIN documents d ON d.id=f.document_id ORDER BY f.campaign_id,f.id`)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -452,7 +464,7 @@ func loadFindingCandidates(ctx context.Context, db *sql.DB, options FindingQuery
 		candidate := &findingCandidate{laneRanks: map[string]int{}, terms: map[string]bool{}}
 		var scopeJSON string
 		if err := rows.Scan(
-			&candidate.record.ID, &candidate.record.CampaignID, &candidate.record.Kind,
+			&candidate.key, &candidate.record.ID, &candidate.record.CampaignID, &candidate.record.Kind,
 			&candidate.record.Subject, &candidate.record.Claim, &scopeJSON,
 			&candidate.record.EvidenceGrade, &candidate.record.ReviewState,
 			&candidate.record.Validity, &candidate.record.Projection, &candidate.record.Digest,
@@ -479,7 +491,7 @@ func loadFindingCandidates(ctx context.Context, db *sql.DB, options FindingQuery
 			filtered = append(filtered, candidate)
 			continue
 		}
-		queryRows, err := db.QueryContext(ctx, `SELECT kind,value FROM finding_queries WHERE finding_id=? ORDER BY kind,value`, candidate.record.ID)
+		queryRows, err := db.QueryContext(ctx, `SELECT kind,value FROM finding_queries WHERE finding_key=? ORDER BY kind,value`, candidate.storageKey())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -498,7 +510,7 @@ func loadFindingCandidates(ctx context.Context, db *sql.DB, options FindingQuery
 		if err := queryRows.Close(); err != nil {
 			return nil, nil, err
 		}
-		termRows, err := db.QueryContext(ctx, `SELECT DISTINCT term FROM finding_terms WHERE finding_id=? ORDER BY term`, candidate.record.ID)
+		termRows, err := db.QueryContext(ctx, `SELECT DISTINCT term FROM finding_terms WHERE finding_key=? ORDER BY term`, candidate.storageKey())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -513,8 +525,8 @@ func loadFindingCandidates(ctx context.Context, db *sql.DB, options FindingQuery
 		if err := termRows.Close(); err != nil {
 			return nil, nil, err
 		}
-		_ = db.QueryRowContext(ctx, `SELECT handle FROM finding_evidence WHERE finding_id=? ORDER BY handle LIMIT 1`, candidate.record.ID).Scan(&candidate.strongestEvidence)
-		result[candidate.record.ID] = candidate
+		_ = db.QueryRowContext(ctx, `SELECT handle FROM finding_evidence WHERE finding_key=? ORDER BY handle LIMIT 1`, candidate.storageKey()).Scan(&candidate.strongestEvidence)
+		result[candidate.storageKey()] = candidate
 	}
 	return result, filtered, rows.Err()
 }
@@ -526,9 +538,9 @@ func rankFindingExact(query string, queryTerms []string, candidates map[string]*
 	}
 	rows := []scored{}
 	queryLower := strings.ToLower(query)
-	for id, candidate := range candidates {
+	for key, candidate := range candidates {
 		score := 0
-		if strings.EqualFold(query, id) {
+		if strings.EqualFold(query, candidate.record.ID) {
 			score += 100000
 		}
 		fields := append([]string{candidate.record.Subject, candidate.record.Claim}, candidate.aliases...)
@@ -550,7 +562,7 @@ func rankFindingExact(query string, queryTerms []string, candidates map[string]*
 		score += matched * 500
 		if score > 0 {
 			candidate.why = append(candidate.why, fmt.Sprintf("exact:%d-terms", matched))
-			rows = append(rows, scored{id, score})
+			rows = append(rows, scored{key, score})
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -576,8 +588,8 @@ func rankFindingFTS(ctx context.Context, db *sql.DB, query string, candidates ma
 	for index, token := range tokens {
 		parts[index] = `"` + strings.ReplaceAll(token, `"`, `""`) + `"`
 	}
-	rows, err := db.QueryContext(ctx, `SELECT finding_id,bm25(finding_fts,0.0,5.0,4.0,2.0,3.0,1.0,0.5)
-		FROM finding_fts WHERE finding_fts MATCH ? ORDER BY 2 ASC,finding_id ASC`, strings.Join(parts, " OR "))
+	rows, err := db.QueryContext(ctx, `SELECT finding_key,bm25(finding_fts,0.0,5.0,4.0,2.0,3.0,1.0,0.5)
+		FROM finding_fts WHERE finding_fts MATCH ? ORDER BY 2 ASC,finding_key ASC`, strings.Join(parts, " OR "))
 	if err != nil {
 		return err
 	}
@@ -666,10 +678,10 @@ func (retriever Retriever) rankFindingDense(
 	seen := map[string]bool{}
 	for _, row := range rows {
 		candidate := byPath[row.Chunk.Path]
-		if candidate == nil || seen[candidate.record.ID] {
+		if candidate == nil || seen[candidate.storageKey()] {
 			continue
 		}
-		seen[candidate.record.ID] = true
+		seen[candidate.storageKey()] = true
 		rank++
 		candidate.laneRanks["dense"] = rank
 		candidate.why = append(candidate.why, "dense")
@@ -717,7 +729,7 @@ func sortedFindingCandidates(candidates map[string]*findingCandidate) []*finding
 		if result[i].fusion != result[j].fusion {
 			return result[i].fusion > result[j].fusion
 		}
-		return result[i].record.ID < result[j].record.ID
+		return result[i].storageKey() < result[j].storageKey()
 	})
 	return result
 }
@@ -767,12 +779,12 @@ func suppressDenseOnlyBehindLexical(
 func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCandidate, eligible map[string]*findingCandidate, limit int) ([]*findingCandidate, error) {
 	critical := map[string][]string{}
 	stalenessGraph := map[string]FindingRecord{}
-	rows, err := db.QueryContext(ctx, `SELECT r.source_id,r.target_id,r.kind,
+	rows, err := db.QueryContext(ctx, `SELECT r.source_key,r.target_key,r.kind,
 		COALESCE(source.verified_at,''),COALESCE(target.verified_at,'')
 		FROM finding_relations r
-		LEFT JOIN findings source ON source.id=r.source_id
-		LEFT JOIN findings target ON target.id=r.target_id
-		ORDER BY r.kind,r.source_id,r.target_id`)
+		LEFT JOIN findings source ON source.key=r.source_key
+		LEFT JOIN findings target ON target.key=r.target_key
+		ORDER BY r.kind,r.source_key,r.target_key`)
 	if err != nil {
 		return nil, err
 	}
@@ -784,6 +796,7 @@ func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCa
 		}
 		sourceCandidate, sourceEligible := eligible[source]
 		targetCandidate, targetEligible := eligible[target]
+		sourceID, targetID := findingIDFromStorageKey(source), findingIDFromStorageKey(target)
 		sourceFinding := stalenessGraph[source]
 		sourceFinding.ID, sourceFinding.VerifiedAt = source, sourceVerifiedAt
 		targetFinding := stalenessGraph[target]
@@ -793,12 +806,12 @@ func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCa
 		}
 		stalenessGraph[source], stalenessGraph[target] = sourceFinding, targetFinding
 		if sourceEligible {
-			sourceCandidate.relationAlerts = append(sourceCandidate.relationAlerts, kind+":"+target)
+			sourceCandidate.relationAlerts = append(sourceCandidate.relationAlerts, kind+":"+targetID)
 		}
 		if targetEligible {
-			alert := "incoming-" + kind + ":" + source
+			alert := "incoming-" + kind + ":" + sourceID
 			if kind == "supersedes" {
-				alert = "superseded-by:" + source
+				alert = "superseded-by:" + sourceID
 			}
 			targetCandidate.relationAlerts = append(targetCandidate.relationAlerts, alert)
 		}
@@ -813,13 +826,17 @@ func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCa
 	stalenessPaths := FindingStalenessPaths(stalenessGraph)
 	for dependentID := range stalenessPaths {
 		if candidate := eligible[dependentID]; candidate != nil {
-			candidate.relationAlerts = append(candidate.relationAlerts,
-				findingStalenessRelationAlerts(stalenessPaths, dependentID)...)
+			for _, alert := range findingStalenessRelationAlerts(stalenessPaths, dependentID) {
+				prefix, key, _ := strings.Cut(alert, ":")
+				candidate.relationAlerts = append(
+					candidate.relationAlerts, prefix+":"+findingIDFromStorageKey(key))
+			}
 		}
 	}
 	for _, candidate := range eligible {
 		candidate.relationAlerts = SortedUnique(candidate.relationAlerts)
-		critical[candidate.record.ID] = SortedUnique(critical[candidate.record.ID])
+		key := candidate.storageKey()
+		critical[key] = SortedUnique(critical[key])
 	}
 
 	// Build the visible prefix as relation-aware groups. A candidate with a
@@ -832,11 +849,12 @@ func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCa
 		if len(prefix) >= limit {
 			break
 		}
-		if selected[candidate.record.ID] {
+		candidateKey := candidate.storageKey()
+		if selected[candidateKey] {
 			continue
 		}
 		group := []*findingCandidate{candidate}
-		for _, relatedID := range critical[candidate.record.ID] {
+		for _, relatedID := range critical[candidateKey] {
 			if !selected[relatedID] {
 				group = append(group, eligible[relatedID])
 			}
@@ -853,7 +871,7 @@ func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCa
 		if len(group) > 1 {
 			groupIDs := make([]string, 0, len(group))
 			for _, member := range group {
-				groupIDs = append(groupIDs, member.record.ID)
+				groupIDs = append(groupIDs, member.storageKey())
 			}
 			groupKey := "relation:" + strings.Join(SortedUnique(groupIDs), ",")
 			for _, member := range group {
@@ -861,15 +879,15 @@ func expandFindingRelations(ctx context.Context, db *sql.DB, ranked []*findingCa
 			}
 		}
 		for _, member := range group {
-			if member == nil || selected[member.record.ID] {
+			if member == nil || selected[member.storageKey()] {
 				continue
 			}
-			if member.record.ID != candidate.record.ID {
+			if member.storageKey() != candidateKey {
 				member.relationAdds = append(member.relationAdds, "relation-from:"+candidate.record.ID)
 				member.relationAdds = SortedUnique(member.relationAdds)
 			}
 			prefix = append(prefix, member)
-			selected[member.record.ID] = true
+			selected[member.storageKey()] = true
 		}
 	}
 
@@ -1024,10 +1042,10 @@ func boundedFindingTraceCandidates(ranked, visible []*findingCandidate, limit in
 	seen := map[string]bool{}
 	appendUnique := func(candidates []*findingCandidate) {
 		for _, candidate := range candidates {
-			if candidate == nil || seen[candidate.record.ID] {
+			if candidate == nil || seen[candidate.storageKey()] {
 				continue
 			}
-			seen[candidate.record.ID] = true
+			seen[candidate.storageKey()] = true
 			all = append(all, candidate)
 		}
 	}

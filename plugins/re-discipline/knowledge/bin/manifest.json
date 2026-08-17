@@ -3,8 +3,8 @@
   "schemaVersion": 1,
   "runtime": {
     "name": "re-discipline-knowledge",
-    "version": "0.9.4",
-    "buildId": "sha256:849c2f0177c5428759b0a14c3e42126712fa330f0502c6599618157e02232558"
+    "version": "0.9.5",
+    "buildId": "sha256:cc671ae560591779c216ae051cad60e633a8476e6e6f660428bda09605666d0d"
   },
   "build": {
     "goToolchain": "go1.26.5",
@@ -12,7 +12,7 @@
     "flags": [
       "-trimpath",
       "-buildvcs=false",
-      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:849c2f0177c5428759b0a14c3e42126712fa330f0502c6599618157e02232558"
+      "-ldflags=-s -w -buildid= -X github.com/adiaz/re-discipline-knowledge/internal/knowledge.CompiledBuildID=sha256:cc671ae560591779c216ae051cad60e633a8476e6e6f660428bda09605666d0d"
     ],
     "environment": [
       "CGO_ENABLED=0",
@@ -32,8 +32,8 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "windows-amd64/re-discipline-knowledge.exe",
-      "sha256": "sha256:63c9101cf082435d81b9239701bd722a62b24dec69afc0941b6d5fbbd0d9f982",
-      "size": 12398080,
+      "sha256": "sha256:6945a1742c8f138d76b26db2a2ab6faad7fc4a04155372f2d8ee7d924a9b9082",
+      "size": 12475392,
       "mode": "0644"
     },
     {
@@ -41,8 +41,8 @@
       "goos": "windows",
       "goarch": "arm64",
       "path": "windows-arm64/re-discipline-knowledge.exe",
-      "sha256": "sha256:13fe857d2e238c6b5fbc4d6efff6ecbc9d182f7a7f336a034d28cb9c15860391",
-      "size": 11368960,
+      "sha256": "sha256:64fcfe839cf40e5485754c731f5412ec7c2b48beffd5596f66255724333beb06",
+      "size": 11439616,
       "mode": "0644"
     },
     {
@@ -50,8 +50,8 @@
       "goos": "linux",
       "goarch": "amd64",
       "path": "linux-amd64/re-discipline-knowledge",
-      "sha256": "sha256:19f9eedbb2017e74745cb60719b696d6ee31a5c19478adc440da6359da2f1b82",
-      "size": 12124286,
+      "sha256": "sha256:ac8938108d33df1ffba519694ea3cdc1bd20c8edd814ae2262e4456f50929672",
+      "size": 12202110,
       "mode": "0755"
     },
     {
@@ -59,8 +59,8 @@
       "goos": "linux",
       "goarch": "arm64",
       "path": "linux-arm64/re-discipline-knowledge",
-      "sha256": "sha256:79fea5f8c2e0506d3cc03e2a32df88fa63894d9a2f2e52ae2cc12c4da137833d",
-      "size": 11272318,
+      "sha256": "sha256:2c5283294691c92a83057059c34d2c12f4741e554870475cf6975afa1fc3382e",
+      "size": 11337854,
       "mode": "0755"
     },
     {
@@ -68,8 +68,8 @@
       "goos": "darwin",
       "goarch": "amd64",
       "path": "darwin-amd64/re-discipline-knowledge",
-      "sha256": "sha256:8f15ae8f7c50e33b264da26395206e6b1838b0fd6aefe1bdbe68884639c5c60c",
-      "size": 12297824,
+      "sha256": "sha256:4926adb19d5eded64660686f423f0392024cc8234b5f29ea5b7f8611d0b73794",
+      "size": 12376336,
       "mode": "0755"
     },
     {
@@ -77,8 +77,8 @@
       "goos": "darwin",
       "goarch": "arm64",
       "path": "darwin-arm64/re-discipline-knowledge",
-      "sha256": "sha256:8e5bb8e3ee3d39b1309d1dff6b0e3c2ced37f64668a02a19caab7afa7bfaeab1",
-      "size": 11489442,
+      "sha256": "sha256:a95219b4ceaed0a8ee52c6e557bb856916ac2b99acec0a450aceb5dac27beb81",
+      "size": 11556194,
       "mode": "0755"
     }
   ],
@@ -95,8 +95,8 @@
       "goos": "windows",
       "goarch": "amd64",
       "path": "re-discipline-knowledge.exe",
-      "sha256": "sha256:d5fbee3726b9b709a4882fdef43935366b542a50c587fc280f50f260b9049165",
-      "size": 2058240,
+      "sha256": "sha256:49d33f3f60bd542849e22448f8f6f982fefa4b9cb61b347e4cc99e5aa46e3b51",
+      "size": 2226688,
       "mode": "0644"
     }
   ],
@@ -104,8 +104,8 @@
     {
       "kind": "benchmark-cases",
       "path": "evals/conformance/cases.json",
-      "sha256": "sha256:6bc4e0934adc1597d92c8873d3f86c0893e932e7b3da2d599aa30b94263f4189",
-      "size": 7806,
+      "sha256": "sha256:47b7b77d3d14433085e651ddea2446abd2e4c2954f45cee629d97ca36476c745",
+      "size": 7978,
       "mode": "0644"
     },
     {
@@ -342,22 +342,8 @@
     {
       "kind": "benchmark-fixture",
       "path": "evals/conformance/fixture/docs/truth/INDEX.md",
-      "sha256": "sha256:776ff12fd91a235667b96ae06a54591f1cc3cf5ab3043694c690fda89792f28b",
-      "size": 109,
-      "mode": "0644"
-    },
-    {
-      "kind": "benchmark-fixture",
-      "path": "evals/conformance/fixture/docs/truth/consumer.md",
-      "sha256": "sha256:21ec8491efbc1fe117e55bb5132c7fa088e9e2a31a9b7a1b2b5c4cab23e0554b",
-      "size": 119,
-      "mode": "0644"
-    },
-    {
-      "kind": "benchmark-fixture",
-      "path": "evals/conformance/fixture/docs/truth/engine.md",
-      "sha256": "sha256:6d27e1341a2d784dca13c47d1d7d83c25af904ef320b3bd258e692bfb4b77d69",
-      "size": 151,
+      "sha256": "sha256:84e698be7844b936e8d62c85d24b3b30ac27cd87ab7b9ec3d40667f232ff16e6",
+      "size": 185,
       "mode": "0644"
     },
     {
@@ -386,13 +372,6 @@
       "path": "evals/conformance/fixture/docs/truth/findings/F-0204.md",
       "sha256": "sha256:27b2cc7198faaee0879d0348d759b0f3d56640a9ec9a07a84172beee174851c3",
       "size": 1712,
-      "mode": "0644"
-    },
-    {
-      "kind": "benchmark-fixture",
-      "path": "evals/conformance/fixture/docs/truth/portability.md",
-      "sha256": "sha256:a2de40d5611452f293a7e3e8fe0da7e3ea2d8a390500d35900314837c15a007e",
-      "size": 102,
       "mode": "0644"
     },
     {
@@ -433,7 +412,7 @@
     {
       "kind": "model-manifest",
       "path": "models/manifest.json",
-      "sha256": "sha256:4ce09fb1768eb37898773e49304719043492981a6e2f26a3e798a66a5bfe1192",
+      "sha256": "sha256:63635d2c4eb2fef2a7e1b10cb2ba43149b1aef23d9000237b6fab183262d9d5f",
       "size": 1286,
       "mode": "0644"
     },
@@ -447,8 +426,8 @@
     {
       "kind": "retrieval-profile",
       "path": "profiles/balanced-v1.json",
-      "sha256": "sha256:cb9d1364901e1cf05c697418ac3706af5307e8c756aeb9ead893e6c8e6ac34eb",
-      "size": 2960,
+      "sha256": "sha256:51cc10f6015a891b40b92264db93fe9f77330fb8776e17e9b2a32e0304eeb092",
+      "size": 2992,
       "mode": "0644"
     },
     {
@@ -797,8 +776,8 @@
     {
       "kind": "json-schema",
       "path": "schemas/transaction.schema.json",
-      "sha256": "sha256:a85afdd1ace765e250436c1bc78063d337dccd155ff6cdcb976b49a98ae74282",
-      "size": 3158,
+      "sha256": "sha256:3485dc7efd0f517afc172ae42e8311016e971ab42dc9deaf6e6aa98e611c257e",
+      "size": 3522,
       "mode": "0644"
     },
     {

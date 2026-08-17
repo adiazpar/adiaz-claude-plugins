@@ -143,8 +143,8 @@ func applyResponseBudget(budget int, response any, sections []budgetSection) ([]
 	return omitted, nil
 }
 
-// budgetTransactionReceipt trims the one derived section a manager or curator
-// transaction receipt carries.
+// budgetTransactionReceipt trims the derived artifact sections a manager or
+// curator transaction receipt may carry.
 //
 // Everything else in the receipt is floor. Records is the compare-and-swap
 // input for the next transaction, one entry per written record with its id,
@@ -157,10 +157,11 @@ func applyResponseBudget(budget int, response any, sections []budgetSection) ([]
 // whole event - a partial event would carry a digest that does not verify,
 // which is precisely the falsified receipt this file refuses to produce.
 //
-// Artifacts is the exception: it is one row per published file, it is derived
-// from paths the caller either supplied or can recompute, and nothing in the
-// next transaction reads it. On a closure finalization it is also the largest
-// thing in the receipt by a wide margin.
+// Artifacts and DeletedArtifacts are the exceptions: each is one row per
+// published or removed file, is derived from paths the caller supplied or can
+// recompute, and nothing in the next transaction reads it. On a closure
+// finalization artifacts is also the largest part of the receipt by a wide
+// margin.
 func budgetTransactionReceipt(
 	receipt StateTransactionReceipt,
 	budget int,
@@ -176,6 +177,14 @@ func budgetTransactionReceipt(
 				"tokenBudget omitted to see them",
 			Present: func() bool { return len(receipt.Artifacts) != 0 },
 			Drop:    func() { receipt.Artifacts = nil },
+		},
+		{
+			Name: "deletedArtifacts",
+			Note: "one row per exact source removed by truth.relocate; the paths and digests " +
+				"were caller-supplied and no following compare-and-swap reads them. Re-issue " +
+				"this transition with tokenBudget omitted to see them",
+			Present: func() bool { return len(receipt.DeletedArtifacts) != 0 },
+			Drop:    func() { receipt.DeletedArtifacts = nil },
 		},
 	})
 	if err != nil {

@@ -199,6 +199,118 @@ func TestFindingDiscoveryRejectsTamperAndBuildsTypedProjection(t *testing.T) {
 	}
 }
 
+func TestFindingIndexUsesCampaignLocalIdentityAndCollapsesExactProjectionCopies(t *testing.T) {
+	type fixtureFinding struct {
+		document FindingDocument
+		source   SourceDocument
+	}
+	makeFinding := func(campaignID, path, tier, claim string) fixtureFinding {
+		t.Helper()
+		document := testFindingDocument()
+		document.Record.ID = "F-0001"
+		document.Record.CampaignID = campaignID
+		document.Record.Path = path
+		document.Record.Claim = claim
+		document.Record.Body = strings.Replace(document.Record.Body,
+			"Resource registration uses the named table.", claim, 1)
+		document.Record.Revision = 2
+		document.Record.UpdatedBy = "manager"
+		document.Record.ReviewState = "manager-ratified"
+		document.Record.Validity = "current"
+		document.Record.Projection = "campaign"
+		if tier == "truth" || tier == "history" {
+			document.Record.Projection = "truth"
+		}
+		body, err := RenderFindingDocument(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		document, err = ParseFindingDocument(body, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := SHA256Bytes(body)
+		return fixtureFinding{
+			document: document,
+			source: SourceDocument{
+				ID: StableID("doc", path, hash), Path: path, Tier: tier,
+				Title: document.Record.Subject, SourceKind: "finding",
+				FindingID: document.Record.ID, CampaignID: campaignID,
+				FindingClaim: document.Record.Claim, EvidenceGrade: document.Record.EvidenceGrade,
+				ReviewState: document.Record.ReviewState, Validity: document.Record.Validity,
+				Content: string(body), ContentHash: hash, Size: int64(len(body)),
+			},
+		}
+	}
+	truth := makeFinding(
+		"C-FIRST", "docs/truth/findings/first-campaign/F-0001.md", "truth",
+		"The first campaign proved its local F-0001 claim.")
+	history := makeFinding(
+		"C-FIRST", "docs/history/campaigns/first-campaign/findings/F-0001.md", "history",
+		truth.document.Record.Claim)
+	second := makeFinding(
+		"C-SECOND", "active/second-campaign/findings/F-0001.md", "campaign",
+		"The second campaign independently owns its local F-0001 claim.")
+	inventory := SourceInventory{
+		Documents: []SourceDocument{history.source, second.source, truth.source},
+		Findings:  []FindingDocument{history.document, second.document, truth.document},
+	}
+	database := filepath.Join(t.TempDir(), "campaign-local-findings.sqlite")
+	db, err := sql.Open("sqlite", database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := createSchema(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	generation := Generation{
+		ID: "generation-campaign-local-findings", Database: database,
+		CorpusFingerprint: stateTestDigest("a"), Project: "fixture",
+		ParserVersion: ParserVersion, ChunkerVersion: ChunkerVersion,
+		CreatedAt: "2026-08-17T10:00:00Z", DocumentCount: len(inventory.Documents),
+	}
+	if err := populateDatabase(context.Background(), db, generation, inventory, ModelManifest{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT f.campaign_id,f.id,f.source_class,d.path
+		FROM findings f JOIN documents d ON d.id=f.document_id
+		ORDER BY f.campaign_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type result struct{ campaignID, findingID, sourceClass, path string }
+	results := []result{}
+	for rows.Next() {
+		var row result
+		if err := rows.Scan(&row.campaignID, &row.findingID, &row.sourceClass, &row.path); err != nil {
+			t.Fatal(err)
+		}
+		results = append(results, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 ||
+		results[0] != (result{"C-FIRST", "F-0001", "truth", truth.source.Path}) ||
+		results[1] != (result{"C-SECOND", "F-0001", "campaign", second.source.Path}) {
+		t.Fatalf("campaign-local finding projection is wrong: %#v", results)
+	}
+	candidates, _, err := loadFindingCandidates(context.Background(), db, FindingQueryOptions{
+		AllowedSourceClasses: []string{"truth", "campaign"},
+		AllowedReviewStates:  []string{"manager-ratified"},
+		AllowedValidities:    []string{"current"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || candidates[findingStorageKey("C-FIRST", "F-0001")] == nil ||
+		candidates[findingStorageKey("C-SECOND", "F-0001")] == nil {
+		t.Fatalf("campaign-local candidates were collapsed: %#v", candidates)
+	}
+}
+
 func findingsPointer(value *int) *int { return value }
 
 func TestFindingCardQueryFiltersThenRanksAndExpandsRelations(t *testing.T) {
@@ -312,27 +424,27 @@ func TestFindingRelationExpansionReservesPairBeforeRankPrefixFills(t *testing.T)
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE finding_relations(source_id TEXT,target_id TEXT,kind TEXT)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE finding_relations(source_key TEXT,target_key TEXT,kind TEXT)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TABLE findings(id TEXT PRIMARY KEY,verified_at TEXT NOT NULL)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE findings(key TEXT PRIMARY KEY,verified_at TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO findings(id,verified_at) VALUES('F-0042',''),('F-0045','')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO findings(key,verified_at) VALUES('C-TEST/F-0042',''),('C-TEST/F-0045','')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO finding_relations(source_id,target_id,kind) VALUES('F-0042','F-0045','contradicts')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO finding_relations(source_key,target_key,kind) VALUES('C-TEST/F-0042','C-TEST/F-0045','contradicts')`); err != nil {
 		t.Fatal(err)
 	}
 	ranked := []*findingCandidate{
-		{record: FindingRecord{ID: "F-0041"}},
-		{record: FindingRecord{ID: "F-0042"}},
-		{record: FindingRecord{ID: "F-0043"}},
-		{record: FindingRecord{ID: "F-0045"}},
+		{record: FindingRecord{ID: "F-0041", CampaignID: "C-TEST"}},
+		{record: FindingRecord{ID: "F-0042", CampaignID: "C-TEST"}},
+		{record: FindingRecord{ID: "F-0043", CampaignID: "C-TEST"}},
+		{record: FindingRecord{ID: "F-0045", CampaignID: "C-TEST"}},
 	}
 	eligible := map[string]*findingCandidate{}
 	for _, candidate := range ranked {
-		eligible[candidate.record.ID] = candidate
+		eligible[candidate.storageKey()] = candidate
 	}
 	visible, err := expandFindingRelations(context.Background(), db, ranked, eligible, 3)
 	if err != nil {

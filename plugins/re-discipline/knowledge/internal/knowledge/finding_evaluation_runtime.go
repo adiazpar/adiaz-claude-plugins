@@ -258,14 +258,21 @@ func boundedEvidenceExpansionTokens(
 	total := 0
 	for _, card := range cards {
 		handle := card.EvidenceHandle
-		if handle == "" || seen[handle] {
+		campaignID := card.Metadata["campaignId"]
+		identity := campaignID + "/" + handle
+		if handle == "" || seen[identity] {
 			continue
 		}
-		seen[handle] = true
+		if campaignID == "" {
+			return 0, fmt.Errorf("finding card %s has no campaignId", card.ID)
+		}
+		seen[identity] = true
 		var findingID string
 		var evidence EvidenceReference
-		err := db.QueryRowContext(ctx, `SELECT finding_id,path,sha256,start_line,end_line,
-			object_key,source_run FROM finding_evidence WHERE handle=?`, handle).Scan(
+		err := db.QueryRowContext(ctx, `SELECT f.id,e.path,e.sha256,e.start_line,e.end_line,
+			e.object_key,e.source_run FROM finding_evidence e
+			JOIN findings f ON f.key=e.finding_key
+			WHERE e.handle=? AND f.campaign_id=?`, handle, campaignID).Scan(
 			&findingID, &evidence.Path, &evidence.SHA256, &evidence.StartLine,
 			&evidence.EndLine, &evidence.ObjectKey, &evidence.SourceRun,
 		)

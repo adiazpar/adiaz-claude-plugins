@@ -18,7 +18,7 @@ func TestExactIndexedReadFlattensPathChunkAndURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const relative = "docs/truth/engine.md"
+	const relative = adversarialEnginePath
 	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(generation.Database))
 	if err != nil {
 		t.Fatal(err)

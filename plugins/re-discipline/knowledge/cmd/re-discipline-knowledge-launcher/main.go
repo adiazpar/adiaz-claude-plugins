@@ -40,7 +40,7 @@ func run(args []string) error {
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	command.Env = os.Environ()
-	err = command.Run()
+	err = runRuntime(command)
 	if err == nil {
 		return nil
 	}

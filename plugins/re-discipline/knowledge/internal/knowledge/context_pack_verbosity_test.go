@@ -90,10 +90,12 @@ func TestCompactCitationsRemainIndependentlyReDerivable(t *testing.T) {
 // response says separately what it cost.
 func TestPreludeStaysChargedAndIsAccountedSeparately(t *testing.T) {
 	root := makeAdversarialProject(t)
-	writeTestFile(t, filepath.Join(root, "docs", "truth", "superseded.md"),
+	writeTestFile(t, filepath.Join(root, "docs", "playbooks", "replacement.md"),
+		"# Current reading\n\n**Claim:** The maintained frame contract replaces ZQPRELUDEMARK.\n")
+	writeTestFile(t, filepath.Join(root, "docs", "playbooks", "superseded.md"),
 		`# Superseded reading
 
-**Superseded-by:** docs/truth/engine.md
+**Superseded-by:** docs/playbooks/replacement.md
 
 **Claim:** ZQPRELUDEMARK once described the frame contract.
 
@@ -107,7 +109,7 @@ than the header itself.
 	service := newAdversarialService(t, root, nil)
 	search, err := service.Search(context.Background(), SearchOptions{
 		Query: "ZQPRELUDEMARK", QueryClass: "exact",
-		AllowedTiers: []string{"truth"}, Limit: 12, TokenBudget: 1024,
+		AllowedTiers: []string{"playbook"}, Limit: 12, TokenBudget: 1024,
 	})
 	if err != nil {
 		t.Fatal(err)

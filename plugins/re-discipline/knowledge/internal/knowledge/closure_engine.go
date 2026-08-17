@@ -1964,7 +1964,7 @@ func (service *Service) prepareClosureProjections(
 	sort.Strings(ids)
 	for _, id := range ids {
 		finding := graph.Findings[id]
-		destination := request.ProjectionDestinations[id]
+		destination := closureFindingDestination(request, finding)
 		switch finding.Projection {
 		case "history", "archive", "rejected":
 			continue
@@ -1982,14 +1982,16 @@ func (service *Service) prepareClosureProjections(
 				"finding %s has projection %q and needs a destination, which the engine will not "+
 					"invent because the path is what readers cite forever. Remedy: pass "+
 					"projectionDestinations[%q] on this closure_apply call - %s",
-				id, finding.Projection, id, closureProjectionDestinationHint(finding.Projection))
+				id, finding.Projection, id, closureProjectionDestinationHint(
+					finding.Projection, request.CampaignSlug, id))
 		}
 		if validClosureNavigationPath(destination) {
 			return nil, nil, nil, fmt.Errorf(
 				"finding %s cannot project to %s: closure generates that navigation index from "+
 					"everything it publishes, so a finding written there would be overwritten by "+
 					"the same transaction. Remedy: choose a leaf path such as %s",
-				id, destination, closureProjectionDestinationHint(finding.Projection))
+				id, destination, closureProjectionDestinationHint(
+					finding.Projection, request.CampaignSlug, id))
 		}
 		if seenDestinations[destination] {
 			return nil, nil, nil, fmt.Errorf(
@@ -2004,6 +2006,9 @@ func (service *Service) prepareClosureProjections(
 		var digest string
 		switch finding.Projection {
 		case "truth":
+			if err := validateCanonicalTruthDestination(request.CampaignSlug, id, destination); err != nil {
+				return nil, nil, nil, err
+			}
 			sourceFinding, exists := sourceGraph.Findings[id]
 			if !exists {
 				return nil, nil, nil, fmt.Errorf("truth projection source finding %s is missing", id)
@@ -2014,8 +2019,13 @@ func (service *Service) prepareClosureProjections(
 			if err != nil {
 				return nil, nil, nil, err
 			}
+			document, err := closureTruthFindingDocument(
+				service.Boundary, request.CampaignSlug, sourceFinding, finding)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			projection, err := buildTruthProjection(
-				service.Boundary, finding, sourceEvidence, destination)
+				service.Boundary, document, sourceEvidence, destination)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("project finding %s: %w", id, err)
 			}
@@ -2084,12 +2094,52 @@ func (service *Service) prepareClosureProjections(
 	return truthDigests, projectionDigests, artifacts, nil
 }
 
+func closureFindingDestination(request ClosureApplyRequest, finding FindingRecord) string {
+	if destination := request.ProjectionDestinations[finding.ID]; destination != "" {
+		return destination
+	}
+	if finding.Projection == "truth" {
+		return canonicalTruthDestination(request.CampaignSlug, finding.ID)
+	}
+	return ""
+}
+
+func closureTruthFindingDocument(
+	boundary Boundary,
+	campaignSlug string,
+	source FindingRecord,
+	projected FindingRecord,
+) (FindingDocument, error) {
+	sourcePath := source.Path
+	if sourcePath == "" {
+		sourcePath = path.Join("active", campaignSlug, "findings", source.ID+".md")
+	}
+	absolute, err := boundary.Resolve(sourcePath, true)
+	if err != nil {
+		return FindingDocument{}, fmt.Errorf("resolve truth source finding %s: %w", source.ID, err)
+	}
+	body, err := readSingleLinkRegularFile(absolute)
+	if err != nil {
+		return FindingDocument{}, fmt.Errorf("read truth source finding %s: %w", source.ID, err)
+	}
+	document, err := ParseFindingDocument(body, sourcePath)
+	if err != nil {
+		return FindingDocument{}, fmt.Errorf("parse truth source finding %s: %w", source.ID, err)
+	}
+	if document.Record.Digest != source.Digest || document.Record.CampaignID != projected.CampaignID ||
+		document.Record.ID != projected.ID {
+		return FindingDocument{}, fmt.Errorf("truth source finding %s no longer matches the closure graph", source.ID)
+	}
+	document.Record = projected
+	return document, nil
+}
+
 // closureProjectionDestinationHint gives the shape of a legal destination for
 // one projection kind. The rules differ per kind and two of them are checked
 // far apart from where the destination is first demanded, so a caller told only
 // "requires a projection destination" would have to trip a second refusal to
 // learn the constraint.
-func closureProjectionDestinationHint(projection string) string {
+func closureProjectionDestinationHint(projection, campaignSlug, findingID string) string {
 	switch projection {
 	case "backlog":
 		return "a Markdown file below docs/backlog/, for example docs/backlog/<slug>.md"
@@ -2099,7 +2149,8 @@ func closureProjectionDestinationHint(projection string) string {
 		return "the existing project-relative file this finding documents, outside both the " +
 			"campaign's active tree and the closure archive"
 	default:
-		return "a project-relative file path, conventionally docs/truth/<slug>.md"
+		return "the canonical finding provenance path " +
+			canonicalTruthDestination(campaignSlug, findingID)
 	}
 }
 
@@ -2250,8 +2301,13 @@ func (service *Service) verifyClosureProjections(
 			if err != nil {
 				return err
 			}
+			document, err := closureTruthFindingDocument(
+				service.Boundary, graph.Campaign.Slug, sourceFinding, finding)
+			if err != nil {
+				return err
+			}
 			projection, err := buildTruthProjection(
-				service.Boundary, finding, sourceEvidence, destination)
+				service.Boundary, document, sourceEvidence, destination)
 			if err != nil {
 				return err
 			}

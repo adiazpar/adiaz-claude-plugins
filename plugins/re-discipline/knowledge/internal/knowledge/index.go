@@ -537,7 +537,8 @@ func createSchema(ctx context.Context, db *sql.DB) error {
 		)`,
 		`CREATE INDEX vectors_signature ON vectors(model_id, signature)`,
 		`CREATE TABLE findings (
-			id TEXT PRIMARY KEY, document_id TEXT NOT NULL UNIQUE REFERENCES documents(id),
+			key TEXT PRIMARY KEY, id TEXT NOT NULL,
+			document_id TEXT NOT NULL UNIQUE REFERENCES documents(id),
 			campaign_id TEXT NOT NULL, kind TEXT NOT NULL, subject TEXT NOT NULL,
 			claim TEXT NOT NULL, scope_json TEXT NOT NULL, evidence_grade TEXT NOT NULL,
 			review_state TEXT NOT NULL, validity TEXT NOT NULL, projection TEXT NOT NULL,
@@ -545,32 +546,33 @@ func createSchema(ctx context.Context, db *sql.DB) error {
 			verified_at TEXT NOT NULL DEFAULT '',
 			questions_reviewed INTEGER NOT NULL
 		)`,
+		`CREATE UNIQUE INDEX findings_identity ON findings(campaign_id,id)`,
 		`CREATE INDEX findings_filters ON findings(source_class,review_state,validity,campaign_id)`,
 		`CREATE VIRTUAL TABLE finding_fts USING fts5(
-			finding_id UNINDEXED, subject, claim, aliases, questions, scope, body,
+			finding_key UNINDEXED, subject, claim, aliases, questions, scope, body,
 			tokenize='unicode61 remove_diacritics 2'
 		)`,
 		`CREATE TABLE finding_queries (
-			finding_id TEXT NOT NULL REFERENCES findings(id), kind TEXT NOT NULL,
-			value TEXT NOT NULL, PRIMARY KEY(finding_id,kind,value)
+			finding_key TEXT NOT NULL REFERENCES findings(key), kind TEXT NOT NULL,
+			value TEXT NOT NULL, PRIMARY KEY(finding_key,kind,value)
 		)`,
 		`CREATE TABLE finding_terms (
-			term TEXT NOT NULL, finding_id TEXT NOT NULL REFERENCES findings(id),
-			kind TEXT NOT NULL, PRIMARY KEY(term,finding_id,kind)
+			term TEXT NOT NULL, finding_key TEXT NOT NULL REFERENCES findings(key),
+			kind TEXT NOT NULL, PRIMARY KEY(term,finding_key,kind)
 		)`,
-		`CREATE INDEX finding_terms_id ON finding_terms(finding_id)`,
+		`CREATE INDEX finding_terms_key ON finding_terms(finding_key)`,
 		`CREATE TABLE finding_evidence (
-			handle TEXT PRIMARY KEY, finding_id TEXT NOT NULL REFERENCES findings(id),
+			handle TEXT NOT NULL, finding_key TEXT NOT NULL REFERENCES findings(key),
 			path TEXT NOT NULL, sha256 TEXT NOT NULL, start_line INTEGER NOT NULL DEFAULT 0,
 			end_line INTEGER NOT NULL DEFAULT 0, object_key TEXT NOT NULL DEFAULT '',
-			source_run TEXT NOT NULL DEFAULT ''
+			source_run TEXT NOT NULL DEFAULT '', PRIMARY KEY(handle,finding_key)
 		)`,
-		`CREATE INDEX finding_evidence_id ON finding_evidence(finding_id)`,
+		`CREATE INDEX finding_evidence_key ON finding_evidence(finding_key)`,
 		`CREATE TABLE finding_relations (
-			source_id TEXT NOT NULL REFERENCES findings(id), target_id TEXT NOT NULL,
-			kind TEXT NOT NULL, PRIMARY KEY(source_id,target_id,kind)
+			source_key TEXT NOT NULL REFERENCES findings(key), target_key TEXT NOT NULL,
+			kind TEXT NOT NULL, PRIMARY KEY(source_key,target_key,kind)
 		)`,
-		`CREATE INDEX finding_relations_target ON finding_relations(target_id)`,
+		`CREATE INDEX finding_relations_target ON finding_relations(target_key)`,
 		`CREATE TABLE archive_reports (
 			report_digest TEXT NOT NULL, document_id TEXT PRIMARY KEY REFERENCES documents(id),
 			path TEXT NOT NULL, legacy_tier TEXT NOT NULL, normalized_finding_id TEXT
@@ -748,31 +750,63 @@ func populateDatabase(
 			return err
 		}
 	}
-	documentsByFinding := map[string]SourceDocument{}
+	documentsByPath := map[string]SourceDocument{}
 	for _, document := range inventory.Documents {
 		if document.FindingID != "" {
-			if prior, duplicate := documentsByFinding[document.FindingID]; duplicate {
-				return fmt.Errorf("finding %s appears in both %s and %s", document.FindingID, prior.Path, document.Path)
-			}
-			documentsByFinding[document.FindingID] = document
+			documentsByPath[document.Path] = document
 		}
 	}
+	type indexedFinding struct {
+		document FindingDocument
+		source   SourceDocument
+	}
+	selected := map[string]indexedFinding{}
 	for _, findingDocument := range inventory.Findings {
 		findingDocument = normalizeFindingDocument(findingDocument)
 		record := findingDocument.Record
-		sourceDocument, indexed := documentsByFinding[record.ID]
+		sourceDocument, indexed := documentsByPath[record.Path]
 		if !indexed {
-			return fmt.Errorf("finding %s has no indexed source document", record.ID)
+			return fmt.Errorf("finding %s/%s has no indexed source document", record.CampaignID, record.ID)
 		}
+		key := findingStorageKey(record.CampaignID, record.ID)
+		if prior, duplicate := selected[key]; duplicate {
+			if prior.document.Record.Digest != record.Digest {
+				return fmt.Errorf(
+					"finding %s/%s conflicts between %s and %s",
+					record.CampaignID, record.ID, prior.source.Path, sourceDocument.Path)
+			}
+			priorRank := findingSourceSelectionRank(prior.source.Tier)
+			candidateRank := findingSourceSelectionRank(sourceDocument.Tier)
+			if priorRank == candidateRank && prior.source.Path != sourceDocument.Path {
+				return fmt.Errorf(
+					"finding %s/%s appears twice in %s provenance: %s and %s",
+					record.CampaignID, record.ID, sourceDocument.Tier,
+					prior.source.Path, sourceDocument.Path)
+			}
+			if candidateRank <= priorRank {
+				continue
+			}
+		}
+		selected[key] = indexedFinding{document: findingDocument, source: sourceDocument}
+	}
+	keys := make([]string, 0, len(selected))
+	for key := range selected {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		findingDocument := selected[key].document
+		sourceDocument := selected[key].source
+		record := findingDocument.Record
 		scopeJSON, err := json.Marshal(record.Scope)
 		if err != nil {
 			return err
 		}
 		sourceClass := sourceDocument.Tier
 		if _, err := tx.ExecContext(ctx, `INSERT INTO findings(
-			id,document_id,campaign_id,kind,subject,claim,scope_json,evidence_grade,
+			key,id,document_id,campaign_id,kind,subject,claim,scope_json,evidence_grade,
 			review_state,validity,projection,record_digest,body,source_class,verified_at,questions_reviewed)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, record.ID, sourceDocument.ID, record.CampaignID,
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, key, record.ID, sourceDocument.ID, record.CampaignID,
 			record.Kind, record.Subject, record.Claim, string(scopeJSON), record.EvidenceGrade,
 			record.ReviewState, record.Validity, record.Projection, record.Digest, record.Body,
 			sourceClass, record.VerifiedAt, findingDocument.QuestionsReviewed); err != nil {
@@ -781,17 +815,17 @@ func populateDatabase(
 		aliases := strings.Join(record.Aliases, "\n")
 		questions := strings.Join(findingDocument.SyntheticQuestions, "\n")
 		if _, err := tx.ExecContext(ctx, `INSERT INTO finding_fts(
-			finding_id,subject,claim,aliases,questions,scope,body) VALUES(?,?,?,?,?,?,?)`,
-			record.ID, record.Subject, record.Claim, aliases, questions, string(scopeJSON), record.Body); err != nil {
+			finding_key,subject,claim,aliases,questions,scope,body) VALUES(?,?,?,?,?,?,?)`,
+			key, record.Subject, record.Claim, aliases, questions, string(scopeJSON), record.Body); err != nil {
 			return err
 		}
 		for _, alias := range record.Aliases {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO finding_queries(finding_id,kind,value) VALUES(?,?,?)`, record.ID, "alias", alias); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO finding_queries(finding_key,kind,value) VALUES(?,?,?)`, key, "alias", alias); err != nil {
 				return err
 			}
 		}
 		for _, question := range findingDocument.SyntheticQuestions {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO finding_queries(finding_id,kind,value) VALUES(?,?,?)`, record.ID, "synthetic-question", question); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO finding_queries(finding_key,kind,value) VALUES(?,?,?)`, key, "synthetic-question", question); err != nil {
 				return err
 			}
 		}
@@ -800,14 +834,14 @@ func populateDatabase(
 			strings.Join(record.Tags, " "), strings.Join(record.Subsystems, " "),
 		}, "\n")
 		for _, token := range AnalyzeIdentifierText(analysisText) {
-			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO finding_terms(term,finding_id,kind) VALUES(?,?,?)`, token.Value, record.ID, token.Kind); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO finding_terms(term,finding_key,kind) VALUES(?,?,?)`, token.Value, key, token.Kind); err != nil {
 				return err
 			}
 		}
 		for _, evidence := range record.Evidence {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO finding_evidence(
-				handle,finding_id,path,sha256,start_line,end_line,object_key,source_run)
-				VALUES(?,?,?,?,?,?,?,?)`, EvidenceHandle(record.ID, evidence), record.ID,
+				handle,finding_key,path,sha256,start_line,end_line,object_key,source_run)
+				VALUES(?,?,?,?,?,?,?,?)`, EvidenceHandle(record.ID, evidence), key,
 				evidence.Path, evidence.SHA256, evidence.StartLine, evidence.EndLine,
 				evidence.ObjectKey, evidence.SourceRun); err != nil {
 				return err
@@ -815,13 +849,26 @@ func populateDatabase(
 		}
 		for kind, targets := range FindingRelationSets(record.Relations) {
 			for _, target := range targets {
-				if _, err := tx.ExecContext(ctx, `INSERT INTO finding_relations(source_id,target_id,kind) VALUES(?,?,?)`, record.ID, target, kind); err != nil {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO finding_relations(source_key,target_key,kind) VALUES(?,?,?)`, key, findingStorageKey(record.CampaignID, target), kind); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	return tx.Commit()
+}
+
+func findingSourceSelectionRank(sourceClass string) int {
+	switch sourceClass {
+	case "truth":
+		return 4
+	case "campaign", "provisional":
+		return 3
+	case "history":
+		return 2
+	default:
+		return 1
+	}
 }
 
 func nullable(value string) any {

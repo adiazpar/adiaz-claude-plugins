@@ -1,10 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.9.5 - 2026-08-17
 
 - Normalize namespaced Codex tool names at the hook boundary so registered
   workers launched through `collaboration.spawn_agent` receive their run
   binding while namespaced write tools retain the same grant enforcement.
+- Bind the dispatched Windows knowledge runtime to a kill-on-close Job Object
+  so terminating its architecture launcher cannot leave the child process
+  orphaned.
+- Publish native truth as canonical `FindingDocument` records under the single
+  campaign-scoped `docs/truth/findings/<campaign>/<F-id>.md` provenance
+  namespace, refuse free-form topic paths, and provide an exact-digest atomic
+  relocation for legacy root and flat-finding projections.
+- Key the derived finding index by campaign plus local finding ID, collapse an
+  exact archive/truth projection pair to the truth source, and retain strict
+  conflict refusal for non-identical copies.
+- Make typed `docs/truth/findings/**` records the sole truth retrieval source;
+  classify `docs/truth/INDEX.md` as navigation and keep legacy split manifests
+  and loose Markdown outside the truth-authority index.
 
 ## 0.9.4 - 2026-08-16
 

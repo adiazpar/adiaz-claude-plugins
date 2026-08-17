@@ -553,9 +553,23 @@ Required metadata:
 - validity state;
 - intended or actual projection destination.
 
-YAML frontmatter is canonical for findings and truth projections. It keeps the
-machine-readable identity and the human-readable explanation in one atomic
-file, avoids sidecar drift, and remains ordinary Markdown for review and Git.
+YAML frontmatter is canonical for findings. A truth projection is the same
+canonical `FindingDocument`, published only after the closure gates under
+`docs/truth/findings/<campaign-slug>/<F-id>.md`; it is not a second record
+schema. This keeps machine-readable identity and human-readable explanation in
+one atomic file, avoids sidecar drift, and remains ordinary Markdown for review
+and Git.
+
+The knowledge runtime assigns truth authority only to valid
+`FindingDocument` files under `docs/truth/findings/**`.
+`docs/truth/INDEX.md` is navigation. Legacy split manifests under
+`docs/truth/splits/**` may remain as human compatibility views, but they are
+not retrieval sources and cannot compete with their target findings. Loose
+Markdown elsewhere under `docs/truth/` is likewise not a truth record; native
+legacy root projections and deprecated flat `docs/truth/findings/F-*.md`
+projections must be moved with the digest-bound `truth.relocate` manager
+action.
+
 A representative active finding begins:
 
 ```yaml
@@ -2096,8 +2110,8 @@ These are accepted RFC choices, not claims about implemented behavior:
     own decision receipt.
 15. **Cross-campaign awareness:** manager-ratified active findings are visible
     to other managers with explicit campaign-provisional durability.
-16. **YAML-frontmatter records:** findings and truth projections keep typed
-    metadata and readable explanation in one file; one file owns one
+16. **One finding format:** active, archived, imported-truth, and native-truth
+    findings use the same YAML-frontmatter `FindingDocument`; one file owns one
     independently supersedable claim.
 17. **General core, policy-specific evidence:** storage and transitions remain
     domain-neutral while projects configure named evidence policies such as the

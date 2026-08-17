@@ -63,6 +63,15 @@ type RunPreparation struct {
 	ContextPack ContextPack `json:"contextPack"`
 }
 
+// TruthRelocation names one legacy native truth projection to normalize. The
+// engine derives both the campaign-scoped destination and the canonical
+// FindingDocument bytes from the closed campaign archive; callers cannot
+// supply either and therefore cannot use this transition to edit truth.
+type TruthRelocation struct {
+	Source         string `json:"source"`
+	ExpectedDigest string `json:"expectedDigest"`
+}
+
 func (submission ReviewPacketSubmission) Packet() CurationPacket {
 	packet := CurationPacket{Intake: submission.Intake}
 	for _, row := range submission.Envelope.Rows {
@@ -96,6 +105,7 @@ type ManagerApplyRequest struct {
 	ArchiveFallbackDecision *ArchiveFallbackOptInDecision `json:"archiveFallbackDecision,omitempty"`
 	CampaignMerge           *CampaignMergeSubmission      `json:"campaignMerge,omitempty"`
 	CampaignDiscard         *CampaignDiscardSubmission    `json:"campaignDiscard,omitempty"`
+	TruthRelocations        []TruthRelocation             `json:"truthRelocations,omitempty"`
 	TokenBudget             int                           `json:"tokenBudget,omitempty"`
 }
 
@@ -118,6 +128,7 @@ var managerActionKinds = map[string]map[string]bool{
 	"decision.record":                   {"review": true, "intake": true, "finding": true, "work": true},
 	"reconcile.import":                  {"campaign": true, "work": true, "run": true, "finding": true, "intake": true, "review": true},
 	"knowledge.archive-fallback.opt-in": {},
+	"truth.relocate":                    {},
 }
 
 // ManagerApply validates and applies one typed manager transition, then trims
@@ -185,6 +196,11 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 	} else if replayed {
 		return receipt, nil
 	}
+	if receipt, replayed, err := replayTruthRelocation(store, service.Boundary, request); err != nil {
+		return StateTransactionReceipt{}, err
+	} else if replayed {
+		return receipt, nil
+	}
 	// From here down every check needs canonical state, so every one of them
 	// still fails fast. Once the campaign does not resolve or the actor has no
 	// authority over it, the answers to the rules below are not evidence about
@@ -222,6 +238,11 @@ func (service *Service) managerApply(ctx context.Context, request ManagerApplyRe
 		return StateTransactionReceipt{}, err
 	}
 	artifacts = append(artifacts, archiveArtifacts...)
+	truthArtifacts, err := service.prepareTruthRelocationArtifacts(request)
+	if err != nil {
+		return StateTransactionReceipt{}, err
+	}
+	artifacts = append(artifacts, truthArtifacts...)
 	writes, reviewHandle, err := buildManagerWrites(service.Boundary, request, artifacts)
 	if err != nil {
 		return StateTransactionReceipt{}, err
@@ -242,7 +263,8 @@ func managerStateTransactionRequest(
 		CorrelationID: request.CorrelationID, IdempotencyKey: request.IdempotencyKey,
 		ExpectedHeadRevision: request.ExpectedHeadRevision, ExpectedHeadDigest: request.ExpectedHeadDigest,
 		RebaseHead: managerActionRebasesHead(request.Action),
-		Writes:     writes, Artifacts: artifacts, ReviewPacket: request.ReviewPacket,
+		Writes:     writes, Artifacts: artifacts, ArtifactDeletes: truthRelocationDeletes(request),
+		ReviewPacket: request.ReviewPacket,
 	}
 }
 
@@ -389,6 +411,8 @@ var managerActionObligations = map[string]string{
 		"the next intake revision with the unresolved spans re-dispositioned and one appended amendment " +
 		"naming each retired span, the exact rationale it displaces, and the review it preserves. No " +
 		"finding, review, or run may be part of it.",
+	"truth.relocate": "Submit at least one deprecated native truth source with its exact current byte digest. " +
+		"The engine derives the archived FindingDocument and campaign-scoped destination.",
 }
 
 func managerActionObligation(action string) string {

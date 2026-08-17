@@ -49,7 +49,7 @@ func documentTokens(t *testing.T, root, relative string) int {
 
 func TestRequiredEvidenceLargerThanBudgetIsServedAsCompactHandleCard(t *testing.T) {
 	const budget = 1024
-	const relative = "docs/truth/serialization-contract.md"
+	const relative = "docs/playbooks/serialization-contract.md"
 	const marker = "ZQDEEPMARK41"
 
 	root := makeAdversarialProject(t)
@@ -65,7 +65,7 @@ func TestRequiredEvidenceLargerThanBudgetIsServedAsCompactHandleCard(t *testing.
 	request := ContextPackRequest{
 		Target: ContextPackTarget{Kind: "project"},
 		Task:   "how does the " + marker + " handshake commit a frame",
-		Role:   "manager", Tiers: []string{"truth"}, TokenBudget: budget,
+		Role:   "manager", Tiers: []string{"playbook"}, TokenBudget: budget,
 		RequiredPaths: []string{relative},
 	}
 	pack, err := service.ContextPackOptions(ctx, request)
@@ -103,7 +103,7 @@ func TestRequiredEvidenceLargerThanBudgetIsServedAsCompactHandleCard(t *testing.
 }
 
 func TestRequiredEvidenceFallsBackToClaimBearingOpeningCard(t *testing.T) {
-	const relative = "docs/truth/serialization-contract.md"
+	const relative = "docs/playbooks/serialization-contract.md"
 	root := makeAdversarialProject(t)
 	writeTestFile(t, filepath.Join(root, filepath.FromSlash(relative)),
 		buildLargeRequiredTruth("ZQDEEPMARK41", 9))
@@ -111,7 +111,7 @@ func TestRequiredEvidenceFallsBackToClaimBearingOpeningCard(t *testing.T) {
 	pack, err := service.ContextPackOptions(context.Background(), ContextPackRequest{
 		Target: ContextPackTarget{Kind: "project"},
 		Task:   "ZQABSENTTOPIC77 QVXJHWMPKD", Role: "manager",
-		Tiers: []string{"truth"}, TokenBudget: 1024,
+		Tiers: []string{"playbook"}, TokenBudget: 1024,
 		RequiredPaths: []string{relative},
 	})
 	if err != nil {
@@ -131,7 +131,7 @@ func TestRequiredEvidenceThatCannotFitStillFailsExplicitly(t *testing.T) {
 	root := makeAdversarialProject(t)
 	required := make([]string, 0, 6)
 	for index := 0; index < 6; index++ {
-		relative := fmt.Sprintf("docs/truth/bulk-%02d.md", index)
+		relative := fmt.Sprintf("docs/playbooks/bulk-%02d.md", index)
 		writeTestFile(t, filepath.Join(root, filepath.FromSlash(relative)),
 			buildLargeRequiredTruth(fmt.Sprintf("ZQBULKMARK%02d", index), 4))
 		required = append(required, relative)
@@ -140,7 +140,7 @@ func TestRequiredEvidenceThatCannotFitStillFailsExplicitly(t *testing.T) {
 	_, err := service.ContextPackOptions(context.Background(), ContextPackRequest{
 		Target: ContextPackTarget{Kind: "project"},
 		Task:   "every bulk contract at once", Role: "manager",
-		Tiers: []string{"truth"}, TokenBudget: 512, RequiredPaths: required,
+		Tiers: []string{"playbook"}, TokenBudget: 512, RequiredPaths: required,
 	})
 	if err == nil || !strings.Contains(err.Error(), "mandatory") {
 		t.Fatalf("unfittable required evidence must fail explicitly: %v", err)

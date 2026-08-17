@@ -15,8 +15,11 @@ const (
 	// The one definition of the published version. The packager, the package
 	// audit, and .github/scripts/re-discipline-sync-version.py all derive
 	// from this; a release is this line plus a manifest sync.
-	RuntimeVersion = "0.9.4"
-	ParserVersion  = "markdown-finding-v2-identifier-v1"
+	RuntimeVersion = "0.9.5"
+	// ParserVersion also binds the derived finding-index identity model. The
+	// campaign-key suffix forces one rebuild when campaign-local F-* IDs replace
+	// the former accidental project-global key.
+	ParserVersion = "markdown-finding-v2-identifier-v1-campaign-key-v1"
 	// Bumped for the per-chunk document prelude, then again for the opening
 	// chunk of an unreviewed drafter report. index.go forces a full rebuild
 	// when this value changes.

@@ -27,23 +27,29 @@ func writeProjectEvalCase(t *testing.T, root string, cases []EvalCase) {
 func pinnedFixtureCase(t *testing.T, root string) EvalCase {
 	t.Helper()
 	answerable := true
-	body, err := os.ReadFile(filepath.Join(root, "docs", "truth", "engine.md"))
+	const relative = "docs/playbooks/pin-health.md"
+	absolute := filepath.Join(root, filepath.FromSlash(relative))
+	if _, err := os.Stat(absolute); os.IsNotExist(err) {
+		writeTestFile(t, absolute,
+			"# Pin health fixture\n\nThe exact engine identifier is A1B2C3D4.\n")
+	}
+	body, err := os.ReadFile(absolute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return EvalCase{
 		ID: "engine-identifier", Role: "manager", Topic: "engine",
 		Split: "development", Query: "A1B2C3D4", QueryClass: "exact",
-		AllowedTiers: []string{"truth"}, CorpusSnapshot: "fixture:adversarial",
-		ExpectedPaths:        []string{"docs/truth/engine.md"},
-		MinimumEvidencePaths: []string{"docs/truth/engine.md"},
+		AllowedTiers: []string{"playbook"}, CorpusSnapshot: "fixture:adversarial",
+		ExpectedPaths:        []string{relative},
+		MinimumEvidencePaths: []string{relative},
 		HardNegativePaths:    []string{"docs/history/retired.md"},
-		ExpectedCitations:    []string{"docs/truth/engine.md"},
+		ExpectedCitations:    []string{relative},
 		ForbiddenTiers:       []string{"history"},
 		TokenBudget:          1024, Answerable: &answerable,
 		EvidencePins: []EvidencePin{{
-			Path:          "docs/truth/engine.md",
-			ClaimSha256:   ClaimDigest(string(body), "docs/truth/engine.md"),
+			Path:          relative,
+			ClaimSha256:   ClaimDigest(string(body), relative),
 			ContentSha256: "sha256:" + SHA256Bytes(body),
 		}},
 	}
@@ -86,7 +92,7 @@ func TestStatusReportsEvidencePinHealth(t *testing.T) {
 
 	// This untyped document has no extractable semantic claim. Its content digest
 	// is therefore the only safe identity and any byte change breaks the pin.
-	enginePath := filepath.Join(root, "docs", "truth", "engine.md")
+	enginePath := filepath.Join(root, "docs", "playbooks", "pin-health.md")
 	body, err := os.ReadFile(enginePath)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +107,7 @@ func TestStatusReportsEvidencePinHealth(t *testing.T) {
 		t.Fatalf("changed untyped evidence reported %+v, want one broken pin", changed)
 	}
 	if len(changed.NonIntactPaths) != 1 ||
-		changed.NonIntactPaths[0].Path != "docs/truth/engine.md" ||
+		changed.NonIntactPaths[0].Path != "docs/playbooks/pin-health.md" ||
 		changed.NonIntactPaths[0].State != "broken" ||
 		changed.NonIntactPaths[0].Pins != 1 {
 		t.Fatalf("broken census named %+v", changed.NonIntactPaths)

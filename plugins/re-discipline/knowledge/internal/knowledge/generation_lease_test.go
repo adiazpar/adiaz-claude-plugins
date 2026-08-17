@@ -19,7 +19,7 @@ func publishTestGeneration(
 	marker int,
 ) Generation {
 	t.Helper()
-	writeTestFile(t, filepath.Join(root, "docs", "truth", "engine.md"), fmt.Sprintf(
+	writeTestFile(t, filepath.Join(root, "docs", "playbooks", "engine.md"), fmt.Sprintf(
 		`# Engine contract
 
 The exact engine identifier is A1B2C3D4.
@@ -171,7 +171,7 @@ func TestAdversarialMeasurementLeaseSurvivesConcurrentPublication(t *testing.T) 
 				}
 				// Each publication adds its own source file, so the concurrent
 				// session never races the reader for one path.
-				path := filepath.Join(root, "docs", "truth",
+				path := filepath.Join(root, "docs", "playbooks",
 					fmt.Sprintf("concurrent-%03d.md", marker))
 				body := fmt.Sprintf(
 					"# Concurrent %03d\n\nconcurrent-publication-marker-%03d\n",
@@ -278,7 +278,7 @@ func TestAdversarialPinnedMeasurementNeverPublishesOrDrifts(t *testing.T) {
 	service.PinGeneration(generation)
 	before := generationDatabaseCount(t, service.Index.CacheRoot)
 
-	writeTestFile(t, filepath.Join(root, "docs", "truth", "engine.md"),
+	writeTestFile(t, filepath.Join(root, "docs", "playbooks", "engine.md"),
 		"# Engine contract\n\nThe exact engine identifier is A1B2C3D4.\n\npinned-drift-marker\n")
 
 	pinned, _, _, rebuilt, err := service.ensure(ctx)

@@ -41,6 +41,15 @@ type StateArtifactWrite struct {
 	Body           []byte `json:"-"`
 }
 
+// StateArtifactDelete removes one exact, already-inventoried artifact. Deletes
+// are deliberately separate from zero-byte writes: absence is part of the
+// resulting state and must be journaled, recovered, and reflected in the
+// inventory as such.
+type StateArtifactDelete struct {
+	Path           string `json:"path"`
+	ExpectedDigest string `json:"expectedDigest"`
+}
+
 type StateTransactionRequest struct {
 	CampaignSlug         string `json:"campaignSlug"`
 	CampaignID           string `json:"campaignId"`
@@ -67,6 +76,7 @@ type StateTransactionRequest struct {
 	RetiredEventJournal string                  `json:"retiredEventJournal,omitempty"`
 	Writes              []StateWrite            `json:"-"`
 	Artifacts           []StateArtifactWrite    `json:"-"`
+	ArtifactDeletes     []StateArtifactDelete   `json:"-"`
 	ReviewPacket        *ReviewPacketSubmission `json:"-"`
 }
 
@@ -85,24 +95,30 @@ type StateArtifactResult struct {
 	Mode           uint32 `json:"mode,omitempty"`
 }
 
+type StateArtifactDeleteResult struct {
+	Path           string `json:"path"`
+	PreviousDigest string `json:"previousDigest"`
+}
+
 type StateTransactionReceipt struct {
-	SchemaVersion       int                   `json:"schemaVersion"`
-	TransactionID       string                `json:"transactionId"`
-	CorrelationID       string                `json:"correlationId"`
-	IdempotencyKey      string                `json:"idempotencyKey"`
-	RequestDigest       string                `json:"requestDigest"`
-	PreviousHead        StateHead             `json:"previousHead"`
-	ResultingHead       StateHead             `json:"resultingHead"`
-	Event               StateEvent            `json:"event"`
-	Records             []StateRecordResult   `json:"records"`
-	Artifacts           []StateArtifactResult `json:"artifacts,omitempty"`
-	CreatedTree         string                `json:"createdTree,omitempty"`
-	RetiredTrees        []string              `json:"retiredTrees,omitempty"`
-	RetiredTreeDigests  map[string]string     `json:"retiredTreeDigests,omitempty"`
-	RetiredTree         string                `json:"retiredTree,omitempty"`
-	GeneratedViewDigest string                `json:"generatedViewDigest"`
-	CommittedAt         string                `json:"committedAt"`
-	ResultDigest        string                `json:"resultDigest"`
+	SchemaVersion       int                         `json:"schemaVersion"`
+	TransactionID       string                      `json:"transactionId"`
+	CorrelationID       string                      `json:"correlationId"`
+	IdempotencyKey      string                      `json:"idempotencyKey"`
+	RequestDigest       string                      `json:"requestDigest"`
+	PreviousHead        StateHead                   `json:"previousHead"`
+	ResultingHead       StateHead                   `json:"resultingHead"`
+	Event               StateEvent                  `json:"event"`
+	Records             []StateRecordResult         `json:"records"`
+	Artifacts           []StateArtifactResult       `json:"artifacts,omitempty"`
+	DeletedArtifacts    []StateArtifactDeleteResult `json:"deletedArtifacts,omitempty"`
+	CreatedTree         string                      `json:"createdTree,omitempty"`
+	RetiredTrees        []string                    `json:"retiredTrees,omitempty"`
+	RetiredTreeDigests  map[string]string           `json:"retiredTreeDigests,omitempty"`
+	RetiredTree         string                      `json:"retiredTree,omitempty"`
+	GeneratedViewDigest string                      `json:"generatedViewDigest"`
+	CommittedAt         string                      `json:"committedAt"`
+	ResultDigest        string                      `json:"resultDigest"`
 	// Omitted is set only on the copy of this receipt that a tokenBudget
 	// trimmed on its way back to the caller. It is never set on the receipt
 	// this package seals, journals, or persists under receipts/, and
@@ -141,12 +157,18 @@ type preparedStateArtifact struct {
 	Body           []byte
 }
 
+type preparedStateArtifactDelete struct {
+	Path           string
+	ExpectedDigest string
+}
+
 type preparedTransaction struct {
-	Request       StateTransactionRequest
-	Writes        []preparedStateWrite
-	Artifacts     []preparedStateArtifact
-	RequestDigest string
-	TransactionID string
+	Request         StateTransactionRequest
+	Writes          []preparedStateWrite
+	Artifacts       []preparedStateArtifact
+	ArtifactDeletes []preparedStateArtifactDelete
+	RequestDigest   string
+	TransactionID   string
 }
 
 // StateTransactionWriteDescriptor is the body-independent write commitment
@@ -169,29 +191,35 @@ type StateTransactionArtifactDescriptor struct {
 	Mode           uint32 `json:"mode,omitempty"`
 }
 
+type StateTransactionArtifactDeleteDescriptor struct {
+	Path           string `json:"path"`
+	ExpectedDigest string `json:"expectedDigest"`
+}
+
 // StateTransactionDescriptor is the versioned, portable transaction shape
 // committed by RequestDigest and described by transaction.schema.json.
 type StateTransactionDescriptor struct {
-	SchemaVersion        int                                  `json:"schemaVersion"`
-	CampaignSlug         string                               `json:"campaignSlug"`
-	CampaignID           string                               `json:"campaignId"`
-	Actor                string                               `json:"actor"`
-	Authority            string                               `json:"authority"`
-	Action               string                               `json:"action"`
-	Rationale            string                               `json:"rationale,omitempty"`
-	ReviewHandle         string                               `json:"reviewHandle,omitempty"`
-	CorrelationID        string                               `json:"correlationId"`
-	IdempotencyKey       string                               `json:"idempotencyKey"`
-	ExpectedHeadRevision int64                                `json:"expectedHeadRevision"`
-	ExpectedHeadDigest   string                               `json:"expectedHeadDigest"`
-	CreateActiveTree     string                               `json:"createActiveTree,omitempty"`
-	RetireActiveTrees    []string                             `json:"retireActiveTrees,omitempty"`
-	RetireTreeDigests    map[string]string                    `json:"retireTreeDigests,omitempty"`
-	EventJournal         string                               `json:"eventJournal,omitempty"`
-	RetireActiveTree     string                               `json:"retireActiveTree,omitempty"`
-	RetiredEventJournal  string                               `json:"retiredEventJournal,omitempty"`
-	Writes               []StateTransactionWriteDescriptor    `json:"writes"`
-	Artifacts            []StateTransactionArtifactDescriptor `json:"artifacts,omitempty"`
+	SchemaVersion        int                                        `json:"schemaVersion"`
+	CampaignSlug         string                                     `json:"campaignSlug"`
+	CampaignID           string                                     `json:"campaignId"`
+	Actor                string                                     `json:"actor"`
+	Authority            string                                     `json:"authority"`
+	Action               string                                     `json:"action"`
+	Rationale            string                                     `json:"rationale,omitempty"`
+	ReviewHandle         string                                     `json:"reviewHandle,omitempty"`
+	CorrelationID        string                                     `json:"correlationId"`
+	IdempotencyKey       string                                     `json:"idempotencyKey"`
+	ExpectedHeadRevision int64                                      `json:"expectedHeadRevision"`
+	ExpectedHeadDigest   string                                     `json:"expectedHeadDigest"`
+	CreateActiveTree     string                                     `json:"createActiveTree,omitempty"`
+	RetireActiveTrees    []string                                   `json:"retireActiveTrees,omitempty"`
+	RetireTreeDigests    map[string]string                          `json:"retireTreeDigests,omitempty"`
+	EventJournal         string                                     `json:"eventJournal,omitempty"`
+	RetireActiveTree     string                                     `json:"retireActiveTree,omitempty"`
+	RetiredEventJournal  string                                     `json:"retiredEventJournal,omitempty"`
+	Writes               []StateTransactionWriteDescriptor          `json:"writes"`
+	Artifacts            []StateTransactionArtifactDescriptor       `json:"artifacts,omitempty"`
+	ArtifactDeletes      []StateTransactionArtifactDeleteDescriptor `json:"artifactDeletes,omitempty"`
 }
 
 func (store *StateStore) Apply(ctx context.Context, request StateTransactionRequest) (StateTransactionReceipt, error) {
@@ -238,7 +266,8 @@ func prepareTransactionRequestIdentity(
 		!actionIDRE.MatchString(request.Action) || !correlationIDRE.MatchString(request.CorrelationID) ||
 		strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 128 ||
 		request.ExpectedHeadRevision < 0 || !digestRE.MatchString(request.ExpectedHeadDigest) ||
-		(len(request.Writes) == 0 && len(request.Artifacts) == 0 && len(transactionRetiredTrees(request)) == 0) {
+		(len(request.Writes) == 0 && len(request.Artifacts) == 0 &&
+			len(request.ArtifactDeletes) == 0 && len(transactionRetiredTrees(request)) == 0) {
 		return preparedTransaction{}, errors.New("transaction identity, authority, action, expected head, and writes are required")
 	}
 	if err := validateStateTopologyRequest(request); err != nil {
@@ -278,6 +307,28 @@ func prepareTransactionRequestIdentity(
 		artifacts = append(artifacts, item)
 	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
+	deletes := make([]preparedStateArtifactDelete, 0, len(request.ArtifactDeletes))
+	for _, deletion := range request.ArtifactDeletes {
+		item, err := prepareStateArtifactDelete(
+			request.Action, request.Authority, request.CampaignSlug, deletion)
+		if err != nil {
+			return preparedTransaction{}, err
+		}
+		if seenPaths[item.Path] {
+			return preparedTransaction{}, fmt.Errorf("transaction repeats path %s", item.Path)
+		}
+		seenPaths[item.Path] = true
+		deletes = append(deletes, item)
+	}
+	sort.Slice(deletes, func(i, j int) bool { return deletes[i].Path < deletes[j].Path })
+	if request.Action == "truth.relocate" {
+		if request.Authority != "manager" || len(prepared) != 0 || len(artifacts) == 0 ||
+			len(artifacts) > maxTruthRelocations || len(artifacts) != len(deletes) || request.CreateActiveTree != "" ||
+			len(transactionRetiredTrees(request)) != 0 || request.ReviewPacket != nil {
+			return preparedTransaction{}, errors.New(
+				"truth.relocate requires one canonical destination artifact per legacy deletion and no other mutation")
+		}
+	}
 	if err := validateRunPreparationArtifactBindings(request, artifacts); err != nil {
 		return preparedTransaction{}, err
 	}
@@ -287,6 +338,12 @@ func prepareTransactionRequestIdentity(
 		artifactDescriptors = append(artifactDescriptors, StateTransactionArtifactDescriptor{
 			Path: artifact.Path, ExpectedDigest: artifact.ExpectedDigest,
 			ContentDigest: artifact.ContentDigest, Mode: artifact.Mode,
+		})
+	}
+	deleteDescriptors := make([]StateTransactionArtifactDeleteDescriptor, 0, len(deletes))
+	for _, deletion := range deletes {
+		deleteDescriptors = append(deleteDescriptors, StateTransactionArtifactDeleteDescriptor{
+			Path: deletion.Path, ExpectedDigest: deletion.ExpectedDigest,
 		})
 	}
 	semantic := StateTransactionDescriptor{
@@ -299,7 +356,7 @@ func prepareTransactionRequestIdentity(
 		CreateActiveTree: request.CreateActiveTree, RetireActiveTrees: request.RetireActiveTrees,
 		RetireTreeDigests: request.RetireTreeDigests, EventJournal: request.EventJournal,
 		RetireActiveTree: request.RetireActiveTree, RetiredEventJournal: request.RetiredEventJournal,
-		Writes: descriptors, Artifacts: artifactDescriptors,
+		Writes: descriptors, Artifacts: artifactDescriptors, ArtifactDeletes: deleteDescriptors,
 	}
 	requestSemantic := semantic
 	if request.RebaseHead && !legacyIdentity {
@@ -316,8 +373,30 @@ func prepareTransactionRequestIdentity(
 	}
 	transactionID := "T-" + SHA256String(request.IdempotencyKey + "\x00" + requestDigest)[:24]
 	return preparedTransaction{
-		Request: request, Writes: prepared, Artifacts: artifacts,
+		Request: request, Writes: prepared, Artifacts: artifacts, ArtifactDeletes: deletes,
 		RequestDigest: requestDigest, TransactionID: transactionID,
+	}, nil
+}
+
+func prepareStateArtifactDelete(
+	action, authority, slug string,
+	deletion StateArtifactDelete,
+) (preparedStateArtifactDelete, error) {
+	if err := validateRelativeRecordPath(deletion.Path); err != nil {
+		return preparedStateArtifactDelete{}, err
+	}
+	if !digestRE.MatchString(deletion.ExpectedDigest) {
+		return preparedStateArtifactDelete{}, errors.New("artifact deletion requires an exact expected digest")
+	}
+	if authority != "manager" || action != "truth.relocate" {
+		return preparedStateArtifactDelete{}, errors.New(
+			"individual artifact deletion is reserved for manager truth.relocate")
+	}
+	if err := validateRelocatableTruthSource(deletion.Path); err != nil {
+		return preparedStateArtifactDelete{}, err
+	}
+	return preparedStateArtifactDelete{
+		Path: deletion.Path, ExpectedDigest: deletion.ExpectedDigest,
 	}, nil
 }
 
@@ -408,6 +487,23 @@ func prepareStateArtifact(action, authority, slug string, artifact StateArtifact
 		if err := validateCampaignMergeArtifactPath(slug, artifact.Path); err != nil {
 			return preparedStateArtifact{}, err
 		}
+	case authority == "manager" && action == "truth.relocate":
+		if artifact.ExpectedDigest != "" {
+			return preparedStateArtifact{}, errors.New("truth relocation destinations are create-only")
+		}
+		if err := validateTruthDestination(artifact.Path); err != nil {
+			return preparedStateArtifact{}, err
+		}
+		document, err := ParseFindingDocument(artifact.Body, artifact.Path)
+		if err != nil {
+			return preparedStateArtifact{}, fmt.Errorf("truth relocation destination: %w", err)
+		}
+		if document.Record.EvidenceGrade != "direct" ||
+			document.Record.ReviewState != "manager-ratified" ||
+			document.Record.Validity != "current" || document.Record.Projection != "truth" {
+			return preparedStateArtifact{}, errors.New(
+				"truth relocation destination must be a direct, manager-ratified, current truth FindingDocument")
+		}
 	case strings.HasPrefix(action, "closure.") && validOne(authority, "manager", "system"):
 		if err := validateClosureArtifactPath(slug, artifact.Path); err != nil {
 			return preparedStateArtifact{}, err
@@ -420,6 +516,20 @@ func prepareStateArtifact(action, authority, slug string, artifact StateArtifact
 		ContentDigest: artifact.ContentDigest, Mode: mode,
 		Body: append([]byte(nil), artifact.Body...),
 	}, nil
+}
+
+func validateRelocatableTruthSource(value string) error {
+	parts := strings.Split(value, "/")
+	rootProjection := len(parts) == 3 && parts[0] == "docs" && parts[1] == "truth" &&
+		parts[2] != "INDEX.md" && path.Ext(parts[2]) == ".md"
+	flatFindingProjection := len(parts) == 4 && parts[0] == "docs" && parts[1] == "truth" &&
+		parts[2] == "findings" && findingIDRE.MatchString(strings.TrimSuffix(parts[3], ".md")) &&
+		path.Ext(parts[3]) == ".md"
+	if !rootProjection && !flatFindingProjection {
+		return errors.New("truth relocation source must be a deprecated native projection at " +
+			"docs/truth/<name>.md or docs/truth/findings/<F-id>.md")
+	}
+	return nil
 }
 
 func validateCampaignMergeArtifactPath(slug, value string) error {

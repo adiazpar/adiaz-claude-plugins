@@ -331,6 +331,7 @@ func (store *StateStore) resultingStateInventory(
 	revision int64,
 	writes []preparedStateWrite,
 	artifacts []preparedStateArtifact,
+	deletes []preparedStateArtifactDelete,
 	eventPath string,
 	eventBody []byte,
 	retiredTrees []string,
@@ -362,6 +363,9 @@ func (store *StateStore) resultingStateInventory(
 	}
 	for _, artifact := range artifacts {
 		entries[artifact.Path] = artifact.ContentDigest
+	}
+	for _, deletion := range deletes {
+		delete(entries, deletion.Path)
 	}
 	entries[eventPath] = "sha256:" + SHA256Bytes(eventBody)
 	for _, retiredTree := range retiredTrees {

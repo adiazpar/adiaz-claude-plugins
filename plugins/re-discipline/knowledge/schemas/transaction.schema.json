@@ -60,6 +60,18 @@
         },
         "additionalProperties": false
       }
+    },
+    "artifactDeletes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "expectedDigest"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "expectedDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

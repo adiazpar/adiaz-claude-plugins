@@ -736,6 +736,22 @@ func FindingHandle(id string) string {
 	return "finding:" + id
 }
 
+// findingStorageKey is the derived index identity for a campaign-local
+// finding. Canonical records and public handles intentionally retain their
+// compact F-* IDs; callers disambiguate those handles with campaignId. The
+// SQLite projection must not collapse equal local IDs from unrelated
+// campaigns, so every internal relation uses this compound key instead.
+func findingStorageKey(campaignID, findingID string) string {
+	return campaignID + "/" + findingID
+}
+
+func findingIDFromStorageKey(key string) string {
+	if separator := strings.LastIndexByte(key, '/'); separator >= 0 && separator+1 < len(key) {
+		return key[separator+1:]
+	}
+	return key
+}
+
 func FindingSourceClass(record FindingRecord) string {
 	switch record.ReviewState {
 	case "manager-ratified", "manager-rejected":

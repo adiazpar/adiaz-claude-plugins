@@ -139,6 +139,23 @@ func TestMaintainedProjectionCannotTargetRetiredCampaignTree(t *testing.T) {
 	}
 }
 
+func TestClosureTruthDestinationIsDerivedAndCampaignScoped(t *testing.T) {
+	finding := FindingRecord{ID: "F-0001", Projection: "truth"}
+	request := ClosureApplyRequest{CampaignSlug: "test-campaign"}
+	want := "docs/truth/findings/test-campaign/F-0001.md"
+	if got := closureFindingDestination(request, finding); got != want {
+		t.Fatalf("derived truth destination = %q, want %q", got, want)
+	}
+	if err := validateCanonicalTruthDestination(
+		"test-campaign", "F-0001", "docs/truth/topic-name.md"); err == nil {
+		t.Fatal("free-form truth destination was accepted")
+	}
+	request.ProjectionDestinations = map[string]string{"F-0001": want}
+	if got := closureFindingDestination(request, finding); got != want {
+		t.Fatalf("exact canonical truth destination changed: %q", got)
+	}
+}
+
 func TestClosureProjectStagesTruthPrivatelyAndVerifiesProductionRetrieval(t *testing.T) {
 	store, root, service, graph, request, original, staging := prepareStagedTruthClosureFixture(t)
 	destination := request.ProjectionDestinations["F-0001"]
@@ -552,7 +569,9 @@ func prepareStagedTruthClosureFixture(
 		CorrelationID: "closure-project", Timestamp: "2026-08-02T20:01:00Z",
 		ExpectedRecordDigests:   map[string]string{document.Record.ID: document.Record.Digest},
 		ExpectedArtifactDigests: map[string]string{},
-		ProjectionDestinations:  map[string]string{"F-0001": "docs/truth/closure-private-staging.md"},
+		ProjectionDestinations: map[string]string{
+			"F-0001": canonicalTruthDestination("test-campaign", "F-0001"),
+		},
 	}
 	projected, promotions, err := service.prepareClosureFindingTransitions(store, graph, request)
 	if err != nil {

@@ -2,7 +2,6 @@ package knowledge
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,8 +23,8 @@ type TruthProjection struct {
 // BuildTruthProjection is the only renderer used by closure. It proves the
 // epistemic gate and every evidence digest before returning bytes; publishing
 // those bytes still belongs to the closure transaction.
-func BuildTruthProjection(boundary Boundary, finding FindingRecord, destination string) (TruthProjection, error) {
-	return buildTruthProjection(boundary, finding, finding.Evidence, destination)
+func BuildTruthProjection(boundary Boundary, document FindingDocument, destination string) (TruthProjection, error) {
+	return buildTruthProjection(boundary, document, document.Record.Evidence, destination)
 }
 
 // buildTruthProjection lets closure validate evidence at its still-live source
@@ -33,10 +32,11 @@ func BuildTruthProjection(boundary Boundary, finding FindingRecord, destination 
 // final atomic cutover. Ordinary callers use the same references for both.
 func buildTruthProjection(
 	boundary Boundary,
-	finding FindingRecord,
+	document FindingDocument,
 	sourceEvidence []EvidenceReference,
 	destination string,
 ) (TruthProjection, error) {
+	finding := document.Record
 	if err := ValidateFinding(finding); err != nil {
 		return TruthProjection{}, err
 	}
@@ -89,35 +89,14 @@ func buildTruthProjection(
 			}
 		}
 	}
-	semantic := struct {
-		SchemaVersion int                 `json:"schemaVersion"`
-		FindingID     string              `json:"findingId"`
-		CampaignID    string              `json:"campaignId"`
-		Subject       string              `json:"subject"`
-		Claim         string              `json:"claim"`
-		Scope         map[string]any      `json:"scope"`
-		AppliesWhen   []string            `json:"appliesWhen,omitempty"`
-		KnownLimits   []string            `json:"knownLimits,omitempty"`
-		Evidence      []EvidenceReference `json:"evidence"`
-		VerifiedAt    string              `json:"verifiedAt,omitempty"`
-	}{
-		SchemaVersion: CampaignSchemaVersion, FindingID: finding.ID,
-		CampaignID: finding.CampaignID, Subject: finding.Subject, Claim: finding.Claim,
-		Scope: finding.Scope, AppliesWhen: SortedUnique(finding.AppliesWhen),
-		KnownLimits: SortedUnique(finding.KnownLimits), Evidence: finding.Evidence,
-		VerifiedAt: finding.VerifiedAt,
-	}
-	semanticDigest, err := CanonicalDigest(semantic)
-	if err != nil {
-		return TruthProjection{}, err
-	}
-	body, err := renderTruthProjection(semantic, semanticDigest)
+	document.Record.Path = destination
+	body, err := RenderFindingDocument(document)
 	if err != nil {
 		return TruthProjection{}, err
 	}
 	return TruthProjection{
 		SchemaVersion: CampaignSchemaVersion, FindingID: finding.ID,
-		Destination: destination, SemanticDigest: semanticDigest,
+		Destination: destination, SemanticDigest: finding.Digest,
 		ContentDigest: "sha256:" + SHA256Bytes(body), Body: body,
 	}, nil
 }
@@ -138,75 +117,30 @@ func validateTruthDestination(value string) error {
 	if err := validateRelativeRecordPath(value); err != nil {
 		return err
 	}
-	if !strings.HasPrefix(value, "docs/truth/") || path.Ext(value) != ".md" {
-		return errors.New("truth projection destination must be a Markdown file below docs/truth")
+	parts := strings.Split(value, "/")
+	if len(parts) != 5 || parts[0] != "docs" || parts[1] != "truth" ||
+		parts[2] != "findings" || !managedSlugRE.MatchString(parts[3]) ||
+		!findingIDRE.MatchString(strings.TrimSuffix(parts[4], ".md")) ||
+		path.Ext(parts[4]) != ".md" {
+		return errors.New("truth projection destination must be docs/truth/findings/<campaign-slug>/<F-id>.md")
 	}
 	return nil
 }
 
-func renderTruthProjection(value struct {
-	SchemaVersion int                 `json:"schemaVersion"`
-	FindingID     string              `json:"findingId"`
-	CampaignID    string              `json:"campaignId"`
-	Subject       string              `json:"subject"`
-	Claim         string              `json:"claim"`
-	Scope         map[string]any      `json:"scope"`
-	AppliesWhen   []string            `json:"appliesWhen,omitempty"`
-	KnownLimits   []string            `json:"knownLimits,omitempty"`
-	Evidence      []EvidenceReference `json:"evidence"`
-	VerifiedAt    string              `json:"verifiedAt,omitempty"`
-}, semanticDigest string) ([]byte, error) {
-	scope, err := json.Marshal(value.Scope)
-	if err != nil {
-		return nil, err
+func canonicalTruthDestination(campaignSlug, findingID string) string {
+	return path.Join("docs", "truth", "findings", campaignSlug, findingID+".md")
+}
+
+func validateCanonicalTruthDestination(campaignSlug, findingID, value string) error {
+	expected := canonicalTruthDestination(campaignSlug, findingID)
+	if value != expected {
+		return fmt.Errorf("truth projection %s must use its canonical provenance path %s", findingID, expected)
 	}
-	var output strings.Builder
-	output.WriteString("---\n")
-	fmt.Fprintf(&output, "schemaVersion: %d\n", value.SchemaVersion)
-	fmt.Fprintf(&output, "truthId: %s\n", yamlScalar("T-"+value.FindingID))
-	fmt.Fprintf(&output, "sourceFinding: %s\n", yamlScalar(value.FindingID))
-	fmt.Fprintf(&output, "sourceCampaign: %s\n", yamlScalar(value.CampaignID))
-	fmt.Fprintf(&output, "subject: %s\n", yamlScalar(value.Subject))
-	fmt.Fprintf(&output, "claim: %s\n", yamlScalar(value.Claim))
-	fmt.Fprintf(&output, "scope: %s\n", string(scope))
-	writeYAMLStrings(&output, "appliesWhen", value.AppliesWhen)
-	writeYAMLStrings(&output, "knownLimits", value.KnownLimits)
-	output.WriteString("evidence:\n")
-	for _, evidence := range value.Evidence {
-		fmt.Fprintf(&output, "  - path: %s\n", yamlScalar(evidence.Path))
-		fmt.Fprintf(&output, "    sha256: %s\n", yamlScalar(evidence.SHA256))
-		if evidence.StartLine > 0 {
-			fmt.Fprintf(&output, "    startLine: %d\n    endLine: %d\n", evidence.StartLine, evidence.EndLine)
-		}
-		if evidence.ObjectKey != "" {
-			fmt.Fprintf(&output, "    objectKey: %s\n", yamlScalar(evidence.ObjectKey))
-		}
-		if evidence.SourceRun != "" {
-			fmt.Fprintf(&output, "    sourceRun: %s\n", yamlScalar(evidence.SourceRun))
-		}
-	}
-	if value.VerifiedAt != "" {
-		fmt.Fprintf(&output, "verifiedAt: %s\n", yamlScalar(value.VerifiedAt))
-	}
-	fmt.Fprintf(&output, "semanticDigest: %s\n", yamlScalar(semanticDigest))
-	output.WriteString("status: current\n---\n\n")
-	output.WriteString(value.Claim)
-	output.WriteString("\n")
-	return []byte(output.String()), nil
+	return validateTruthDestination(value)
 }
 
 func yamlScalar(value string) string {
 	return strconv.Quote(value)
-}
-
-func writeYAMLStrings(output *strings.Builder, key string, values []string) {
-	if len(values) == 0 {
-		return
-	}
-	fmt.Fprintf(output, "%s:\n", key)
-	for _, value := range values {
-		fmt.Fprintf(output, "  - %s\n", yamlScalar(value))
-	}
 }
 
 // BuildArchiveManifest seals the archive inventory after the caller has

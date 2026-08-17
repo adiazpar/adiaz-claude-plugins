@@ -133,6 +133,9 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	if err := store.validateArtifactExpectations(prepared.Artifacts); err != nil {
 		return StateTransactionReceipt{}, err
 	}
+	if err := store.validateArtifactDeleteExpectations(prepared.ArtifactDeletes); err != nil {
+		return StateTransactionReceipt{}, err
+	}
 	graph, err := store.loadGraphForTransaction(prepared.Request.CampaignSlug)
 	if err != nil {
 		return StateTransactionReceipt{}, err
@@ -175,7 +178,8 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		}
 	}
 	mutationDigest, resultingStateDigest, err := transactionStateDigests(
-		head, writes, prepared.Artifacts, prepared.Request.CreateActiveTree,
+		head, writes, prepared.Artifacts, prepared.ArtifactDeletes,
+		prepared.Request.CreateActiveTree,
 		transactionRetiredTrees(prepared.Request))
 	if err != nil {
 		return StateTransactionReceipt{}, err
@@ -186,6 +190,9 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	}
 	for _, artifact := range prepared.Artifacts {
 		affected = append(affected, artifact.Path)
+	}
+	for _, deletion := range prepared.ArtifactDeletes {
+		affected = append(affected, deletion.Path)
 	}
 	affected = append(affected, transactionRetiredTrees(prepared.Request)...)
 	if validOne(prepared.Request.Action, "campaign.merge", "campaign.discard") {
@@ -252,7 +259,8 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		}
 	}
 	resultingInventory, err := store.resultingStateInventory(
-		inventory, head.Revision+1, writes, prepared.Artifacts, resultingEventJournal,
+		inventory, head.Revision+1, writes, prepared.Artifacts, prepared.ArtifactDeletes,
+		resultingEventJournal,
 		eventBody, transactionRetiredTrees(prepared.Request),
 	)
 	if err != nil {
@@ -277,7 +285,12 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 	if len(prepared.Artifacts) != 0 {
 		artifactResults = make([]StateArtifactResult, 0, len(prepared.Artifacts))
 	}
-	artifacts := make([]publicationArtifact, 0, len(writes)+len(prepared.Artifacts)+3)
+	var deleteResults []StateArtifactDeleteResult
+	if len(prepared.ArtifactDeletes) != 0 {
+		deleteResults = make([]StateArtifactDeleteResult, 0, len(prepared.ArtifactDeletes))
+	}
+	artifacts := make([]publicationArtifact, 0,
+		len(writes)+len(prepared.Artifacts)+len(prepared.ArtifactDeletes)+3)
 	for _, write := range writes {
 		recordResults = append(recordResults, StateRecordResult{
 			Path: write.Path, RecordID: write.RecordID, Revision: write.Revision,
@@ -297,6 +310,14 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 			Mode: fs.FileMode(artifact.Mode),
 		})
 	}
+	for _, deletion := range prepared.ArtifactDeletes {
+		deleteResults = append(deleteResults, StateArtifactDeleteResult{
+			Path: deletion.Path, PreviousDigest: deletion.ExpectedDigest,
+		})
+		artifacts = append(artifacts, publicationArtifact{
+			Kind: "delete", Target: deletion.Path, ExpectedDigest: deletion.ExpectedDigest,
+		})
+	}
 	if !discard {
 		stateViewPath := "active/" + prepared.Request.CampaignSlug + "/STATE.md"
 		artifacts = append(artifacts, publicationArtifact{
@@ -310,6 +331,7 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		CorrelationID: prepared.Request.CorrelationID, IdempotencyKey: prepared.Request.IdempotencyKey,
 		RequestDigest: prepared.RequestDigest, PreviousHead: head, ResultingHead: resultingHead,
 		Event: event, Records: recordResults, Artifacts: artifactResults,
+		DeletedArtifacts:   deleteResults,
 		CreatedTree:        prepared.Request.CreateActiveTree,
 		RetiredTrees:       append([]string(nil), prepared.Request.RetireActiveTrees...),
 		RetiredTreeDigests: prepared.Request.RetireTreeDigests,
@@ -343,7 +365,9 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 			return StateTransactionReceipt{}, err
 		}
 		if err := store.publishJournalOperation(operation); err != nil {
-			return StateTransactionReceipt{}, err
+			return StateTransactionReceipt{}, fmt.Errorf(
+				"publish transaction operation %d (%s %s): %w",
+				index, operation.Kind, operation.Target, err)
 		}
 		point := FailAfterRecordPublish
 		if operation.Kind == "event" {
@@ -370,14 +394,14 @@ func (store *StateStore) runPreparedTransaction(ctx context.Context, prepared pr
 		return StateTransactionReceipt{}, err
 	}
 	if err := durableAtomicWriteJSON(headPath, resultingHead, 0o600); err != nil {
-		return StateTransactionReceipt{}, err
+		return StateTransactionReceipt{}, fmt.Errorf("publish transaction head: %w", err)
 	}
 	if err := store.hitFailpoint(FailAfterHeadPublish, prepared.TransactionID, ".re-discipline/state/head.json", -1); err != nil {
 		return StateTransactionReceipt{}, err
 	}
 	journal.Phase, journal.UpdatedAt = "committed", RFC3339UTC(store.Now())
 	if err := store.writeTransactionJournal(journalPath, &journal); err != nil {
-		return StateTransactionReceipt{}, err
+		return StateTransactionReceipt{}, fmt.Errorf("mark transaction journal committed: %w", err)
 	}
 	store.cleanupJournalStaging(journal)
 	return receipt, nil
@@ -563,6 +587,31 @@ func (store *StateStore) validateArtifactExpectations(artifacts []preparedStateA
 					"set expectedArtifactDigests[%q] to its current digest, or omit the entry "+
 					"if the destination should be created rather than replaced",
 				ErrStateConflict, artifact.Path, artifact.ExpectedDigest, found, artifact.Path)
+		}
+	}
+	return nil
+}
+
+func (store *StateStore) validateArtifactDeleteExpectations(
+	deletions []preparedStateArtifactDelete,
+) error {
+	for _, deletion := range deletions {
+		target, err := store.canonicalOutputPath(deletion.Path)
+		if err != nil {
+			return err
+		}
+		digest, exists, err := currentFileDigest(target)
+		if err != nil {
+			return err
+		}
+		if !exists || digest != deletion.ExpectedDigest {
+			found := "nothing"
+			if exists {
+				found = digest
+			}
+			return fmt.Errorf(
+				"%w: artifact deletion %s expected digest %s and found %s",
+				ErrStateConflict, deletion.Path, deletion.ExpectedDigest, found)
 		}
 	}
 	return nil
@@ -790,8 +839,16 @@ func applyRecordToGraph(graph *CampaignGraph, value any) {
 	}
 }
 
-func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifacts []preparedStateArtifact, createdTree string, retiredTrees []string) (string, string, error) {
-	descriptors := make([]any, 0, len(writes)+len(artifacts)+len(retiredTrees)+1)
+func transactionStateDigests(
+	head StateHead,
+	writes []preparedStateWrite,
+	artifacts []preparedStateArtifact,
+	deletes []preparedStateArtifactDelete,
+	createdTree string,
+	retiredTrees []string,
+) (string, string, error) {
+	descriptors := make([]any, 0,
+		len(writes)+len(artifacts)+len(deletes)+len(retiredTrees)+1)
 	for _, write := range writes {
 		descriptors = append(descriptors, struct {
 			Kind   string            `json:"kind"`
@@ -806,6 +863,14 @@ func transactionStateDigests(head StateHead, writes []preparedStateWrite, artifa
 		}{"artifact", StateArtifactResult{
 			Path: artifact.Path, PreviousDigest: artifact.ExpectedDigest,
 			ContentDigest: artifact.ContentDigest, Mode: artifact.Mode,
+		}})
+	}
+	for _, deletion := range deletes {
+		descriptors = append(descriptors, struct {
+			Kind     string                    `json:"kind"`
+			Deletion StateArtifactDeleteResult `json:"deletion"`
+		}{"delete", StateArtifactDeleteResult{
+			Path: deletion.Path, PreviousDigest: deletion.ExpectedDigest,
 		}})
 	}
 	if createdTree != "" {
@@ -873,6 +938,13 @@ func sealTransactionReceipt(receipt *StateTransactionReceipt) error {
 			return errors.New("transaction receipt artifact is invalid")
 		}
 		seenArtifacts[artifact.Path] = true
+	}
+	for _, deletion := range receipt.DeletedArtifacts {
+		if seenArtifacts[deletion.Path] || validateRelativeRecordPath(deletion.Path) != nil ||
+			!digestRE.MatchString(deletion.PreviousDigest) {
+			return errors.New("transaction receipt artifact deletion is invalid")
+		}
+		seenArtifacts[deletion.Path] = true
 	}
 	if receipt.RetiredTree != "" {
 		parts := strings.Split(receipt.RetiredTree, "/")
@@ -1126,6 +1198,50 @@ func (store *StateStore) prepareJournalOperation(transactionID string, index int
 			PreviousMode: uint32(info.Mode().Perm()), ResultMode: uint32(info.Mode().Perm()),
 		}, nil
 	}
+	if artifact.Kind == "delete" {
+		info, err := os.Lstat(target)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return journalOperation{}, fmt.Errorf(
+				"transaction deletion target %s is not a real regular file", artifact.Target)
+		}
+		file, err := os.Open(target)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		multiple, linkErr := writerFileHasMultipleLinks(file)
+		_ = file.Close()
+		if linkErr != nil || multiple {
+			return journalOperation{}, fmt.Errorf(
+				"transaction deletion target %s has an unsafe link count", artifact.Target)
+		}
+		previous, err := readSingleLinkRegularFile(target)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		previousDigest := "sha256:" + SHA256Bytes(previous)
+		if previousDigest != artifact.ExpectedDigest {
+			return journalOperation{}, fmt.Errorf(
+				"%w: deletion target %s digest is %s; expected %s",
+				ErrStateConflict, artifact.Target, previousDigest, artifact.ExpectedDigest)
+		}
+		backup := fmt.Sprintf("staging/%s/backup/%04d", transactionID, index)
+		backupPath, err := store.statePath(backup)
+		if err != nil {
+			return journalOperation{}, err
+		}
+		if err := durableAtomicWrite(backupPath, previous, 0o600); err != nil {
+			return journalOperation{}, err
+		}
+		return journalOperation{
+			Kind: "delete", Target: artifact.Target, Stage: backup, Backup: backup,
+			Existed: true, PreviousDigest: previousDigest,
+			ResultDigest: "sha256:" + SHA256String("deleted\x00"+artifact.Target+"\x00"+previousDigest),
+			PreviousMode: uint32(info.Mode().Perm()), ResultMode: uint32(info.Mode().Perm()),
+		}, nil
+	}
 	operation := journalOperation{
 		Kind: artifact.Kind, Target: artifact.Target,
 		Stage:        fmt.Sprintf("staging/%s/new/%04d", transactionID, index),
@@ -1199,7 +1315,7 @@ func sealTransactionJournal(journal *transactionJournal) error {
 		return err
 	}
 	for _, operation := range journal.Operations {
-		if !validOne(operation.Kind, "record", "artifact", "derived", "event", "inventory", "receipt", "retire-tree") ||
+		if !validOne(operation.Kind, "record", "artifact", "delete", "derived", "event", "inventory", "receipt", "retire-tree") ||
 			!digestRE.MatchString(operation.ResultDigest) || operation.ResultMode == 0 {
 			return errors.New("transaction journal operation is invalid")
 		}
@@ -1213,6 +1329,16 @@ func sealTransactionJournal(journal *transactionJournal) error {
 			if !operation.Existed || operation.Backup != "" ||
 				!digestRE.MatchString(operation.PreviousDigest) || operation.PreviousMode == 0 {
 				return errors.New("transaction retirement metadata is invalid")
+			}
+			continue
+		}
+		if operation.Kind == "delete" {
+			if !operation.Existed || operation.Backup == "" ||
+				!digestRE.MatchString(operation.PreviousDigest) || operation.PreviousMode == 0 {
+				return errors.New("transaction deletion metadata is invalid")
+			}
+			if err := validateRelativeRecordPath(operation.Backup); err != nil {
+				return err
 			}
 			continue
 		}
@@ -1249,6 +1375,26 @@ func (store *StateStore) writeTransactionJournal(path string, journal *transacti
 func (store *StateStore) publishJournalOperation(operation journalOperation) error {
 	if operation.Kind == "retire-tree" {
 		return store.publishTreeRetirement(operation)
+	}
+	if operation.Kind == "delete" {
+		target, err := store.canonicalOutputPath(operation.Target)
+		if err != nil {
+			return err
+		}
+		digest, exists, err := currentFileDigest(target)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return nil
+		}
+		if digest != operation.PreviousDigest {
+			return fmt.Errorf("%w: deletion target %s changed", ErrStateDirty, operation.Target)
+		}
+		if err := os.Remove(target); err != nil {
+			return err
+		}
+		return syncTransactionDirectory(filepath.Dir(target))
 	}
 	stagePath, err := store.statePath(operation.Stage)
 	if err != nil {
@@ -1587,6 +1733,20 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 			if err != nil {
 				return err
 			}
+			if operation.Kind == "delete" {
+				if !exists {
+					continue
+				}
+				if digest != operation.PreviousDigest {
+					return fmt.Errorf(
+						"%w: transaction deletion target %s changed during roll-forward",
+						ErrStateDirty, operation.Target)
+				}
+				if err := store.publishJournalOperation(operation); err != nil {
+					return err
+				}
+				continue
+			}
 			if exists && digest == operation.ResultDigest {
 				continue
 			}
@@ -1620,6 +1780,35 @@ func (store *StateStore) recoverTransactionJournal(path string, journal *transac
 			digest, exists, err := currentFileDigest(target)
 			if err != nil {
 				return err
+			}
+			if operation.Kind == "delete" {
+				if exists {
+					if digest != operation.PreviousDigest {
+						return fmt.Errorf(
+							"%w: transaction deletion target %s changed during rollback",
+							ErrStateDirty, operation.Target)
+					}
+					continue
+				}
+				backupPath, err := store.statePath(operation.Backup)
+				if err != nil {
+					return err
+				}
+				body, err := readSingleLinkRegularFile(backupPath)
+				if err != nil {
+					return err
+				}
+				if "sha256:"+SHA256Bytes(body) != operation.PreviousDigest {
+					return errors.New("transaction deletion backup digest does not verify")
+				}
+				if err := durableAtomicWrite(
+					target, body, fs.FileMode(operation.PreviousMode)); err != nil {
+					return err
+				}
+				if err := verifyFileDigest(target, operation.PreviousDigest); err != nil {
+					return err
+				}
+				continue
 			}
 			if operation.Existed {
 				if !exists {

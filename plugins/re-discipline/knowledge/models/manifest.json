@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "runtime": {
     "implementation": "re-discipline-knowledge-go",
-    "version": "0.9.4",
+    "version": "0.9.5",
     "sqliteDriver": "modernc.org/sqlite@v1.54.0",
     "numericalBackend": "fixed-int64-v1",
     "tieBreaker": "score-desc,path-asc,start-line-asc,chunk-id-asc"

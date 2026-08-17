@@ -343,7 +343,8 @@ func (service *Service) stageClosureProjections(
 	}
 	manifest.TruthDigests = cloneStringMap(truthDigests)
 	manifest.ProjectionDigests = cloneStringMap(projectionDigests)
-	for id, destination := range request.ProjectionDestinations {
+	for id, finding := range projectedGraph.Findings {
+		destination := closureFindingDestination(request, finding)
 		if projectionDigests[destination] != "" {
 			manifest.FindingDestinations[id] = destination
 		}

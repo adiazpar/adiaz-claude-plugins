@@ -1063,6 +1063,14 @@ func toolDefinitions() []map[string]any {
 	campaignMergeSubmissionSchema := reflectedJSONSchema(reflect.TypeOf(CampaignMergeSubmission{}))
 	campaignMergeSubmissionSchema["description"] = "Exact specification and approved plan digest; campaign.merge only."
 	campaignDiscardSubmissionSchema := reflectedJSONSchema(reflect.TypeOf(CampaignDiscardSubmission{}))
+	truthRelocationSchema := objectSchema(map[string]any{
+		"source": map[string]any{
+			"type": "string",
+		},
+		"expectedDigest": map[string]any{
+			"type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+		},
+	}, []string{"source", "expectedDigest"})
 	campaignDiscardSubmissionSchema["description"] = "DESTRUCTIVE exact confirmation, reason, and campaign digest; an optional tree digest adds a byte-for-byte source-tree assertion. campaign.discard only."
 	archiveFallbackDecisionSchema["description"] = "Exact manager ratification of one retained normalized-versus-raw candidate; valid only for knowledge.archive-fallback.opt-in."
 	setSchemaProperties(archiveFallbackDecisionSchema, map[string]any{
@@ -1074,12 +1082,12 @@ func toolDefinitions() []map[string]any {
 	})
 	setSchemaProperties(managerSchema, map[string]any{
 		"projectRoot": projectRoot,
-		"action": enumSchema("Typed manager transition.",
+		"action": enumSchema("Manager transition.",
 			"campaign.open", "campaign.update", "campaign.merge", "campaign.discard",
 			"work.create", "work.update", "run.prepare", "run.start",
 			"run.return", "run.complete", "closure.remediation.run.create", "review.submit",
 			"finding.challenge", "finding.update", "decision.record", "intake.coverage.retire",
-			"reconcile.import", "knowledge.archive-fallback.opt-in"),
+			"reconcile.import", "knowledge.archive-fallback.opt-in", "truth.relocate"),
 		"actor":          stringSchema("Permitted manager identity recorded in the event.", 1, 128),
 		"campaignSlug":   stringSchema("Canonical campaign directory slug.", 3, 50),
 		"campaignId":     stringSchema("Canonical campaign ID bound by every submitted record.", 1, 64),
@@ -1093,7 +1101,11 @@ func toolDefinitions() []map[string]any {
 		"archiveFallbackDecision": archiveFallbackDecisionSchema,
 		"campaignMerge":           campaignMergeSubmissionSchema,
 		"campaignDiscard":         campaignDiscardSubmissionSchema,
-		"tokenBudget":             mutationTokenBudgetSchema("artifact rows"),
+		"truthRelocations": map[string]any{
+			"type": "array", "minItems": 1, "maxItems": 512,
+			"items": truthRelocationSchema,
+		},
+		"tokenBudget": mutationTokenBudgetSchema("artifact rows"),
 	})
 	hoistManagerRecordDefinitions(managerSchema)
 	describeManagerRunHandles(managerSchema)
@@ -1279,8 +1291,8 @@ func toolDefinitions() []map[string]any {
 			"annotations": writeOnly,
 		},
 		{
-			"name": "manager_apply", "title": "Apply typed manager transition",
-			"description": "Validate and atomically apply one typed transition with optimistic concurrency. campaign.merge consolidates exact source trees from an approved plan. campaign.discard is explicitly destructive and permanently removes one open or paused campaign without closure.",
+			"name": "manager_apply", "title": "Apply manager transition",
+			"description": "Atomically apply one typed manager transition.",
 			"inputSchema": managerSchema,
 			"annotations": closureWrite,
 		},
