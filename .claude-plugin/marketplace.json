@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "re-discipline",
-      "description": "Transactional campaigns and atomic project knowledge for Claude Code and Codex, with atomic campaign consolidation, guarded destructive discard, unified runs, bounded context, immutable review, resumable closure, and one filesystem-canonical engine.",
+      "description": "Markdown-canonical reverse-engineering knowledge: campaign curation conventions plus the re-search retrieval CLI/MCP tool.",
       "source": "./",
       "author": {
         "name": "Alex Diaz",

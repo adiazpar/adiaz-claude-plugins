@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
-  "version": "0.9.6",
-  "description": "Transactional campaigns, atomic consolidation, guarded discard, unified runs, atomic findings, bounded context, closure-gated truth, and governed retrieval.",
+  "version": "1.0.0",
+  "description": "Markdown-canonical reverse-engineering knowledge: campaign curation conventions plus the re-search retrieval CLI/MCP tool.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
@@ -16,31 +16,22 @@
   ],
   "skills": "./skills/",
   "mcpServers": {
-    "re-discipline-knowledge": {
-      "command": "knowledge/bin/re-discipline-knowledge",
-      "args": [
-        "serve",
-        "--asset-root",
-        "knowledge"
-      ],
+    "re-search": {
+      "command": "bin/re-search.exe",
+      "args": ["serve", "--mcp"],
       "cwd": "."
     }
   },
   "interface": {
     "displayName": "Re-Discipline",
-    "shortDescription": "Transactional campaigns and atomic project knowledge",
-    "longDescription": "Manage campaign consolidation and guarded discard, work items, unified runs, atomic findings, immutable reviews, bounded context, resumable closure, and citable project knowledge through one filesystem-canonical engine shared by manager hosts and drafters.",
+    "shortDescription": "Curated RE knowledge: search it, campaign it, promote findings.",
+    "longDescription": "Markdown-canonical reverse-engineering knowledge base in .re-discipline/: search curated docs with the re-search query tool before investigating, work in campaign folders (reports + candidate findings), and promote reviewed findings into docs/.",
     "developerName": "Alex Diaz",
     "category": "Productivity",
     "capabilities": [
       "Read",
       "Write"
     ],
-    "defaultPrompt": [
-      "Initialize this project with re-discipline.",
-      "Orient me with the bounded project state view.",
-      "Search atomic findings and trace their evidence.",
-      "Plan an atomic merge of related campaigns."
-    ]
+    "defaultPrompt": "Search the project knowledge base with the re-search query tool before investigating anything. Follow .re-discipline/CONVENTIONS.md for reports, findings, and promotion."
   }
 }

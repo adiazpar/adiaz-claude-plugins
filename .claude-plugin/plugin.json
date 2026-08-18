@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
-  "version": "0.9.6",
-  "description": "Transactional campaigns, atomic consolidation, guarded discard, unified runs, atomic findings, bounded context, closure-gated truth, and governed retrieval.",
+  "version": "1.0.0",
+  "description": "Markdown-canonical reverse-engineering knowledge: campaign curation conventions plus the re-search retrieval CLI/MCP tool.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
