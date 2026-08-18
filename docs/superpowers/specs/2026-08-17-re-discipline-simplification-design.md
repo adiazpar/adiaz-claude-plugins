@@ -51,9 +51,11 @@ AGENTS.md            # project root — orientation marker block (§9)
 
 Everything plugin-related lives under `.re-discipline/` except the host
 orientation files, which must stay at root. `CONVENTIONS.md` and
-`re-search.exe` are copied into the project so it is self-contained: any
-agent that can read files and run a command can use the system without the
-plugin installed.
+`re-search.exe` are copied into the project so any agent that can read
+files and run a command can use the system without the plugin installed.
+(`bin/` is gitignored, so a fresh clone lacks the exe until init is re-run
+or the exe is copied in — the docs themselves remain fully readable and
+grep-able regardless.)
 
 ## 3. Document format
 
@@ -102,7 +104,8 @@ moment never comes back.
    checklist: is the claim atomic, is evidence cited, does the grade match
    the evidence. It dedupes (searching existing docs first), resolves
    conflicts (higher grade wins, or both recorded), and moves accepted
-   findings into `docs/`, updating `INDEX.md`. Investigators do not
+   findings into `docs/`, setting `status: promoted` as part of the move
+   and regenerating `INDEX.md` (`re-search index`). Investigators do not
    self-promote.
 4. **Close campaign** = final promotion sweep + short summary + move the
    folder to `archive/`. A file move, not a proof obligation.
@@ -119,18 +122,43 @@ answers, exits. All state on disk. The 0.x engine is deleted, not trimmed.
 
 Commands:
 
-- `re-search index` — rebuild `index.db` from `docs/` (SQLite FTS5, BM25).
+- `re-search index` — rebuild `index.db` from `docs/` (SQLite FTS5, BM25)
+  and regenerate `INDEX.md` from doc frontmatter and paths. `INDEX.md` is
+  a derived artifact (committed for browsability, but a clobber costs
+  nothing — regenerating it is the recovery). `INDEX.md` itself is
+  excluded from the FTS index so it cannot pollute rankings.
 - `re-search query "<question>"` — ranked excerpts + file paths, text or
-  JSON output. **Auto-reindexes** first if any doc is newer than the index,
-  so staleness is not a concept anyone manages.
-- `re-search bench` — run every `golden.jsonl` question, report whether the
-  expected doc ranked in the top 5. A regression test, not a research
-  instrument.
+  JSON output. **Auto-reindexes** first when stale. Staleness is a
+  manifest diff: the index stores `(path, mtime, size)` for every indexed
+  file, and a fresh scan of `docs/` that differs — including deletions and
+  moves — triggers rebuild. At hundreds of docs the scan is trivially
+  cheap per query. Each hit carries its `status`, `kind`, and `grade`;
+  superseded hits are labeled and downranked so dead knowledge is never
+  presented as current truth.
+- `re-search bench` — run every `golden.jsonl` question (record shape:
+  `{"q": "...", "expect": "docs/..."}`), report whether the expected doc
+  ranked in the top 5. A regression test, not a research instrument. The
+  project's real `golden.jsonl` is run in-project (manually, or as part of
+  the close-campaign sweep); plugin CI runs bench only against its own
+  fixture corpus.
 - `re-search serve --mcp` — thin stdio MCP server exposing one `query`
   tool. Spawned per-session by the host (normal MCP lifecycle), stateless,
   safe to run many instances, loses nothing when killed.
-- `re-search serve --http` — small JSON endpoint over the same query path;
-  the retrieval half of any future hosted oracle.
+- `re-search serve --http` — small JSON endpoint over the same query path.
+  Included as an explicit user decision (no phased builds), not on behalf
+  of the out-of-scope oracle; it is the retrieval half any future consumer
+  wraps.
+
+Robustness rules (binding on the implementation):
+
+- **Project-root discovery**: `re-search` walks up from cwd to the nearest
+  `.re-discipline/`, overridable with `--root` (the plugin `.mcp.json`
+  entry sets `--root` via the host's project-directory variable).
+- **Indexing is lenient**: a doc with malformed frontmatter is indexed as
+  plain text with a warning in command output; indexing never fails on doc
+  content.
+- **The index is disposable at runtime**: any error opening or reading
+  `index.db` triggers silent delete-and-rebuild.
 
 Retrieval design decisions:
 
@@ -159,13 +187,20 @@ No shared daemon. The shared surface is the filesystem.
 
 - **Reads**: SQLite serves concurrent readers; N sessions = N short-lived
   processes reading one file.
-- **Reindex contention**: rebuild into a temp file, atomic rename over
-  `index.db`, lock file so one rebuilder runs while others use the existing
-  index.
+- **Reindex contention (Windows semantics, not POSIX)**: one rebuilder at
+  a time, enforced by an OS-held lock the kernel releases on process death
+  (exclusive file handle / `LockFileEx`) — never a bare marker file that a
+  killed process would orphan. The rebuilt index is swapped in without
+  assuming atomic replace-over-open-file (which fails with sharing
+  violations on Windows): retry with short backoff, and on persistent
+  failure serve the existing index for this query and try again next time.
+  **A query never fails or blocks because a reindex could not complete.**
 - **Writes**: one campaign folder per session/task isolates concurrent
-  curation. Same-doc promotion collisions surface as git conflicts for the
-  user — git is the reconciliation, replacing the 0.x global lock/journal
-  engine.
+  curation. Concurrent sessions share one checkout, so same-doc collisions
+  are silent last-writer-wins, not git conflicts — accepted as rare and
+  repairable: docs are small and atomic, git history preserves the
+  overwritten version, and the designated hot file (`INDEX.md`) is
+  derived and regenerable (§5), so a clobber there costs nothing.
 - **MCP**: stdio servers are per-session by nature (host spawns/kills).
   Statelessness makes many instances safe and orphans harmless.
 
@@ -197,16 +232,23 @@ divergent memories.
   no proposal tier, no memory index.
 - **Host-native memory is switched off** when shared memory is enabled:
   project-scoped where the host allows (Claude Code:
-  `autoMemoryEnabled: false` in project `.claude/settings.json`; Codex
-  equivalent — implementation pins exact keys). Agent edits these directly
-  at init; the awk parser machinery is deleted.
+  `autoMemoryEnabled: false` in project `.claude/settings.json`; Codex:
+  the equivalent key, pinned at implementation — and if Codex has no
+  project-scoped memory switch, the marker-block instruction alone is the
+  mechanism there). Agent edits these directly at init; the awk parser
+  machinery is deleted. `Shared memory: disabled` means init **never
+  touches host memory settings** — it only ever writes them when enabling,
+  so a user's unrelated memory configuration is never reverted.
 - **UX: ask once at first init** — "Use shared memory? Replaces host-native
   memory with `.re-discipline/docs/ops/` so all agents share recall.
   [Recommended: yes]". The decision is recorded as a visible line in the
   AGENTS.md marker block (`Shared memory: enabled`), which is
   simultaneously the stored policy, the agent instruction, and
-  user-editable. Re-running init reads the line and converges host settings
-  without re-asking. Changing your mind = edit the line, re-run init.
+  user-editable. **Root `AGENTS.md` is canonical for policy**; init syncs
+  the `.claude/CLAUDE.md` block from it, so disagreement between the two
+  resolves in AGENTS.md's favor. Re-running init reads the line and
+  converges host settings without re-asking. Changing your mind = edit the
+  line, re-run init.
 - There is no separate "project profile" artifact; the marker block is the
   profile, holding exactly the policies that exist (currently one).
 
@@ -224,8 +266,11 @@ block (`<!-- re-discipline:start -->` … `<!-- re-discipline:end -->`) in
 root `AGENTS.md` and `.claude/CLAUDE.md` (~5 lines: where docs live, how to
 query, where active campaigns are, conventions location, shared-memory
 policy line). Existing user content outside markers is never touched.
-Re-running init after a plugin update refreshes the block, the conventions
-copy, and the exe.
+Marker edge cases: if markers are absent, append a fresh block; if exactly
+one well-formed pair exists, replace its contents; in any other case
+(unpaired, duplicated, nested) init leaves that file untouched and reports
+it for manual repair. Re-running init after a plugin update refreshes the
+block, the conventions copy, and the exe.
 
 Old-format state (0.x `config.json`, campaign JSON) detected → init stops
 and directs the user to the one-time migration session (§12). Never
@@ -272,12 +317,21 @@ lock/atomic-rename behavior, MCP stdio smoke test (spawn, one query,
 exit), HTTP handler test, and `bench` against a small fixture corpus as
 the end-to-end accuracy check. Total runtime: seconds.
 
+**Build pinning (makes the stale-binary check passable).** SQLite driver
+is pure-Go with FTS5 support (`modernc.org/sqlite`) — no cgo, or
+reproducibility is unattainable. Go toolchain pinned via the `toolchain`
+directive in `go.mod` and used identically by CI. One canonical build
+command shared verbatim by the release step and CI:
+`go build -trimpath -buildvcs=false -ldflags "-X ...version=X.Y.Z"`.
+
 **CI.** One workflow, one Windows job, on push/PR: `go vet` + `go build` +
 `go test` + `bench` on the fixture corpus + version-consistency check + a
-stale-binary check (reproducible rebuild with `-trimpath`, hash-compare
-against the committed exe — catches "changed source, forgot to rebuild").
-~1–2 minutes. CI's entire purpose: a bad commit cannot ship a broken or
-stale exe. No mac/linux jobs, no packaging matrices.
+stale-binary check (rebuild with the canonical pinned command,
+hash-compare against the committed exe — catches "changed source, forgot
+to rebuild"). ~1–2 minutes. CI's entire purpose: a bad commit cannot ship
+a broken or stale exe. No mac/linux jobs, no packaging matrices. The
+committed exe does grow repo history by a few MB per release — accepted
+as far better than 0.x's six-binary matrix; shallow clones mitigate.
 
 ## 12. Migration of existing project state (snaphak-re)
 
