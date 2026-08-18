@@ -1,15 +1,114 @@
-// Package mcp implements a minimal MCP stdio server for re-search.
+// Package mcp implements a minimal MCP stdio server for re-search:
+// newline-delimited JSON-RPC 2.0 exposing one `query` tool. Stateless;
+// all knowledge state lives on disk, so any number of instances are
+// safe and a killed instance loses nothing.
 package mcp
 
 import (
-	"fmt"
+	"bufio"
+	"encoding/json"
 	"io"
 )
 
 // QueryFunc answers one question with formatted text.
 type QueryFunc func(query string, limit int) (string, error)
 
-// Serve speaks MCP over stdio (implemented in a later task).
+type request struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
+}
+
+type response struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Result  any             `json:"result,omitempty"`
+	Error   *rpcError       `json:"error,omitempty"`
+}
+
+type rpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// Serve reads newline-delimited JSON-RPC requests from in until EOF.
 func Serve(in io.Reader, out io.Writer, version string, query QueryFunc) error {
-	return fmt.Errorf("mcp: not yet implemented")
+	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
+	enc := json.NewEncoder(out)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var req request
+		if err := json.Unmarshal(line, &req); err != nil {
+			continue // unparseable line: nothing safe to answer
+		}
+		if req.ID == nil {
+			continue // notification
+		}
+		resp := response{JSONRPC: "2.0", ID: req.ID}
+		switch req.Method {
+		case "initialize":
+			var p struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			}
+			json.Unmarshal(req.Params, &p)
+			if p.ProtocolVersion == "" {
+				p.ProtocolVersion = "2024-11-05"
+			}
+			resp.Result = map[string]any{
+				"protocolVersion": p.ProtocolVersion,
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "re-search", "version": version},
+			}
+		case "tools/list":
+			resp.Result = map[string]any{"tools": []map[string]any{{
+				"name":        "query",
+				"description": "Search the project's curated reverse-engineering knowledge base (.re-discipline/docs/). Returns ranked findings with evidence paths. Search here before investigating anything.",
+				"inputSchema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"query": map[string]any{"type": "string", "description": "natural-language question or identifier"},
+						"limit": map[string]any{"type": "integer", "description": "max results (default 5)"},
+					},
+					"required": []string{"query"},
+				},
+			}}}
+		case "tools/call":
+			var p struct {
+				Name      string `json:"name"`
+				Arguments struct {
+					Query string `json:"query"`
+					Limit int    `json:"limit"`
+				} `json:"arguments"`
+			}
+			json.Unmarshal(req.Params, &p)
+			if p.Name != "query" {
+				resp.Error = &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
+				break
+			}
+			text, err := query(p.Arguments.Query, p.Arguments.Limit)
+			if err != nil {
+				resp.Result = map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "query error: " + err.Error()}},
+					"isError": true,
+				}
+				break
+			}
+			resp.Result = map[string]any{
+				"content": []map[string]any{{"type": "text", "text": text}},
+			}
+		case "ping":
+			resp.Result = map[string]any{}
+		default:
+			resp.Error = &rpcError{Code: -32601, Message: "method not found: " + req.Method}
+		}
+		if err := enc.Encode(resp); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
 }
