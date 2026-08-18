@@ -178,8 +178,8 @@ Retrieval design decisions:
   reword, retry, and fall back to grep.
 
 Accuracy workflow: whenever retrieval fails in real use, that question is
-added to `golden.jsonl`. Real failures become permanent regression cases;
-CI runs `bench` against them.
+added to `golden.jsonl`. Real failures become permanent regression cases,
+run by the in-project `bench` (plugin CI covers only its fixture corpus).
 
 ## 6. Concurrency model (multiple sessions)
 
@@ -313,7 +313,7 @@ manifests agree.
 **Tests.** All 0.x engine tests are deleted with the engine. New tests,
 written fresh for `re-search`: tokenizer (identifier splitting),
 frontmatter parsing, index build, query ranking, auto-reindex staleness +
-lock/atomic-rename behavior, MCP stdio smoke test (spawn, one query,
+lock/swap behavior, MCP stdio smoke test (spawn, one query,
 exit), HTTP handler test, and `bench` against a small fixture corpus as
 the end-to-end accuracy check. Total runtime: seconds.
 
