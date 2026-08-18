@@ -30,6 +30,11 @@ $tc = (Select-String -Path (Join-Path $repo 'retrieval/go.mod') -Pattern '^toolc
 if (-not $tc) { throw "no toolchain directive in retrieval/go.mod" }
 $env:GOTOOLCHAIN = $tc
 
+# cgo is forbidden in this project, and CGO_ENABLED is part of the build
+# ID baked into the binary — machines with a C compiler default it to 1
+# and produce a different file hash for identical code. Pin it.
+$env:CGO_ENABLED = '0'
+
 $out = Join-Path $repo $Output
 New-Item -ItemType Directory -Force (Split-Path -Parent $out) | Out-Null
 Push-Location (Join-Path $repo 'retrieval')
