@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "re-search": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/re-search.exe",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}

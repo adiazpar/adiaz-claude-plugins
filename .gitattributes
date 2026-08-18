@@ -1,11 +1,3 @@
-* text eol=lf
-.github/workflows/re-discipline.yml text eol=lf
-tests/test_re_discipline*.py text eol=lf
-tests/re_discipline*.py text eol=lf
-
-knowledge/models/artifacts/*.bin binary
-knowledge/bin/**/*.exe binary
-knowledge/bin/re-discipline-knowledge text eol=lf
-knowledge/bin/*/re-discipline-knowledge binary
-knowledge/bin/SHA256SUMS text eol=lf
-knowledge/evals/conformance/evidence/*.zip binary
+* text=auto
+*.exe binary
+*.db binary
