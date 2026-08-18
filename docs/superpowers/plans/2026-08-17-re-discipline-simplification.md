@@ -2743,10 +2743,13 @@ The Codex manifest additionally carries 0.x content that must be rewritten, not 
 "mcpServers": {
   "re-search": {
     "command": "bin/re-search.exe",
-    "args": ["serve", "--mcp"]
+    "args": ["serve", "--mcp"],
+    "cwd": "."
   }
 }
 ```
+
+After editing, verify the Codex registration once: start a Codex session in a test project and confirm the `query` tool answers (or returns the "run init-project" message).
 
 - Rewrite its `interface` block (`shortDescription`, `longDescription`, `defaultPrompt`) from the 0.x engine language (runs, ratification, guarded discard, atomic merge) to 1.0 semantics. Use: shortDescription `"Curated RE knowledge: search it, campaign it, promote findings."`; longDescription `"Markdown-canonical reverse-engineering knowledge base in .re-discipline/: search curated docs with the re-search query tool before investigating, work in campaign folders (reports + candidate findings), and promote reviewed findings into docs/."`; defaultPrompt `"Search the project knowledge base with the re-search query tool before investigating anything. Follow .re-discipline/CONVENTIONS.md for reports, findings, and promotion."`. If any of these fields don't exist in the current manifest, skip them; if other 0.x-specific fields reference deleted paths, remove those fields and note them in the commit message.
 
