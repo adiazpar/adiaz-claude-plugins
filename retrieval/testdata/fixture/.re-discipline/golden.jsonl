@@ -1,0 +1,3 @@
+{"q": "how do I bind entities to demon joints", "expect": "docs/engine/joint-binding.md"}
+{"q": "snapmap spawn limit", "expect": "docs/engine/spawn-limit.md"}
+{"q": "where is the ghidra project", "expect": "docs/ops/ghidra-setup.md"}
