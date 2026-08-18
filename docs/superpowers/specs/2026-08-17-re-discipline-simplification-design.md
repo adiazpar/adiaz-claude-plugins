@@ -245,21 +245,39 @@ Deleted: all 0.x write-guard/launch-handshake/subagent-binding hooks
 promotion convention plus git review. (If accidental doc writes ever prove
 a real problem, a ~20-line PreToolUse hook can return; not shipped.)
 
-## 11. Plugin repo structure, CI, tests
+## 11. Plugin repo structure, versioning, tests, CI
 
-Repo becomes: 4 skills, `retrieval/` (the Go module), `hooks/` (one
-PowerShell file + hooks.json), `templates/` (CONVENTIONS.md, marker block,
-skeleton), `.mcp.json` (registers `re-search serve --mcp` for Claude/Codex),
-plugin manifests, README, CHANGELOG.
+**Structure.** Repo becomes: 4 skills, `retrieval/` (the Go module),
+`hooks/` (one PowerShell file + hooks.json), `templates/` (CONVENTIONS.md,
+marker block, skeleton), `.mcp.json` (registers `re-search serve --mcp` for
+Claude/Codex), one committed `windows-amd64` exe (marketplaces install by
+git clone), plugin manifests, README, CHANGELOG.
 
 Deleted: the 0.x Go engine (~62k lines + ~35k test lines), all 52 schemas,
 GloVe/model artifacts, evals/conformance, benchmarking/calibration/
-migration tooling, references/ (replaced by CONVENTIONS.md), sh/awk hooks.
+migration tooling, references/ (replaced by CONVENTIONS.md), sh/awk hooks,
+the version sync/guard Python scripts, SHA256SUMS and binary manifests.
 
-Tests: Go unit tests on tokenizer, indexer, ranking, auto-reindex locking —
-seconds to run. CI: one Windows job, `go build && go test && re-search
-bench` on a fixture corpus (~1–2 min). No mac/linux jobs, no binary
-matrices, no version-guard scripts beyond what one platform needs.
+**Versioning.** Manual semver. Canonical version lives in
+`.claude-plugin/plugin.json`; the Codex manifest and marketplace entries
+must match; the exe is stamped at build via ldflags (`re-search
+--version`). A release = bump manifests, CHANGELOG entry, rebuild exe,
+commit `Cut re-discipline X.Y.Z`, tag. No sync scripts — CI checks the
+manifests agree.
+
+**Tests.** All 0.x engine tests are deleted with the engine. New tests,
+written fresh for `re-search`: tokenizer (identifier splitting),
+frontmatter parsing, index build, query ranking, auto-reindex staleness +
+lock/atomic-rename behavior, MCP stdio smoke test (spawn, one query,
+exit), HTTP handler test, and `bench` against a small fixture corpus as
+the end-to-end accuracy check. Total runtime: seconds.
+
+**CI.** One workflow, one Windows job, on push/PR: `go vet` + `go build` +
+`go test` + `bench` on the fixture corpus + version-consistency check + a
+stale-binary check (reproducible rebuild with `-trimpath`, hash-compare
+against the committed exe — catches "changed source, forgot to rebuild").
+~1–2 minutes. CI's entire purpose: a bad commit cannot ship a broken or
+stale exe. No mac/linux jobs, no packaging matrices.
 
 ## 12. Migration of existing project state (snaphak-re)
 
