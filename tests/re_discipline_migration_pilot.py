@@ -43,10 +43,10 @@ DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 PAIR_DIGEST_ALGORITHM = "sorted-path-null-sha256-v1"
 PILOT_KIND = "re-discipline-disposable-migration-pilot-v1"
 PILOT_SCHEMA = (
-    "plugins/re-discipline/knowledge/schemas/"
+    "knowledge/schemas/"
     "disposable-migration-pilot.schema.json"
 )
-PLUGIN_ROOT = "plugins/re-discipline"
+PLUGIN_ROOT = "."
 ASSET_ROOT = f"{PLUGIN_ROOT}/knowledge"
 PACKAGE_MANIFEST = f"{ASSET_ROOT}/bin/manifest.json"
 PACKAGE_SUMS = f"{ASSET_ROOT}/bin/SHA256SUMS"

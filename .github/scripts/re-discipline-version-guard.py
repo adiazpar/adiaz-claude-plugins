@@ -16,7 +16,7 @@ commit. This guard is the only check that compares against what was published
 before, so it owns exactly that one rule and leaves consistency to them.
 
 The version is read from its single definition, RuntimeVersion in
-plugins/re-discipline/knowledge/internal/knowledge/types.go.
+knowledge/internal/knowledge/types.go.
 
 Usage:
     re-discipline-version-guard.py --base <ref>
@@ -37,6 +37,20 @@ from pathlib import Path
 
 VERSION_SOURCE = "knowledge/internal/knowledge/types.go"
 VERSION_CONSTANT = "RuntimeVersion"
+
+# The plugin is the repository root. These paths never ship to an install,
+# so changing them alone requires no version bump.
+UNPACKAGED = (
+    ".github",
+    "tests",
+    ".claude",
+    ".agents",
+    ".claude-plugin/marketplace.json",
+)
+
+
+def packaged_pathspec() -> list[str]:
+    return ["."] + [f":(exclude){path}" for path in UNPACKAGED]
 
 
 def run_git(args: list[str]) -> subprocess.CompletedProcess:
@@ -66,30 +80,31 @@ def extract_version(text: str, origin: str) -> str:
     return match.group(1)
 
 
-def version_in_tree(plugin_path: str) -> str:
-    path = Path(plugin_path) / VERSION_SOURCE
+def version_in_tree() -> str:
+    path = Path(VERSION_SOURCE)
     return extract_version(path.read_text(encoding="utf-8"), str(path))
 
 
-def version_at_ref(ref: str, plugin_path: str) -> str | None:
+def version_at_ref(ref: str) -> str | None:
     """Read the declared version as of `ref`, or None if absent there."""
-    relative = f"{plugin_path}/{VERSION_SOURCE}"
-    shown = run_git(["show", f"{ref}:{relative}"])
+    shown = run_git(["show", f"{ref}:{VERSION_SOURCE}"])
     if shown.returncode != 0:
         return None
-    return extract_version(shown.stdout, f"{ref}:{relative}")
+    return extract_version(shown.stdout, f"{ref}:{VERSION_SOURCE}")
 
 
-def packaged_content_changed(base: str, plugin_path: str) -> bool:
-    diff = run_git(["diff", "--quiet", base, "HEAD", "--", plugin_path])
+def packaged_content_changed(base: str) -> bool:
+    diff = run_git(["diff", "--quiet", base, "HEAD", "--"] + packaged_pathspec())
     # 0 -> identical, 1 -> differs. Anything else is a git failure.
     if diff.returncode not in (0, 1):
-        raise RuntimeError(f"git diff failed for {plugin_path}: {diff.stderr.strip()}")
+        raise RuntimeError(f"git diff failed: {diff.stderr.strip()}")
     return diff.returncode == 1
 
 
-def changed_files(base: str, plugin_path: str) -> list[str]:
-    listing = run_git(["diff", "--name-only", base, "HEAD", "--", plugin_path])
+def changed_files(base: str) -> list[str]:
+    listing = run_git(
+        ["diff", "--name-only", base, "HEAD", "--"] + packaged_pathspec()
+    )
     return [line for line in listing.stdout.splitlines() if line.strip()]
 
 
@@ -100,20 +115,10 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="commit to compare against (the previously published state)",
     )
-    parser.add_argument(
-        "--plugin",
-        default="re-discipline",
-        help="plugin directory name under plugins/",
-    )
     args = parser.parse_args(argv)
 
-    plugin_path = f"plugins/{args.plugin}"
-    if not Path(plugin_path).is_dir():
-        print(f"version-guard: no such plugin directory: {plugin_path}")
-        return 1
-
     try:
-        current = version_in_tree(plugin_path)
+        current = version_in_tree()
         current_parts = parse_semver(current)
     except (ValueError, OSError) as exc:
         print(f"version-guard: {exc}")
@@ -128,36 +133,33 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        changed = packaged_content_changed(base, plugin_path)
+        changed = packaged_content_changed(base)
     except RuntimeError as exc:
         print(f"version-guard: {exc}")
         return 1
 
     if not changed:
-        print(
-            f"version-guard: no packaged change under {plugin_path}; "
-            f"version {current} may stand."
-        )
+        print(f"version-guard: no packaged change; version {current} may stand.")
         return 0
 
     try:
-        previous = version_at_ref(base, plugin_path)
+        previous = version_at_ref(base)
     except ValueError as exc:
         print(f"version-guard: base version unreadable: {exc}")
         return 1
 
     if previous is None:
         print(
-            f"version-guard: {plugin_path} is new as of {base}; "
+            f"version-guard: the plugin is new as of {base}; "
             f"version {current} accepted."
         )
         return 0
 
-    files = changed_files(base, plugin_path)
+    files = changed_files(base)
     if previous == current:
         print(
-            f"version-guard: {len(files)} packaged file(s) changed under "
-            f"{plugin_path} but the version is still {current}."
+            f"version-guard: {len(files)} packaged file(s) changed "
+            f"but the version is still {current}."
         )
         for name in files[:20]:
             print(f"  {name}")
@@ -167,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             "\n  Installed clients key their cache on this version, so "
             "republishing\n  the same version leaves every existing install "
             "on the old bytes.\n  fix: raise "
-            f"{VERSION_CONSTANT} in {plugin_path}/{VERSION_SOURCE}, then run"
+            f"{VERSION_CONSTANT} in {VERSION_SOURCE}, then run"
             "\n  .github/scripts/re-discipline-sync-version.py"
         )
         return 1

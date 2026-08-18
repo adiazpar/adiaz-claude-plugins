@@ -16,8 +16,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads(
     (
         ROOT
-        / "plugins"
-        / "re-discipline"
         / "knowledge"
         / "schemas"
         / "project-lane-ablation-report.schema.json"

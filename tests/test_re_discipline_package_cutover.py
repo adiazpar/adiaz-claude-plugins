@@ -13,7 +13,7 @@ from tests.re_discipline_package_audit import audit_plugin, declared_plugin_vers
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "re-discipline"
+PLUGIN = ROOT
 HOOKS = PLUGIN / "hooks"
 
 

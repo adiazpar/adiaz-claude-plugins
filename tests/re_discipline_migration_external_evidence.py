@@ -66,7 +66,7 @@ HOST_PROTOCOL = (
     "semantic digests."
 )
 MIGRATION_STATE = ".re-discipline/migration/0.8/state.json"
-CURRENT_PLUGIN = "plugins/re-discipline"
+CURRENT_PLUGIN = "."
 CURRENT_ASSETS = f"{CURRENT_PLUGIN}/knowledge"
 EVAL_ROOT = ".re-discipline/knowledge/evals"
 PRIMARY_PROFILE = "hybrid-no-rerank-v1"

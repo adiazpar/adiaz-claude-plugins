@@ -1,25 +1,16 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "adiaz-claude-plugins",
-  "description": "Alex Diaz's Claude Code plugins for evidence-disciplined research, shared project knowledge, and structured product discovery.",
+  "name": "re-discipline",
+  "description": "Evidence-disciplined campaigns and shared project knowledge for Claude Code and Codex.",
   "owner": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
   },
   "plugins": [
     {
-      "name": "cofounder",
-      "description": "A founding meeting between you and Claude as co-founders: establish who you honestly are, get educated on a landscape with live web evidence and dated why-now timing signals, converge on a direction with honest co-founder pushback, and leave with an actionable plan and a falsifiable first move. Calibrates to your real experience per domain (beginner to pro); once a direction is validated, earns a minute-detail execution handoff with prompt files for a Claude Code subagent team.",
-      "source": "./plugins/cofounder",
-      "author": {
-        "name": "Alex Diaz",
-        "email": "alexdiaz0923@gmail.com"
-      }
-    },
-    {
-      "description": "Transactional campaigns and atomic project knowledge for Claude Code and Codex, with atomic campaign consolidation, guarded destructive discard, unified runs, bounded context, immutable review, resumable closure, and one filesystem-canonical engine.",
       "name": "re-discipline",
-      "source": "./plugins/re-discipline",
+      "description": "Transactional campaigns and atomic project knowledge for Claude Code and Codex, with atomic campaign consolidation, guarded destructive discard, unified runs, bounded context, immutable review, resumable closure, and one filesystem-canonical engine.",
+      "source": "./",
       "author": {
         "name": "Alex Diaz",
         "email": "alexdiaz0923@gmail.com"

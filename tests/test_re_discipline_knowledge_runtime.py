@@ -14,7 +14,7 @@ from tests.re_discipline_package_audit import declared_plugin_version
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "re-discipline"
+PLUGIN = ROOT
 DECLARED_VERSION = declared_plugin_version(ROOT)
 BIN_ROOT = PLUGIN / "knowledge" / "bin"
 EXPECTED_PLATFORMS = {

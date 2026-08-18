@@ -74,32 +74,32 @@ class StagingFixture:
         profile = self.synthetic.profile_catalog_path.read_bytes()
         _write(
             self.plugin
-            / "plugins/re-discipline/templates/project/retrieval-profile.json",
+            / "templates/project/retrieval-profile.json",
             profile,
         )
         _write(
-            self.plugin / "plugins/re-discipline/knowledge/profiles/balanced-v1.json",
+            self.plugin / "knowledge/profiles/balanced-v1.json",
             profile,
         )
         _write(
             self.plugin
-            / "plugins/re-discipline/knowledge/internal/knowledge/migration_templates/balanced-v1.json",
+            / "knowledge/internal/knowledge/migration_templates/balanced-v1.json",
             profile,
         )
         _write(
-            self.plugin / "plugins/re-discipline/knowledge/models/manifest.json",
+            self.plugin / "knowledge/models/manifest.json",
             self.synthetic.model_manifest_path.read_bytes(),
         )
         _write(
-            self.plugin / "plugins/re-discipline/templates/project/config.json",
+            self.plugin / "templates/project/config.json",
             '{"schemaVersion":3,"knowledge":{"enabled":true}}\n',
         )
         _write(
-            self.plugin / "plugins/re-discipline/templates/project/policy.jsonc",
+            self.plugin / "templates/project/policy.jsonc",
             '{"schemaVersion":1,"sources":{}}\n',
         )
         _write(
-            self.plugin / "plugins/re-discipline/knowledge/go.mod",
+            self.plugin / "knowledge/go.mod",
             "module fixture.invalid/re-discipline\n\ngo 1.22\n",
         )
 

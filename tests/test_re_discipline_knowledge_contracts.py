@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "re-discipline"
+PLUGIN = ROOT
 
 
 class ReDisciplineKnowledgeContractTests(unittest.TestCase):

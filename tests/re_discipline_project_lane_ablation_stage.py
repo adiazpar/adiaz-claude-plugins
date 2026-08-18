@@ -60,30 +60,30 @@ MIGRATION_PATHS = (
 CONTROL_SPECS = (
     (
         "bootstrap-config",
-        "plugins/re-discipline/templates/project/config.json",
+        "templates/project/config.json",
         ".re-discipline/config.json",
     ),
     (
         "knowledge-policy",
-        "plugins/re-discipline/templates/project/policy.jsonc",
+        "templates/project/policy.jsonc",
         ".re-discipline/knowledge/policy.jsonc",
     ),
     (
         "retrieval-profile",
-        "plugins/re-discipline/templates/project/retrieval-profile.json",
+        "templates/project/retrieval-profile.json",
         ".re-discipline/knowledge/retrieval-profile.json",
     ),
 )
-PROFILE_CATALOG = "plugins/re-discipline/knowledge/profiles/balanced-v1.json"
+PROFILE_CATALOG = "knowledge/profiles/balanced-v1.json"
 MIGRATION_PROFILE_CATALOG = (
-    "plugins/re-discipline/knowledge/internal/knowledge/"
+    "knowledge/internal/knowledge/"
     "migration_templates/balanced-v1.json"
 )
-MODEL_MANIFEST = "plugins/re-discipline/knowledge/models/manifest.json"
-ASSET_ROOT = "plugins/re-discipline/knowledge"
+MODEL_MANIFEST = "knowledge/models/manifest.json"
+ASSET_ROOT = "knowledge"
 HARNESS_SCRIPT = "tests/re_discipline_project_lane_ablation_stage.py"
 HARNESS_SCHEMA = (
-    "plugins/re-discipline/knowledge/schemas/"
+    "knowledge/schemas/"
     "project-lane-ablation-harness.schema.json"
 )
 EVAL_ROOT = ".re-discipline/knowledge/evals"
@@ -1005,7 +1005,7 @@ def _verify_indexed_source_manifest(
 
 def _semantic_benchmark_command(go_executable: str) -> dict[str, Any]:
     command = {
-        "cwd": "plugins/re-discipline/knowledge",
+        "cwd": "knowledge",
         "argv": [
             go_executable,
             "run",

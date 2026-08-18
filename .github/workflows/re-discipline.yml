@@ -2,25 +2,7 @@ name: re-discipline
 
 on:
   push:
-    paths:
-      - ".gitattributes"
-      - ".agents/plugins/marketplace.json"
-      - ".claude-plugin/marketplace.json"
-      - ".github/workflows/re-discipline.yml"
-      - ".github/scripts/re-discipline-*"
-      - "plugins/re-discipline/**"
-      - "tests/re_discipline*.py"
-      - "tests/test_re_discipline*.py"
   pull_request:
-    paths:
-      - ".gitattributes"
-      - ".agents/plugins/marketplace.json"
-      - ".claude-plugin/marketplace.json"
-      - ".github/workflows/re-discipline.yml"
-      - ".github/scripts/re-discipline-*"
-      - "plugins/re-discipline/**"
-      - "tests/re_discipline*.py"
-      - "tests/test_re_discipline*.py"
   workflow_dispatch:
 
 permissions:
@@ -89,7 +71,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: plugins/re-discipline/knowledge/go.mod
+          go-version-file: knowledge/go.mod
           cache: false
 
       - name: Validate workflow syntax
@@ -104,14 +86,14 @@ jobs:
         run: npm install --global @anthropic-ai/claude-code@2.1.220 @openai/codex@0.145.0
 
       - name: Validate Claude plugin manifest
-        run: claude plugin validate --strict plugins/re-discipline
+        run: claude plugin validate --strict .
 
       - name: Validate and install Codex plugin manifest
         shell: bash
         run: |
           set -eu
           codex plugin marketplace add "$GITHUB_WORKSPACE" --json
-          codex plugin add re-discipline@adiaz-claude-plugins --json
+          codex plugin add re-discipline@re-discipline --json
           codex plugin list --json
 
   cross-platform:
@@ -148,15 +130,15 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: plugins/re-discipline/knowledge/go.mod
-          cache-dependency-path: plugins/re-discipline/knowledge/go.sum
+          go-version-file: knowledge/go.mod
+          cache-dependency-path: knowledge/go.sum
 
       - name: Run Python contract and compatibility tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Check Go formatting
         shell: pwsh
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: |
           $unformatted = @(gofmt -l .)
           if ($LASTEXITCODE -ne 0) {
@@ -168,32 +150,32 @@ jobs:
           }
 
       - name: Verify Go module metadata is tidy
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: go mod tidy -diff
 
       - name: Verify Go module checksums
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: go mod verify
 
       - name: Run Go static analysis
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: go vet ./...
 
       - name: Run Go unit tests
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: go test -count=1 -timeout=25m ./...
 
       - name: Build reproducible runtime package
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: go run ./cmd/re-discipline-knowledge-packager --output bin
 
       - name: Verify runtime package manifest and checksums
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: go run ./cmd/re-discipline-knowledge-packager --output bin --verify
 
       - name: Verify checked-in runtime package is current
         shell: pwsh
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: |
           $drift = @(git status --porcelain=v1 --untracked-files=all -- bin)
           if ($LASTEXITCODE -ne 0) {
@@ -207,7 +189,7 @@ jobs:
       - name: Verify POSIX executable modes
         if: runner.os != 'Windows'
         shell: bash
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: |
           set -eu
           for executable in \
@@ -223,7 +205,7 @@ jobs:
 
       - name: Run full packaged benchmark and digest gates
         shell: pwsh
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: |
           $goos = (go env GOOS).Trim()
           $launcher = if ($goos -eq "windows") {
@@ -262,12 +244,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: plugins/re-discipline/knowledge/go.mod
-          cache-dependency-path: plugins/re-discipline/knowledge/go.sum
+          go-version-file: knowledge/go.mod
+          cache-dependency-path: knowledge/go.sum
 
       - name: Run race detector on explicit concurrency scenarios
         shell: pwsh
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: |
           # The complete deterministic suite runs in every OS validation job.
           # These are every test that currently starts a goroutine. Keep this
@@ -299,5 +281,5 @@ jobs:
           }
 
       - name: Run Go vulnerability analysis
-        working-directory: plugins/re-discipline/knowledge
+        working-directory: knowledge
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...

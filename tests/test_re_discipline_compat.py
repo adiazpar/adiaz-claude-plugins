@@ -10,7 +10,7 @@ from tests.re_discipline_package_audit import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "re-discipline"
+PLUGIN = ROOT
 
 SKILLS = {
     "benchmark-knowledge",

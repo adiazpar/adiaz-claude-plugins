@@ -1,14 +1,14 @@
 {
-  "name": "adiaz-claude-plugins",
+  "name": "re-discipline",
   "interface": {
-    "displayName": "Alex Diaz Plugins"
+    "displayName": "Re-Discipline"
   },
   "plugins": [
     {
       "name": "re-discipline",
       "source": {
         "source": "local",
-        "path": "./plugins/re-discipline"
+        "path": "."
       },
       "policy": {
         "installation": "AVAILABLE",

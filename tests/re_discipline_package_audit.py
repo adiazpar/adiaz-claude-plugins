@@ -203,8 +203,6 @@ def declared_plugin_version(root: Path | None = None) -> str:
     base = root or Path(__file__).resolve().parents[1]
     return read_version_constant(
         base
-        / "plugins"
-        / "re-discipline"
         / "knowledge"
         / "internal"
         / "knowledge"

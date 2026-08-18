@@ -133,7 +133,7 @@ class MigrationPilotTests(unittest.TestCase):
 
     def _package_fixture(self, root: Path) -> tuple[Path, Path]:
         plugin = root / "plugin"
-        bin_root = plugin / "plugins/re-discipline/knowledge/bin"
+        bin_root = plugin / "knowledge/bin"
         bin_root.mkdir(parents=True)
         goos, goarch, executable = pilot._platform_target()
         target_path = bin_root / f"{goos}-{goarch}" / executable

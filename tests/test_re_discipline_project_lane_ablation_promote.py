@@ -21,7 +21,7 @@ from tests.test_re_discipline_project_lane_ablation_build import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-KNOWLEDGE = ROOT / "plugins" / "re-discipline" / "knowledge"
+KNOWLEDGE = ROOT / "knowledge"
 PROJECT_SCHEMA = KNOWLEDGE / "schemas" / "project-lane-ablation-report.schema.json"
 AGGREGATE_SCHEMA = KNOWLEDGE / "schemas" / "lane-ablation-report.schema.json"
 SOURCE_REPORT = KNOWLEDGE / "evals" / "conformance" / "lane-ablation-report.json"

@@ -2,7 +2,7 @@
 """Propagate the single published-version definition into the JSON manifests.
 
 The version is declared exactly once, as RuntimeVersion in
-plugins/re-discipline/knowledge/internal/knowledge/types.go. Go code consumes
+knowledge/internal/knowledge/types.go. Go code consumes
 that constant directly and the package audit derives its expectation from it,
 so those can never drift. The Claude and Codex plugin manifests are static
 JSON read by hosts before any code runs, so they cannot reference a constant
@@ -25,7 +25,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PLUGIN = ROOT / "plugins" / "re-discipline"
+PLUGIN = ROOT
 SOURCE = PLUGIN / "knowledge" / "internal" / "knowledge" / "types.go"
 # Manifests whose top-level "version" is the published plugin version.
 MANIFESTS = (

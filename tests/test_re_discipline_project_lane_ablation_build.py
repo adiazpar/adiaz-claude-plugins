@@ -36,8 +36,6 @@ from tests.re_discipline_project_lane_ablation_stage import (
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = (
     ROOT
-    / "plugins"
-    / "re-discipline"
     / "knowledge"
     / "schemas"
     / "project-lane-ablation-report.schema.json"
@@ -49,8 +47,6 @@ ARCHIVE_BUILDER_PATH = (
 )
 COMMITTED_HISTORICAL_ARCHIVE = (
     ROOT
-    / "plugins"
-    / "re-discipline"
     / "knowledge"
     / "evals"
     / "conformance"
@@ -499,17 +495,17 @@ class SyntheticInputs:
             for kind, replacement, project_path in (
                 (
                     "bootstrap-config",
-                    "plugins/re-discipline/templates/project/config.json",
+                    "templates/project/config.json",
                     ".re-discipline/config.json",
                 ),
                 (
                     "knowledge-policy",
-                    "plugins/re-discipline/templates/project/policy.jsonc",
+                    "templates/project/policy.jsonc",
                     ".re-discipline/knowledge/policy.jsonc",
                 ),
                 (
                     "retrieval-profile",
-                    "plugins/re-discipline/templates/project/retrieval-profile.json",
+                    "templates/project/retrieval-profile.json",
                     ".re-discipline/knowledge/retrieval-profile.json",
                 ),
             )
@@ -550,7 +546,7 @@ class SyntheticInputs:
                 "harnessSchemaSha256": _identity(
                     (
                         ROOT
-                        / "plugins/re-discipline/knowledge/schemas/project-lane-ablation-harness.schema.json"
+                        / "knowledge/schemas/project-lane-ablation-harness.schema.json"
                     ).read_bytes()
                 ),
                 "pythonVersion": "fixture-python",

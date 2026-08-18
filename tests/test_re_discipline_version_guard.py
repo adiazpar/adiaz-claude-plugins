@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "re-discipline"
+PLUGIN = ROOT
 GUARD = ROOT / ".github" / "scripts" / "re-discipline-version-guard.py"
 VERSION_SOURCE = Path("knowledge") / "internal" / "knowledge" / "types.go"
 
@@ -74,7 +74,7 @@ class VersionGuardBehavior(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.repo = Path(self._tmp.name)
-        self.plugin = self.repo / "plugins" / "re-discipline"
+        self.plugin = self.repo
         git(["init", "-b", "main"], self.repo)
         write_version(self.plugin, "0.8.0")
         (self.plugin / "payload.txt").write_text("one\n", encoding="utf-8")

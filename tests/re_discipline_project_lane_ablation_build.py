@@ -1385,7 +1385,7 @@ def _harness(
         "--mode",
         "full",
     ]
-    if command["cwd"] != "plugins/re-discipline/knowledge" or command["argv"][1:] != expected_tail:
+    if command["cwd"] != "knowledge" or command["argv"][1:] != expected_tail:
         _fail("harness.benchmarkCommand", "is not the canonical full benchmark invocation")
     expected_exit = 0 if raw.get("passed") is True else 1
     if command["exitCode"] != expected_exit:
