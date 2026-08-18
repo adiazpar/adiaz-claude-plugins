@@ -22,6 +22,14 @@ foreach ($mp in @('.claude-plugin/marketplace.json', '.agents/plugins/marketplac
     }
 }
 
+# Force the exact compiler from go.mod's toolchain directive. Without
+# this, GOTOOLCHAIN=auto silently uses any NEWER installed Go (CI's
+# go1.26.5 vs local go1.26.4 produced different binaries and broke the
+# stale-binary check).
+$tc = (Select-String -Path (Join-Path $repo 'retrieval/go.mod') -Pattern '^toolchain (\S+)').Matches[0].Groups[1].Value
+if (-not $tc) { throw "no toolchain directive in retrieval/go.mod" }
+$env:GOTOOLCHAIN = $tc
+
 $out = Join-Path $repo $Output
 New-Item -ItemType Directory -Force (Split-Path -Parent $out) | Out-Null
 Push-Location (Join-Path $repo 'retrieval')

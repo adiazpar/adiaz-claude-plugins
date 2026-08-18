@@ -1,3 +1,10 @@
 * text=auto
 *.exe binary
 *.db binary
+
+# Go sources must be byte-identical on every checkout: the committed exe
+# is hash-compared against a CI rebuild, and CRLF conversion would alter
+# raw string literals.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
