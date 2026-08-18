@@ -1,0 +1,36 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: retrieval/go.mod
+
+      - name: Vet and test
+        working-directory: retrieval
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Canonical build (also checks manifest version consistency)
+        run: pwsh scripts/build.ps1 -Output bin/ci-re-search.exe
+
+      - name: Stale binary check
+        shell: pwsh
+        run: |
+          $committed = (Get-FileHash bin/re-search.exe).Hash
+          $rebuilt   = (Get-FileHash bin/ci-re-search.exe).Hash
+          if ($committed -ne $rebuilt) {
+            throw "bin/re-search.exe is stale: source changed without 'pwsh scripts/build.ps1'. committed=$committed rebuilt=$rebuilt"
+          }
+
+      - name: Bench fixture corpus
+        run: bin/ci-re-search.exe bench --root retrieval/testdata/fixture
