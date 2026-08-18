@@ -1,0 +1,154 @@
+// Command re-search indexes and queries a .re-discipline/ markdown
+// knowledge base. It is ephemeral: it starts, answers, and exits.
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+
+	"github.com/adiazpar/re-discipline/retrieval/internal/httpserve"
+	"github.com/adiazpar/re-discipline/retrieval/internal/mcp"
+	"github.com/adiazpar/re-discipline/retrieval/internal/search"
+)
+
+var version = "dev" // stamped via -ldflags "-X main.version=X.Y.Z"
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "re-search:", err)
+		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	if len(args) > 0 && (args[0] == "--version" || args[0] == "version") {
+		fmt.Println(version)
+		return nil
+	}
+	if len(args) == 0 {
+		return fmt.Errorf("usage: re-search [--version] <index|query|bench|serve> [flags]")
+	}
+	cmd, rest := args[0], args[1:]
+
+	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+	rootFlag := fs.String("root", "", "project root (default: walk up from cwd to .re-discipline)")
+	jsonOut := fs.Bool("json", false, "JSON output")
+	limit := fs.Int("limit", 5, "max results")
+	mcpMode := fs.Bool("mcp", false, "serve MCP over stdio")
+	httpAddr := fs.String("http", "", "serve HTTP on address, e.g. 127.0.0.1:7345")
+	fs.Parse(rest)
+
+	resolveRoot := func() (string, error) {
+		if *rootFlag != "" {
+			return *rootFlag, nil
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		return search.FindRoot(cwd)
+	}
+
+	switch cmd {
+	case "index":
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		return runIndex(root)
+	case "query":
+		q := ""
+		if fs.NArg() > 0 {
+			q = fs.Arg(0)
+		}
+		if q == "" {
+			return fmt.Errorf("usage: re-search query \"<question>\"")
+		}
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		hits, warnings, err := search.Query(root, q, *limit)
+		printWarnings(warnings)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(hits)
+		}
+		fmt.Print(search.FormatHits(hits))
+		return nil
+	case "bench":
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		return runBench(root, *limit, *jsonOut)
+	case "serve":
+		// Root is resolved lazily, per query: the host spawns this
+		// server in every project where the plugin is enabled,
+		// initialized or not, and a process that dies at spawn reads
+		// as a broken plugin. An uninitialized project gets a helpful
+		// text answer instead.
+		queryText := func(q string, n int) (string, error) {
+			root, err := resolveRoot()
+			if err != nil {
+				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
+			}
+			hits, _, qErr := search.Query(root, q, n)
+			if qErr != nil {
+				return "", qErr
+			}
+			return search.FormatHits(hits), nil
+		}
+		switch {
+		case *mcpMode:
+			return mcp.Serve(os.Stdin, os.Stdout, version, queryText)
+		case *httpAddr != "":
+			return httpserve.ListenAndServe(*httpAddr, func(q string, n int) ([]search.Hit, error) {
+				root, err := resolveRoot()
+				if err != nil {
+					return nil, err
+				}
+				hits, _, qErr := search.Query(root, q, n)
+				return hits, qErr
+			})
+		default:
+			return fmt.Errorf("serve requires --mcp or --http <addr>")
+		}
+	default:
+		return fmt.Errorf("unknown command %q", cmd)
+	}
+}
+
+func runIndex(root string) error {
+	release, ok := search.TryLock(root)
+	if !ok {
+		return fmt.Errorf("another process is rebuilding the index; try again shortly")
+	}
+	defer release()
+	tmp := search.IndexPath(root) + ".build"
+	os.Remove(tmp)
+	docs, warnings, err := search.BuildIndexFile(root, tmp)
+	printWarnings(warnings)
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := search.SwapIndex(tmp, search.IndexPath(root)); err != nil {
+		return err
+	}
+	if err := search.WriteIndexMD(root, docs); err != nil {
+		return err
+	}
+	fmt.Printf("indexed %d docs\n", len(docs))
+	return nil
+}
+
+func printWarnings(warnings []string) {
+	for _, w := range warnings {
+		fmt.Fprintln(os.Stderr, "warning:", w)
+	}
+}
