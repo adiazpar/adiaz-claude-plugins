@@ -53,19 +53,19 @@ Run: `git status` → expect "nothing to commit, working tree clean".
 ### Task 2: Demolish the 0.x machinery
 
 **Files:**
-- Delete: `knowledge/` (entire tree: engine, schemas, models, evals, bin), `references/`, `hooks/` (all 0.x files), `.github/scripts/`, `.github/workflows/re-discipline.yml`, `.mcp.json` (recreated in Task 13), the 12 0.x skill directories under `skills/`, and `plugins/` if any remnant exists.
+- Delete: `knowledge/` (entire tree: engine, schemas, models, evals, bin), `references/`, `hooks/` (all 0.x files), `templates/` (0.x campaign/finding/run JSON templates — recreated fresh in Task 14), `tests/` (0.x Python suite), `.github/scripts/`, `.github/workflows/re-discipline.yml`, `.mcp.json` (recreated in Task 13), the 12 0.x skill directories under `skills/`, and `plugins/` if any remnant exists.
 - Keep: `LICENSE`, `README.md` (rewritten Task 17), `CHANGELOG.md`, `.claude-plugin/`, `.codex-plugin/`, `.agents/`, `.gitattributes` (simplified Task 13), `.claude/`, `docs/superpowers/`.
 
 - [ ] **Step 1: Delete**
 
 ```bash
-git rm -r -q knowledge references hooks .github/scripts .github/workflows/re-discipline.yml .mcp.json skills
+git rm -r -q knowledge references hooks templates tests .github/scripts .github/workflows/re-discipline.yml .mcp.json skills
 git rm -r -q plugins 2>/dev/null || true
 ```
 
 - [ ] **Step 2: Verify what remains**
 
-Run: `git status --short | head -20` and `ls` → remaining tracked tree is manifests, LICENSE, README, CHANGELOG, `.claude/`, `.agents/`, `.gitattributes`, `docs/`. Nothing under `knowledge/`, `hooks/`, `references/`, `skills/` remains.
+Run: `git status --short | head -20` and `ls` → remaining tracked tree is manifests, LICENSE, README, CHANGELOG, `.claude/`, `.agents/`, `.gitattributes`, `docs/`. Nothing under `knowledge/`, `hooks/`, `references/`, `skills/`, `templates/`, or `tests/` remains.
 
 - [ ] **Step 3: Commit**
 
@@ -733,8 +733,9 @@ git commit -m "feat: corpus scanning and staleness manifest comparison"
 ```bash
 cd retrieval
 go get modernc.org/sqlite@latest
-go mod tidy
 ```
+
+(Do NOT run `go mod tidy` yet — no file imports the driver until Step 4, so tidy would drop the requirement and the first `go test` would fail with a "to add it: go get" error. Run `go mod tidy` after Step 4 instead.)
 
 - [ ] **Step 2: Write the failing test**
 
@@ -944,6 +945,9 @@ func WriteIndexMD(root string, docs []Doc) error {
 	byDir := map[string][]Doc{}
 	for _, d := range docs {
 		dir := path.Dir(strings.TrimPrefix(d.Path, "docs/"))
+		if dir == "." {
+			dir = "(root)"
+		}
 		byDir[dir] = append(byDir[dir], d)
 	}
 	dirs := make([]string, 0, len(byDir))
@@ -1179,7 +1183,9 @@ func EnsureFresh(root string) []string {
 	stale := false
 	if stored, err := ReadManifest(dbPath); err != nil {
 		// Missing or corrupt index: it is disposable — delete and rebuild.
-		os.Remove(dbPath)
+		if rmErr := os.Remove(dbPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			warnings = append(warnings, fmt.Sprintf("index unreadable and could not be removed (%v); retrying next query", rmErr))
+		}
 		stale = true
 	} else if ManifestDiffers(stored, current) {
 		stale = true
@@ -1194,8 +1200,16 @@ func EnsureFresh(root string) []string {
 	}
 	defer release()
 
+	// Holding the lock, sweep temp debris from rebuilders that were
+	// killed mid-build (only the owner ever removed its own temp).
+	if leftovers, _ := filepath.Glob(filepath.Join(root, ".re-discipline", "index.tmp-*.db")); leftovers != nil {
+		for _, l := range leftovers {
+			os.Remove(l)
+		}
+	}
+	os.Remove(filepath.Join(root, ".re-discipline", "index.db.build"))
+
 	tmp := filepath.Join(root, ".re-discipline", fmt.Sprintf("index.tmp-%d.db", os.Getpid()))
-	os.Remove(tmp)
 	_, buildWarnings, err := BuildIndexFile(root, tmp)
 	warnings = append(warnings, buildWarnings...)
 	if err != nil {
@@ -1430,20 +1444,23 @@ func run(args []string) error {
 	httpAddr := fs.String("http", "", "serve HTTP on address, e.g. 127.0.0.1:7345")
 	fs.Parse(rest)
 
-	root := *rootFlag
-	if root == "" {
+	resolveRoot := func() (string, error) {
+		if *rootFlag != "" {
+			return *rootFlag, nil
+		}
 		cwd, err := os.Getwd()
 		if err != nil {
-			return err
+			return "", err
 		}
-		root, err = search.FindRoot(cwd)
-		if err != nil {
-			return err
-		}
+		return search.FindRoot(cwd)
 	}
 
 	switch cmd {
 	case "index":
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
 		return runIndex(root)
 	case "query":
 		q := ""
@@ -1452,6 +1469,10 @@ func run(args []string) error {
 		}
 		if q == "" {
 			return fmt.Errorf("usage: re-search query \"<question>\"")
+		}
+		root, err := resolveRoot()
+		if err != nil {
+			return err
 		}
 		hits, warnings, err := search.Query(root, q, *limit)
 		printWarnings(warnings)
@@ -1464,21 +1485,39 @@ func run(args []string) error {
 		fmt.Print(search.FormatHits(hits))
 		return nil
 	case "bench":
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
 		return runBench(root, *limit, *jsonOut)
 	case "serve":
+		// Root is resolved lazily, per query: the host spawns this
+		// server in every project where the plugin is enabled,
+		// initialized or not, and a process that dies at spawn reads
+		// as a broken plugin. An uninitialized project gets a helpful
+		// text answer instead.
+		queryText := func(q string, n int) (string, error) {
+			root, err := resolveRoot()
+			if err != nil {
+				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
+			}
+			hits, _, qErr := search.Query(root, q, n)
+			if qErr != nil {
+				return "", qErr
+			}
+			return search.FormatHits(hits), nil
+		}
 		switch {
 		case *mcpMode:
-			return mcp.Serve(os.Stdin, os.Stdout, version, func(q string, n int) (string, error) {
-				hits, _, err := search.Query(root, q, n)
-				if err != nil {
-					return "", err
-				}
-				return search.FormatHits(hits), nil
-			})
+			return mcp.Serve(os.Stdin, os.Stdout, version, queryText)
 		case *httpAddr != "":
 			return httpserve.ListenAndServe(*httpAddr, func(q string, n int) ([]search.Hit, error) {
-				hits, _, err := search.Query(root, q, n)
-				return hits, err
+				root, err := resolveRoot()
+				if err != nil {
+					return nil, err
+				}
+				hits, _, qErr := search.Query(root, q, n)
+				return hits, qErr
 			})
 		default:
 			return fmt.Errorf("serve requires --mcp or --http <addr>")
@@ -2226,6 +2265,18 @@ $claude = (Get-Content (Join-Path $repo '.claude-plugin/plugin.json') -Raw | Con
 $codex  = (Get-Content (Join-Path $repo '.codex-plugin/plugin.json')  -Raw | ConvertFrom-Json).version
 if ($claude -ne $codex) { throw "version mismatch: .claude-plugin=$claude .codex-plugin=$codex" }
 
+# Marketplace entries must match too (spec §11) — this check is what
+# replaced the 0.x version sync/guard scripts.
+foreach ($mp in @('.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json')) {
+    $mpPath = Join-Path $repo $mp
+    if (-not (Test-Path $mpPath)) { continue }
+    $entry = (Get-Content $mpPath -Raw | ConvertFrom-Json).plugins |
+        Where-Object { $_.name -eq 're-discipline' }
+    if ($entry -and $entry.version -and $entry.version -ne $claude) {
+        throw "version mismatch: $mp=$($entry.version) plugin.json=$claude"
+    }
+}
+
 $out = Join-Path $repo $Output
 New-Item -ItemType Directory -Force (Split-Path -Parent $out) | Out-Null
 Push-Location (Join-Path $repo 'retrieval')
@@ -2242,7 +2293,7 @@ Run: `pwsh scripts/build.ps1` then `bin/re-search.exe --version` → prints the 
 
 - [ ] **Step 3: Write `.mcp.json`**
 
-The host spawns the server with cwd = the project directory, so walk-up root discovery works without flags:
+The host spawns the server with cwd = the project directory, so walk-up root discovery works without flags; per spec §5, `serve` resolves the root lazily per query (Task 9), so this server never dies at spawn in an uninitialized project:
 
 ```json
 {
@@ -2309,10 +2360,11 @@ or "delete and rebuild" — nothing requires exact hashes or protocols.
 
     .re-discipline/bin/re-search.exe query "your question or identifier"
 
-Add `--json` for structured output, `--limit N` for more results. The
-index rebuilds itself when stale. If results are weak, reword, or grep
-`docs/` directly. When a real question misses a doc you know exists, add
-it to `golden.jsonl`.
+Add `--json` for structured output, `--limit N` for more results. Flags
+go BEFORE the question text (`query --limit 8 "..."`) — flags after the
+question are silently ignored. The index rebuilds itself when stale. If
+results are weak, reword, or grep `docs/` directly. When a real question
+misses a doc you know exists, add it to `golden.jsonl`.
 
 ## Doc format
 
@@ -2679,9 +2731,24 @@ git commit -m "feat: single read-only SessionStart status hook"
 - Modify: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `CHANGELOG.md`, `README.md`
 - Modify: `bin/re-search.exe` (rebuilt with the 1.0.0 stamp)
 
-- [ ] **Step 1: Set versions**
+- [ ] **Step 1: Set versions and purge 0.x manifest content**
 
-In `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`: set `"version": "1.0.0"`, preserving all other fields; update the `description` field to: `"Markdown-canonical reverse-engineering knowledge: campaign curation conventions plus the re-search retrieval CLI/MCP tool."`. In both marketplace.json files, update the re-discipline entry's version/description to match (leave unrelated fields untouched).
+In `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`: set `"version": "1.0.0"` and update the `description` field to: `"Markdown-canonical reverse-engineering knowledge: campaign curation conventions plus the re-search retrieval CLI/MCP tool."`. In both marketplace.json files, update the re-discipline entry's version/description to match (leave unrelated fields untouched).
+
+The Codex manifest additionally carries 0.x content that must be rewritten, not preserved:
+
+- Replace its `mcpServers` entry (which points at the deleted `knowledge/bin/re-discipline-knowledge`) with the 1.0 server, using the same repo-relative path style the 0.x entry used:
+
+```json
+"mcpServers": {
+  "re-search": {
+    "command": "bin/re-search.exe",
+    "args": ["serve", "--mcp"]
+  }
+}
+```
+
+- Rewrite its `interface` block (`shortDescription`, `longDescription`, `defaultPrompt`) from the 0.x engine language (runs, ratification, guarded discard, atomic merge) to 1.0 semantics. Use: shortDescription `"Curated RE knowledge: search it, campaign it, promote findings."`; longDescription `"Markdown-canonical reverse-engineering knowledge base in .re-discipline/: search curated docs with the re-search query tool before investigating, work in campaign folders (reports + candidate findings), and promote reviewed findings into docs/."`; defaultPrompt `"Search the project knowledge base with the re-search query tool before investigating anything. Follow .re-discipline/CONVENTIONS.md for reports, findings, and promotion."`. If any of these fields don't exist in the current manifest, skip them; if other 0.x-specific fields reference deleted paths, remove those fields and note them in the commit message.
 
 - [ ] **Step 2: Rebuild the exe with the new version**
 

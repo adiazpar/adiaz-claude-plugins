@@ -152,8 +152,11 @@ Commands:
 Robustness rules (binding on the implementation):
 
 - **Project-root discovery**: `re-search` walks up from cwd to the nearest
-  `.re-discipline/`, overridable with `--root` (the plugin `.mcp.json`
-  entry sets `--root` via the host's project-directory variable).
+  `.re-discipline/`, overridable with `--root`. `serve` resolves the root
+  lazily, per query — the host spawns the MCP server (with cwd = the
+  project directory) in every project where the plugin is enabled, so an
+  uninitialized project must get a helpful "run init-project" text answer,
+  never a process that dies at spawn.
 - **Indexing is lenient**: a doc with malformed frontmatter is indexed as
   plain text with a warning in command output; indexing never fails on doc
   content.
