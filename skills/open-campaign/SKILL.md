@@ -20,6 +20,10 @@ description: >-
   findings/
 ```
 
+(`work/` — campaign-scoped scratch for scripts, dumps, and logs — is
+created on demand when the investigation needs it; see CONVENTIONS.md's
+"Working artifacts" section.)
+
 4. Write `CAMPAIGN.md`:
 
 ```markdown

@@ -24,9 +24,23 @@ Docs are truth; the index is disposable; git is history.
 
 Then run `/re-discipline:init-project` inside your target project. It is
 idempotent: it creates `.re-discipline/` (docs, campaigns, conventions,
-a project-local copy of `re-search.exe`), adds marker-bounded
-orientation blocks to `AGENTS.md`/`.claude/CLAUDE.md`, and asks once
-whether to use shared memory (`docs/ops/` replacing host-native memory).
+a project-local copy of `re-search.exe`), writes the marker-bounded
+orientation block into root `AGENTS.md` (the one canonical agent file —
+Codex reads it natively; root `CLAUDE.md` imports it via `@AGENTS.md`
+for Claude Code), and asks once whether to use shared memory
+(`docs/ops/` replacing host-native memory).
+
+## Updating
+
+When the plugin updates (marketplace update + plugin reload), re-run
+`/re-discipline:init-project` in each project that uses it. Init is the
+upgrade path: it refreshes the three plugin-owned copies
+(`CONVENTIONS.md`, `.re-discipline/.gitignore`, `re-search.exe`) and
+converges the host wiring to the current layout, while never touching
+your docs, campaigns, archives, golden questions, or any content outside
+its marker block. Tell collaborators the same: after updating the
+plugin, run init-project once per project — that is the whole migration
+for 1.x upgrades.
 
 ## Daily use
 

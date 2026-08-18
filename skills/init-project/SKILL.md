@@ -50,20 +50,31 @@ once: "Use shared memory? Replaces Claude/Codex native memory with
 - **disabled**: do NOT touch host memory settings at all — init only
   ever writes them when enabling.
 
-## 3. Marker blocks
+## 3. Host wiring (one canonical agent file)
 
-Render `<plugin-root>/templates/marker-block.md` with
-`{{SHARED_MEMORY}}` → `enabled`/`disabled`, then apply to root
-`AGENTS.md` and `.claude/CLAUDE.md`:
+Root `AGENTS.md` is the single canonical agent file. Codex reads it
+natively (it walks AGENTS.md files from the git root to the cwd); Claude
+Code does NOT read it automatically and instead imports it. Wire both:
+
+**AGENTS.md** — render `<plugin-root>/templates/marker-block.md` with
+`{{SHARED_MEMORY}}` → `enabled`/`disabled`, then apply:
 
 - markers absent → append the block (create the file if missing);
 - exactly one well-formed `<!-- re-discipline:start -->` …
   `<!-- re-discipline:end -->` pair → replace its contents;
-- anything else (unpaired, duplicated, nested) → leave that file
+- anything else (unpaired, duplicated, nested) → leave the file
   untouched and report it for manual repair.
 
-`AGENTS.md` is canonical: sync the `CLAUDE.md` block from it whenever
-they disagree. Never modify anything outside the markers.
+**Root `CLAUDE.md`** — must contain the line `@AGENTS.md` (Claude Code's
+documented import syntax, expanded at launch). If the file is missing,
+create it containing exactly that line; if it exists without the line,
+add it at the top; never duplicate the marker block into any CLAUDE.md.
+
+**Pre-1.1 layouts**: if a re-discipline marker block exists in
+`.claude/CLAUDE.md` or root `CLAUDE.md` (the old dual-block model),
+remove that block (markers included) — the block lives only in
+`AGENTS.md` now. Content outside markers is user-owned: never touch it.
+`.codex/` needs no files — Codex does not read `.codex/AGENTS.md`.
 
 ## 4. Report
 

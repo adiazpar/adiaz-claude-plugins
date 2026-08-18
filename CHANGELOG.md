@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 - 2026-08-18
+
+Host-wiring correction, verified against Codex source and Claude Code
+docs: root `AGENTS.md` is now the single canonical agent file (Codex
+reads it natively but never reads `.codex/AGENTS.md`; Claude Code does
+not auto-read `AGENTS.md` and imports it instead). `init-project` now
+writes the marker block only into `AGENTS.md`, ensures root `CLAUDE.md`
+contains `@AGENTS.md`, and removes marker blocks from pre-1.1 dual-block
+layouts. New "Working artifacts" convention: campaign-scoped scratch in
+`active/<slug>/work/`, durable tooling graduates to the project source
+tree. README gains an Updating section — re-running init-project is the
+whole upgrade path for initialized projects.
+
 ## 1.0.0 - 2026-08-18
 
 Ground-up simplification. Markdown in `.re-discipline/docs/` is now the

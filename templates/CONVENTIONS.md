@@ -13,7 +13,7 @@ or "delete and rebuild" — nothing requires exact hashes or protocols.
 - `active/<campaign-slug>/` — one campaign (investigation workspace) per
   task: `CAMPAIGN.md` (goal + status), `reports/` (full investigator
   reports, append-only), `findings/` (candidate findings awaiting
-  promotion).
+  promotion), `work/` (optional scratch — see Working artifacts).
 - `archive/<campaign-slug>/` — closed campaigns.
 - `golden.jsonl` — retrieval regression questions:
   `{"q": "...", "expect": "docs/..."}` per line.
@@ -65,3 +65,20 @@ misses a doc you know exists, add it to `golden.jsonl`.
    replacement. Git history is the provenance trail.
 5. Closing a campaign: final promotion sweep, write a short summary in
    CAMPAIGN.md, move the folder to `archive/`.
+
+## Working artifacts (where actual work lives)
+
+- **Campaign-scoped scratch** — one-off analysis scripts, dumps, logs,
+  candidate patches, anything whose meaning is tied to this
+  investigation — goes in `active/<slug>/work/`. It archives with the
+  campaign on close, so reports can cite `work/` paths durably.
+- **Durable tooling** — anything with a life beyond the campaign
+  (a decompile helper you'll reuse, a codec, a validator) — graduates to
+  the project's normal source tree (`tools/`, `src/`, …) before the
+  campaign closes, like any other code change.
+- **Product changes** (mods, patches, features) are made in place in the
+  repo, never inside the campaign folder; the report records which paths
+  were touched and why.
+
+Rule of thumb: if deleting the campaign folder would lose it, and that
+loss would hurt beyond this campaign, it does not belong in `work/`.
