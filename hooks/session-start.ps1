@@ -14,7 +14,7 @@ try {
             $age = [int]((Get-Date) - $_.LastWriteTime).TotalDays
             "$($_.Name) (updated ${age}d ago)"
         }
-        $campaignPart = "$($campaigns.Count) active campaign(s) — $($names -join ', ')"
+        $campaignPart = "$($campaigns.Count) active campaign(s) - $($names -join ', ')"
     }
     Write-Output "re-discipline: $campaignPart. $($docs.Count) docs curated."
 } catch { }

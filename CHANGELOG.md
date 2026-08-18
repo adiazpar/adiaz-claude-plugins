@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0
+## 1.0.0 - 2026-08-18
 
 Ground-up simplification. Markdown in `.re-discipline/docs/` is now the
 canonical knowledge store; the retrieval index is derived and
