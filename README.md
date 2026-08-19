@@ -68,7 +68,7 @@ outside the FTS doc index:
 ```text
 re-search symbol idLangDict_langEntry_t
 
-[struct] reference/idlib_schema.json
+[struct-doom2016] reference/idlib_schema.json (DOOM 2016)
 idLangDict_langEntry_t  size 32
   id      unsigned int    +0x00  4
   key     idAtomicString  +0x08  8
@@ -128,6 +128,15 @@ the entry, and keep tags rare.
 Grow `golden.jsonl` before a bulk load, not after, and include questions
 whose expected answer is a reference doc — otherwise the bench can only
 measure harm to facts and never benefit to lookups.
+
+You may be tempted to give reference material its own index so it cannot
+perturb the facts at all. That was measured on a 12,152-doc corpus and
+did not pay: scoring only the questions expecting a curated doc, so the
+test cannot cheat by deleting its own answers, removing all 7,150 bulk
+reference docs moved curated retrieval from 94/106 to **93/106** — one
+point worse. The penalty and the boilerplate discipline above already
+neutralise the interference a split would remove. Re-measure before
+adding a query router you do not need.
 
 Windows-only. Requires nothing running in the background: the tool
 starts, answers, exits.
