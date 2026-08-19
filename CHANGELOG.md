@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 - 2026-08-19
+
+The benchmark could only test `query`. A golden case may now carry `symbol`
+instead of `q`, in which case `expect` is a symbol name rather than a document
+path, so symbol lookup is regression-tested like everything else — exact match
+and the substring fallback both. Exactly one of the two fields must be set.
+
+Written after a corpus reached 12,152 documents and 44,878 symbols with no
+coverage of the symbol table at all in its 148-question golden set. An
+evaluation blind to a surface cannot detect regressions in it.
+
+
 ## 1.2.0 - 2026-08-19
 
 Retrieval work driven by a corpus that grew from 254 to 11,054 docs,

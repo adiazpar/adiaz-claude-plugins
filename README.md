@@ -1,4 +1,4 @@
-# re-discipline 1.2
+# re-discipline 1.3
 
 An evidence-disciplined reverse-engineering knowledge system for Claude
 Code, Codex, and any MCP-capable agent. Two halves:
@@ -78,7 +78,9 @@ idLangDict_langEntry_t  size 32
 ```
 
 Exact match first, substring only as a fallback. Also available as the
-`symbol` MCP tool and `GET /symbol?name=…`.
+`symbol` MCP tool and `GET /symbol?name=…`, and testable from the golden
+set: a case carrying `symbol` instead of `q` expects a symbol name rather
+than a document path.
 
 To populate it, write `.re-discipline/symbols.jsonl` — one object per
 line, `{name, kind, render, source}` — from whatever your project's

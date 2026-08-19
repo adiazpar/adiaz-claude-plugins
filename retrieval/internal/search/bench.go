@@ -7,9 +7,15 @@ import (
 	"strings"
 )
 
-// BenchCase is one golden regression question.
+// BenchCase is one golden regression question. Exactly one of Q
+// (free-text retrieval) or Symbol (exact-name symbol lookup) is set.
+// For Q cases Expect is the doc path that must appear in the top hits;
+// for Symbol cases it is the symbol name that must appear among the
+// returned symbols (case-insensitive), so both the exact and the
+// substring-fallback lookup paths are testable.
 type BenchCase struct {
-	Q      string `json:"q"`
+	Q      string `json:"q,omitempty"`
+	Symbol string `json:"symbol,omitempty"`
 	Expect string `json:"expect"`
 }
 
@@ -39,22 +45,37 @@ func RunBench(root, goldenPath string, limit int) (BenchReport, error) {
 			continue
 		}
 		var c BenchCase
-		if err := json.Unmarshal([]byte(line), &c); err != nil || c.Q == "" || c.Expect == "" {
+		if err := json.Unmarshal([]byte(line), &c); err != nil || c.Expect == "" ||
+			(c.Q == "") == (c.Symbol == "") {
 			report.Total++
 			report.Misses = append(report.Misses, BenchCase{Q: line, Expect: "(malformed line)"})
 			continue
 		}
 		report.Total++
-		hits, _, err := Query(root, c.Q, limit)
-		if err != nil {
-			report.Misses = append(report.Misses, c)
-			continue
-		}
 		found := false
-		for _, h := range hits {
-			if h.Path == c.Expect {
-				found = true
-				break
+		if c.Symbol != "" {
+			res, _, err := LookupSymbol(root, c.Symbol, limit)
+			if err != nil {
+				report.Misses = append(report.Misses, c)
+				continue
+			}
+			for _, s := range res.Symbols {
+				if strings.EqualFold(s.Name, c.Expect) {
+					found = true
+					break
+				}
+			}
+		} else {
+			hits, _, err := Query(root, c.Q, limit)
+			if err != nil {
+				report.Misses = append(report.Misses, c)
+				continue
+			}
+			for _, h := range hits {
+				if h.Path == c.Expect {
+					found = true
+					break
+				}
 			}
 		}
 		if found {
