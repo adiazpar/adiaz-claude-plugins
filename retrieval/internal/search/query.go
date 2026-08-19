@@ -22,9 +22,9 @@ type Hit struct {
 }
 
 // QueryOptions carries optional constraints for QueryOpts. The zero
-// value means "current default behavior": limit 5, no filtering.
+// value means "current default behavior": limit 8, no filtering.
 type QueryOptions struct {
-	Limit int    // <= 0 means 5
+	Limit int    // <= 0 means 8
 	Kind  string // filter to this kind (fact|ops|reference); empty = no filter
 	Grade string // filter to this grade (direct|inferred|reported); empty = no filter
 }
@@ -83,7 +83,7 @@ func QueryOpts(root, q string, opts QueryOptions) ([]Hit, []string, error) {
 	}
 	defer db.Close()
 	if opts.Limit <= 0 {
-		opts.Limit = 5
+		opts.Limit = 8
 	}
 	// bm25() returns negative scores (more negative = better), so the
 	// ascending ORDER BY is correct; pinned in TestBM25WeightBehavior.

@@ -37,6 +37,24 @@ func TestParseDocFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParseDocAliases(t *testing.T) {
+	d := ParseDoc("docs/reference/cvars/timescale.md", `---
+kind: reference
+idents: [timescale]
+aliases: [slow motion, game speed]
+---
+# Cvar `+"`"+`timescale`+"`"+` scales the time
+
+scales the time
+`)
+	if len(d.Aliases) != 2 || d.Aliases[0] != "slow motion" || d.Aliases[1] != "game speed" {
+		t.Fatalf("aliases: %v", d.Aliases)
+	}
+	if len(d.Idents) != 1 || d.Idents[0] != "timescale" {
+		t.Fatalf("aliases must not disturb idents: %v", d.Idents)
+	}
+}
+
 func TestParseDocMalformedIsLenient(t *testing.T) {
 	d := ParseDoc("docs/broken.md", "---\nstatus: promoted\nno closing fence\n# A heading\nbody")
 	if d.Warning == "" {

@@ -35,7 +35,7 @@ func run(args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	rootFlag := fs.String("root", "", "project root (default: walk up from cwd to .re-discipline)")
 	jsonOut := fs.Bool("json", false, "JSON output")
-	limit := fs.Int("limit", 5, "max results")
+	limit := fs.Int("limit", 8, "max results")
 	kind := fs.String("kind", "", "only docs of this kind (fact|ops|reference); empty = all")
 	grade := fs.String("grade", "", "only docs of this grade (direct|inferred|reported); empty = all")
 	mcpMode := fs.Bool("mcp", false, "serve MCP over stdio")

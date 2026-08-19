@@ -95,6 +95,37 @@ golden set, 16 questions contained a token matching a symbol name and
 `resource`, `encounter`). Blending would have attached noise to more
 queries than it helped, and the largest single render is 642 lines.
 
+## When the doc's words are not the reader's words
+
+Search matches words, not meanings. A cvar documented by its engine help
+string says `scales the time`, and no amount of ranking will connect that to
+"how do I slow down game time" -- the two share no term. That gap is not a
+ranking bug and cannot be tuned away.
+
+`aliases:` frontmatter closes it by hand:
+
+```yaml
+idents: [timescale]
+aliases: [slow motion, bullet time, game speed]
+```
+
+Aliases are indexed as ordinary searchable text alongside the identifiers
+expanded out of the title and body. They deliberately do NOT enter the
+declared-identifier table, so unlike `idents` they never waive the
+reference-doc rank penalty -- an alias says "someone might call it this",
+not "this document owns that name".
+
+They are also the sharpest available tool for wrecking your index. The
+document-frequency warning below applies with full force: a handful of
+specific phrasings per doc helps, while one generic word written across a
+family of thousands destroys its own search weight and drags unrelated
+queries with it. Write 3-6 per doc, and reject any alias that would land in
+hundreds of them.
+
+Measured: adding aliases to 219 documents moved a 231-question benchmark
+from 215 to 219, and made `porter` stemming worth +4 where it had been worth
+-1 without them.
+
 ## Mixing curated facts with generated reference material
 
 A knowledge base usually grows two kinds of doc: hard-won `kind: fact`

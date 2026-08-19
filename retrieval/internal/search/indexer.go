@@ -20,7 +20,9 @@ func IndexPath(root string) string {
 // built by an older binary must be rebuilt even when the corpus is
 // unchanged, or queries silently serve stale term data.
 // 4: added the symbols table (exact-name lookup, outside FTS).
-const indexFormatVersion = "4"
+// 5: aliases frontmatter is indexed into the idents column.
+// 6: porter stemming, so "wraps" matches "wrapping".
+const indexFormatVersion = "6"
 
 // relationLinkRe matches "- <Label>: ..." bullets inside a Relations
 // section ("- Depends on:", "- Split from:", and future labels alike).
@@ -71,7 +73,13 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 	defer db.Close()
 
 	stmts := []string{
-		`CREATE VIRTUAL TABLE docs USING fts5(title, body, idents, path UNINDEXED, status UNINDEXED, kind UNINDEXED, grade UNINDEXED)`,
+		// Porter stemming folds word forms together, so a question asking
+		// what "wraps" the executable reaches a doc that says "wrapping".
+		// Measured twice on the same 12,314-doc corpus: worth -1 on its
+		// own, worth +4 once aliases exist (215 -> 219 of 231). Aliases are
+		// natural-language phrasings, which is exactly the text whose word
+		// forms vary; stemming has little to fold in an identifier dump.
+		`CREATE VIRTUAL TABLE docs USING fts5(title, body, idents, path UNINDEXED, status UNINDEXED, kind UNINDEXED, grade UNINDEXED, tokenize = 'porter unicode61')`,
 		`CREATE TABLE manifest(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER)`,
 		// Per-doc metadata that must stay out of the searchable text
 		// (evidence holds file paths — indexing them would add noise).
@@ -112,6 +120,14 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 		}
 		if len(d.Idents) > 0 {
 			parts = append(parts, ExpandIdentifiers(strings.Join(d.Idents, " "))...)
+		}
+		// Aliases are indexed as ordinary searchable text in the idents
+		// column. They deliberately do NOT enter docmeta.idents: an alias
+		// is a phrasing hint, not a claim of authority over an identifier,
+		// so it must not waive the reference penalty.
+		for _, a := range d.Aliases {
+			parts = append(parts, strings.Fields(strings.ToLower(a))...)
+			parts = append(parts, ExpandIdentifiers(a)...)
 		}
 		idents := strings.Join(parts, " ")
 		if _, err := tx.Exec(`INSERT INTO docs(title, body, idents, path, status, kind, grade) VALUES(?,?,?,?,?,?,?)`,

@@ -230,3 +230,52 @@ func TestWriteIndexMD(t *testing.T) {
 		t.Fatalf("INDEX.md content:\n%s", s)
 	}
 }
+
+// An alias is a phrasing hint, not a claim of authority. It must make the
+// doc findable by words absent from its title and body, and it must NOT be
+// written into docmeta.idents, because that column is what waives the
+// reference penalty — an aliased reference doc would then outrank curated
+// facts on every ordinary question containing the alias word.
+func TestAliasesAreIndexedButGrantNoIdentAuthority(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, "docs/reference/cvars/timescale.md", `---
+status: promoted
+kind: reference
+grade: direct
+idents: [timescale]
+aliases: [slow motion, bullet time]
+---
+# Cvar `+"`"+`timescale`+"`"+` scales the time
+
+scales the time
+`)
+	dbPath := filepath.Join(root, "index.db")
+	if _, _, err := BuildIndexFile(root, dbPath); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, _, err := Query(root, "how do I get slow motion", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Path != "docs/reference/cvars/timescale.md" {
+		t.Fatalf("alias must make the doc findable by its alias words, got %+v", hits)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var declared string
+	if err := db.QueryRow(`SELECT idents FROM docmeta WHERE path = ?`,
+		"docs/reference/cvars/timescale.md").Scan(&declared); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(declared, "slow") || strings.Contains(declared, "bullet") {
+		t.Fatalf("alias words leaked into declared idents: %q", declared)
+	}
+	if !strings.Contains(declared, "timescale") {
+		t.Fatalf("declared ident lost: %q", declared)
+	}
+}

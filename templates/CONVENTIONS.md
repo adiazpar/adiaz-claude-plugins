@@ -34,8 +34,10 @@ misses a doc you know exists, add it to `golden.jsonl`.
 
     ---
     status: promoted | superseded    # candidate while in active/*/findings/
-    kind: fact | ops
-    grade: direct | inferred | reported   # facts only
+    kind: fact | ops | reference
+    grade: direct | inferred | reported
+    idents: [idLangDict, TAG_LANGDICT]     # identifiers this doc owns
+    aliases: [string table, localisation dump]   # other words a searcher may use
     evidence: [archive/<slug>/reports/R-001.md]
     tags: [entities, animation]
     ---
@@ -45,9 +47,43 @@ misses a doc you know exists, add it to `golden.jsonl`.
 
 - `grade`: `direct` = observed in decompilation/memory; `inferred` =
   deduced; `reported` = external source.
+- `kind: reference` is generated per-entry material — one event, cvar,
+  console command, decl type or catalog entity per doc. It is ranked
+  below `fact` on natural-language questions and exempted from that
+  penalty when the query names one of its declared `idents`, so a
+  concept question reaches curated facts while a name lookup reaches
+  the reference entry. Grade it from its own provenance: an engine help
+  string or a signature read from a dump is `direct`; a model-written
+  summary is `inferred`.
+- `idents`: identifiers the doc is authoritative for. Declaring them is
+  what makes an exact-name query land on this doc.
+- `aliases`: other phrasings someone might search for, when the doc's own
+  words are not the words a reader would type. A cvar whose help string
+  reads "scales the time" is never found by "slow down game time" — search
+  matches words, not meanings, so the missing words go here. Aliases are
+  indexed as ordinary text and, unlike `idents`, grant no authority: they
+  never waive the reference-doc rank penalty.
+
+  Two rules keep them from doing harm. Write 3-6, specific to this entry.
+  And never write a word that would land in hundreds of docs: a phrase
+  repeated across a family destroys its own search weight, exactly as the
+  bulk-generation warning below describes. Measured on this corpus, adding
+  aliases to 219 docs moved a 231-question benchmark from 215 to 219.
 - Titles are searchable assertions, not labels.
 - Negative results are first-class docs: "X does not work, because Y."
 - Conflicting observations may both be recorded with the conflict noted.
+
+### Generated docs dilute the index
+
+A phrase repeated across many generated docs destroys its own search
+weight and drags down unrelated queries. Measured on this corpus: writing
+the literal token `eventCall` into 1,611 docs took the document frequency
+of "call" from 22 docs to 1,633; tagging 6,862 docs `console` put that
+word in 64% of the corpus and broke "read console output from outside the
+process". Tags feed the indexed identifier column, so a tag shared by
+thousands of docs is not free metadata. Put provenance and confidence in
+frontmatter, keep body prose specific to the entry, and omit
+cross-reference bullet lists.
 
 ## Curation flow
 

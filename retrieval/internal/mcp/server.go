@@ -77,7 +77,7 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 					"type": "object",
 					"properties": map[string]any{
 						"query": map[string]any{"type": "string", "description": "natural-language question or identifier"},
-						"limit": map[string]any{"type": "integer", "description": "max results (default 5)"},
+						"limit": map[string]any{"type": "integer", "description": "max results (default 8)"},
 						"kind":  map[string]any{"type": "string", "description": "only docs of this kind (fact|ops|reference); omit for all"},
 						"grade": map[string]any{"type": "string", "description": "only docs of this grade (direct|inferred|reported); omit for all"},
 					},

@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.4.0 - 2026-08-19
+
+Three changes, each measured on a 12,314-doc corpus against a 231-question
+golden set. Together they took it from 208 to 219.
+
+`query` now returns 8 results instead of 5. Thirteen of the twenty-two
+failures were ranked 6-26, so the right document was already being retrieved
+and then cut off; raising the page fixed seven of them without touching
+ranking. Curated reference entries have a median body of 129-420 characters,
+so three more snippets cost a caller almost nothing. `symbol` keeps its
+default of 5 -- a single struct render can run to hundreds of lines.
+
+New `aliases:` frontmatter, for the docs whose own words are not the words a
+reader would type. A cvar whose engine help string reads "scales the time"
+cannot be reached by "how do I slow down game time" -- there is no shared
+word to match. Aliases are indexed as ordinary text in the identifier column
+and, unlike `idents`, confer no authority: they never waive the reference-doc
+rank penalty, because an alias is a phrasing hint and not a claim to own a
+name. Two rules keep them safe, and CONVENTIONS.md now carries both: a
+handful per doc, and never a word that would land in hundreds of them.
+
+FTS5 now stems with `porter`, so a question about what "wraps" the executable
+reaches a document that says "wrapping". This was measured twice and shipped
+only on the second result: on its own it was worth -1, and it becomes worth
++4 once aliases exist. Aliases are natural-language phrasings, which is
+precisely the text whose word forms vary -- there is little for a stemmer to
+fold together in a dump of identifiers.
+
+The index format version is bumped, so existing indexes rebuild on first
+query rather than serving stale terms.
+
 ## 1.3.0 - 2026-08-19
 
 The benchmark could only test `query`. A golden case may now carry `symbol`

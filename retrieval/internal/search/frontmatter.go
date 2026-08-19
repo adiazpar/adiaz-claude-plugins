@@ -15,6 +15,7 @@ type Doc struct {
 	Grade    string // direct | inferred | reported | ""
 	Tags     []string
 	Idents   []string // identifiers this doc declares itself authoritative for
+	Aliases  []string // alternate phrasings a searcher might use; indexed as text, never grants the reference-penalty exemption
 	Evidence []string // evidence paths; stored for callers, never indexed as text
 	Warning  string   // non-empty when frontmatter was malformed
 }
@@ -65,6 +66,8 @@ func parseFrontmatter(fm string, d *Doc) {
 			d.Tags = parseList(val)
 		case "idents":
 			d.Idents = parseList(val)
+		case "aliases":
+			d.Aliases = append(d.Aliases, parseList(val)...)
 		case "evidence":
 			d.Evidence = parseList(val)
 		}
