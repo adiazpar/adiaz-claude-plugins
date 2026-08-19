@@ -7,7 +7,8 @@ status: promoted
 kind: fact
 grade: direct
 tags: [entities, animation]
-evidence: [archive/demo/reports/R-007.md]
+idents: [idAnimatedEntity::AttachJoint, ai_bindFlags]
+evidence: [archive/demo/reports/R-007.md, archive/demo/reports/R-008.md]
 ---
 # Entity binding goes through idAnimatedEntity::AttachJoint
 
@@ -21,6 +22,12 @@ func TestParseDocFrontmatter(t *testing.T) {
 	}
 	if len(d.Tags) != 2 || d.Tags[0] != "entities" {
 		t.Fatalf("tags: %v", d.Tags)
+	}
+	if len(d.Idents) != 2 || d.Idents[0] != "idAnimatedEntity::AttachJoint" || d.Idents[1] != "ai_bindFlags" {
+		t.Fatalf("idents: %v", d.Idents)
+	}
+	if len(d.Evidence) != 2 || d.Evidence[0] != "archive/demo/reports/R-007.md" || d.Evidence[1] != "archive/demo/reports/R-008.md" {
+		t.Fatalf("evidence: %v", d.Evidence)
 	}
 	if d.Title != "Entity binding goes through idAnimatedEntity::AttachJoint" {
 		t.Fatalf("title: %q", d.Title)

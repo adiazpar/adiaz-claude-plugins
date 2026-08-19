@@ -7,14 +7,16 @@ import (
 
 // Doc is one parsed markdown document from .re-discipline/docs/.
 type Doc struct {
-	Path    string // relative to .re-discipline/, forward slashes
-	Title   string
-	Body    string
-	Status  string // promoted | superseded | candidate | ""
-	Kind    string // fact | ops | ""
-	Grade   string // direct | inferred | reported | ""
-	Tags    []string
-	Warning string // non-empty when frontmatter was malformed
+	Path     string // relative to .re-discipline/, forward slashes
+	Title    string
+	Body     string
+	Status   string // promoted | superseded | candidate | ""
+	Kind     string // fact | ops | ""
+	Grade    string // direct | inferred | reported | ""
+	Tags     []string
+	Idents   []string // identifiers this doc declares itself authoritative for
+	Evidence []string // evidence paths; stored for callers, never indexed as text
+	Warning  string   // non-empty when frontmatter was malformed
 }
 
 // ParseDoc parses raw markdown with optional frontmatter. It is lenient:
@@ -61,6 +63,10 @@ func parseFrontmatter(fm string, d *Doc) {
 			d.Grade = val
 		case "tags":
 			d.Tags = parseList(val)
+		case "idents":
+			d.Idents = parseList(val)
+		case "evidence":
+			d.Evidence = parseList(val)
 		}
 	}
 }

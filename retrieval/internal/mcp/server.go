@@ -8,10 +8,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+
+	"github.com/adiazpar/re-discipline/retrieval/internal/search"
 )
 
 // QueryFunc answers one question with formatted text.
-type QueryFunc func(query string, limit int) (string, error)
+type QueryFunc func(query string, opts search.QueryOptions) (string, error)
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -73,6 +75,8 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc) error {
 					"properties": map[string]any{
 						"query": map[string]any{"type": "string", "description": "natural-language question or identifier"},
 						"limit": map[string]any{"type": "integer", "description": "max results (default 5)"},
+						"kind":  map[string]any{"type": "string", "description": "only docs of this kind (fact|ops); omit for all"},
+						"grade": map[string]any{"type": "string", "description": "only docs of this grade (direct|inferred|reported); omit for all"},
 					},
 					"required": []string{"query"},
 				},
@@ -83,6 +87,8 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc) error {
 				Arguments struct {
 					Query string `json:"query"`
 					Limit int    `json:"limit"`
+					Kind  string `json:"kind"`
+					Grade string `json:"grade"`
 				} `json:"arguments"`
 			}
 			json.Unmarshal(req.Params, &p)
@@ -90,7 +96,11 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc) error {
 				resp.Error = &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
 				break
 			}
-			text, err := query(p.Arguments.Query, p.Arguments.Limit)
+			text, err := query(p.Arguments.Query, search.QueryOptions{
+				Limit: p.Arguments.Limit,
+				Kind:  p.Arguments.Kind,
+				Grade: p.Arguments.Grade,
+			})
 			if err != nil {
 				resp.Result = map[string]any{
 					"content": []map[string]any{{"type": "text", "text": "query error: " + err.Error()}},

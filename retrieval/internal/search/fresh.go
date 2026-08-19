@@ -1,10 +1,13 @@
 package search
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // SwapIndex renames tmpPath over dstPath. Windows refuses to replace a
@@ -21,6 +24,24 @@ func SwapIndex(tmpPath, dstPath string) error {
 	}
 	os.Remove(tmpPath)
 	return fmt.Errorf("could not swap index into place: %w", err)
+}
+
+// schemaCurrent reports whether an index database was built by a binary
+// with the current index format. An index built by an older binary
+// (missing tables, or older indexing content: no stripping, different
+// tokenization) would otherwise serve wrong or failing queries until
+// the corpus happened to change.
+func schemaCurrent(dbPath string) bool {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	var v string
+	if err := db.QueryRow(`SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&v); err != nil {
+		return false // table missing (pre-versioning index) or unreadable
+	}
+	return v == indexFormatVersion
 }
 
 // EnsureFresh implements the binding auto-reindex rule: a query never
@@ -42,7 +63,7 @@ func EnsureFresh(root string) []string {
 			warnings = append(warnings, fmt.Sprintf("index unreadable and could not be removed (%v); retrying next query", rmErr))
 		}
 		stale = true
-	} else if ManifestDiffers(stored, current) {
+	} else if ManifestDiffers(stored, current) || !schemaCurrent(dbPath) {
 		stale = true
 	}
 	if !stale {

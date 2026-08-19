@@ -1,6 +1,7 @@
 package search
 
 import (
+	"database/sql"
 	"os"
 	"testing"
 )
@@ -48,6 +49,50 @@ func TestEnsureFreshBuildsAndHealsCorruption(t *testing.T) {
 	after, _ := os.Stat(IndexPath(root))
 	if !before.ModTime().Equal(after.ModTime()) {
 		t.Fatal("unchanged corpus must not trigger rebuild")
+	}
+}
+
+// An index built by an older binary (no indexmeta table, or an older
+// format version) must be treated as stale even though the manifest
+// still matches — otherwise stale term data serves forever.
+func TestEnsureFreshRebuildsOutdatedSchema(t *testing.T) {
+	root := buildTestCorpus(t)
+	EnsureFresh(root)
+
+	// Case 1: pre-versioning index (no indexmeta table at all).
+	db, err := sql.Open("sqlite", IndexPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE indexmeta`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	db.Close()
+	if schemaCurrent(IndexPath(root)) {
+		t.Fatal("missing indexmeta must read as outdated")
+	}
+	EnsureFresh(root)
+	if !schemaCurrent(IndexPath(root)) {
+		t.Fatal("outdated schema must trigger a rebuild")
+	}
+
+	// Case 2: older format version.
+	db, err = sql.Open("sqlite", IndexPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE indexmeta SET value = '0' WHERE key = 'format'`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	db.Close()
+	if schemaCurrent(IndexPath(root)) {
+		t.Fatal("older format version must read as outdated")
+	}
+	EnsureFresh(root)
+	if !schemaCurrent(IndexPath(root)) {
+		t.Fatal("version bump must trigger a rebuild")
 	}
 }
 

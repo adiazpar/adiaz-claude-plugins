@@ -11,9 +11,9 @@ import (
 )
 
 // QueryFunc answers one question with ranked hits.
-type QueryFunc func(query string, limit int) ([]search.Hit, error)
+type QueryFunc func(query string, opts search.QueryOptions) ([]search.Hit, error)
 
-// Handler serves GET /query?q=...&limit=N as JSON.
+// Handler serves GET /query?q=...&limit=N&kind=...&grade=... as JSON.
 func Handler(query QueryFunc) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /query", func(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +23,11 @@ func Handler(query QueryFunc) http.Handler {
 			return
 		}
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		hits, err := query(q, limit)
+		hits, err := query(q, search.QueryOptions{
+			Limit: limit,
+			Kind:  r.URL.Query().Get("kind"),
+			Grade: r.URL.Query().Get("grade"),
+		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

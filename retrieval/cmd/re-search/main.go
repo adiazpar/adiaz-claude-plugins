@@ -36,6 +36,8 @@ func run(args []string) error {
 	rootFlag := fs.String("root", "", "project root (default: walk up from cwd to .re-discipline)")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	limit := fs.Int("limit", 5, "max results")
+	kind := fs.String("kind", "", "only docs of this kind (fact|ops); empty = all")
+	grade := fs.String("grade", "", "only docs of this grade (direct|inferred|reported); empty = all")
 	mcpMode := fs.Bool("mcp", false, "serve MCP over stdio")
 	httpAddr := fs.String("http", "", "serve HTTP on address, e.g. 127.0.0.1:7345")
 	fs.Parse(rest)
@@ -70,7 +72,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		hits, warnings, err := search.Query(root, q, *limit)
+		hits, warnings, err := search.QueryOpts(root, q, search.QueryOptions{Limit: *limit, Kind: *kind, Grade: *grade})
 		printWarnings(warnings)
 		if err != nil {
 			return err
@@ -92,12 +94,12 @@ func run(args []string) error {
 		// initialized or not, and a process that dies at spawn reads
 		// as a broken plugin. An uninitialized project gets a helpful
 		// text answer instead.
-		queryText := func(q string, n int) (string, error) {
+		queryText := func(q string, opts search.QueryOptions) (string, error) {
 			root, err := resolveRoot()
 			if err != nil {
 				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
 			}
-			hits, _, qErr := search.Query(root, q, n)
+			hits, _, qErr := search.QueryOpts(root, q, opts)
 			if qErr != nil {
 				return "", qErr
 			}
@@ -107,12 +109,12 @@ func run(args []string) error {
 		case *mcpMode:
 			return mcp.Serve(os.Stdin, os.Stdout, version, queryText)
 		case *httpAddr != "":
-			return httpserve.ListenAndServe(*httpAddr, func(q string, n int) ([]search.Hit, error) {
+			return httpserve.ListenAndServe(*httpAddr, func(q string, opts search.QueryOptions) ([]search.Hit, error) {
 				root, err := resolveRoot()
 				if err != nil {
 					return nil, err
 				}
-				hits, _, qErr := search.Query(root, q, n)
+				hits, _, qErr := search.QueryOpts(root, q, opts)
 				return hits, qErr
 			})
 		default:
