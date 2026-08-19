@@ -49,6 +49,30 @@ evidence: [archive/demo/reports/R-042.md, archive/demo/reports/R-043.md]
 
 Prose only; the cvar is declared in frontmatter, not in this text.
 `)
+	writeDoc(t, root, "docs/engine/cyber-idle.md", `---
+status: promoted
+kind: fact
+grade: direct
+---
+# A demon stands idle when its emotion band never crosses the attack threshold
+
+The cyberdemon stood still and never attacked because its emotion band
+asymmetry kept it stuck idle.
+`)
+	writeDoc(t, root, "docs/reference/events/ssaction-idle.md", `---
+status: promoted
+kind: reference
+grade: inferred
+idents: [ssaction_Idle]
+---
+# Event `+"`ssaction_Idle`"+` — a scripted action that makes the actor stand idle
+
+A scripted action that makes the actor stand idle for a set duration.
+
+## Signature
+
+`+"`ssaction_Idle`"+` takes 2 arguments, verbatim from the engine's event dump.
+`)
 	writeDoc(t, root, "docs/broken.md", "---\nstatus: promoted\nunclosed")
 	return root
 }
@@ -60,8 +84,8 @@ func TestBuildIndexFileAndManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 5 {
-		t.Fatalf("want 5 docs, got %d", len(docs))
+	if len(docs) != 7 {
+		t.Fatalf("want 7 docs, got %d", len(docs))
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "docs/broken.md") {
 		t.Fatalf("want one lenient warning for broken doc, got %v", warnings)
@@ -178,6 +202,15 @@ func TestBuildIndexDeclaredIdents(t *testing.T) {
 	}
 	if evidence != "archive/demo/reports/R-042.md\narchive/demo/reports/R-043.md" {
 		t.Fatalf("docmeta evidence: %q", evidence)
+	}
+	// docmeta.idents stores declared identifiers verbatim-lowercased plus
+	// their collapsed forms, and nothing expanded from title or body.
+	var declared string
+	if err := db.QueryRow(`SELECT idents FROM docmeta WHERE path = 'docs/engine/force-idle.md'`).Scan(&declared); err != nil {
+		t.Fatal(err)
+	}
+	if declared != "ai_forceidle aiforceidle idai::setidlestate idaisetidlestate" {
+		t.Fatalf("docmeta declared idents: %q", declared)
 	}
 }
 

@@ -163,6 +163,50 @@ func TestQueryDeclaredIdents(t *testing.T) {
 	}
 }
 
+// Reference docs are bulk-generated and outnumber curated facts; on a
+// concept query that names no declared identifier, a matching fact doc
+// must outrank them even when the reference doc's term overlap is
+// comparable (referencePenalty).
+func TestQueryReferencePenalizedOnConceptQuery(t *testing.T) {
+	root := buildTestCorpus(t)
+	hits, _, err := Query(root, "why does the demon stand idle instead of attacking", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Path != "docs/engine/cyber-idle.md" {
+		t.Fatalf("fact doc must outrank reference docs on a concept query: %+v", hits)
+	}
+	// The reference doc is demoted, not hidden.
+	found := false
+	for _, h := range hits {
+		if h.Path == "docs/reference/events/ssaction-idle.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("reference doc must still be retrievable: %+v", hits)
+	}
+}
+
+// A query naming a declared identifier is exactly what reference docs
+// exist for: the declaring doc is exempt from referencePenalty and must
+// rank first, in both the verbatim and the collapsed spelling.
+func TestQueryReferenceIdentLookupExempt(t *testing.T) {
+	root := buildTestCorpus(t)
+	for _, q := range []string{
+		"what does ssaction_Idle do",
+		"what arguments does ssactionIdle take",
+	} {
+		hits, _, err := Query(root, q, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hits) == 0 || hits[0].Path != "docs/reference/events/ssaction-idle.md" {
+			t.Fatalf("query %q must rank the declaring reference doc first: %+v", q, hits)
+		}
+	}
+}
+
 func TestQueryEvidenceAndSnippetMarkers(t *testing.T) {
 	root := buildTestCorpus(t)
 	hits, _, err := Query(root, "ai_forceIdle", 5)

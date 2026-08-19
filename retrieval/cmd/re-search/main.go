@@ -36,7 +36,7 @@ func run(args []string) error {
 	rootFlag := fs.String("root", "", "project root (default: walk up from cwd to .re-discipline)")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	limit := fs.Int("limit", 5, "max results")
-	kind := fs.String("kind", "", "only docs of this kind (fact|ops); empty = all")
+	kind := fs.String("kind", "", "only docs of this kind (fact|ops|reference); empty = all")
 	grade := fs.String("grade", "", "only docs of this grade (direct|inferred|reported); empty = all")
 	mcpMode := fs.Bool("mcp", false, "serve MCP over stdio")
 	httpAddr := fs.String("http", "", "serve HTTP on address, e.g. 127.0.0.1:7345")

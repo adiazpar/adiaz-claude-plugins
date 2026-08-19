@@ -19,7 +19,7 @@ func IndexPath(root string) string {
 // tokenization, column composition), not just table shape — an index
 // built by an older binary must be rebuilt even when the corpus is
 // unchanged, or queries silently serve stale term data.
-const indexFormatVersion = "2"
+const indexFormatVersion = "3"
 
 // relationLinkRe matches "- <Label>: ..." bullets inside a Relations
 // section ("- Depends on:", "- Split from:", and future labels alike).
@@ -71,7 +71,11 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 		`CREATE TABLE manifest(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER)`,
 		// Per-doc metadata that must stay out of the searchable text
 		// (evidence holds file paths — indexing them would add noise).
-		`CREATE TABLE docmeta(path TEXT PRIMARY KEY, evidence TEXT)`,
+		// idents holds the DECLARED identifiers verbatim-lowercased,
+		// space-joined, for query-time declared-ident matching — distinct
+		// from the docs.idents FTS column, which also carries identifiers
+		// expanded out of the title and body.
+		`CREATE TABLE docmeta(path TEXT PRIMARY KEY, evidence TEXT, idents TEXT)`,
 		`CREATE TABLE indexmeta(key TEXT PRIMARY KEY, value TEXT)`,
 	}
 	for _, s := range stmts {
@@ -105,9 +109,24 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 			tx.Rollback()
 			return nil, warnings, err
 		}
-		if len(d.Evidence) > 0 {
-			if _, err := tx.Exec(`INSERT INTO docmeta(path, evidence) VALUES(?,?)`,
-				d.Path, strings.Join(d.Evidence, "\n")); err != nil {
+		if len(d.Evidence) > 0 || len(d.Idents) > 0 {
+			// Each declared ident is stored verbatim-lowercased plus
+			// with :: and _ collapsed, mirroring the two whole-identifier
+			// forms BuildMatch emits, so either spelling of a query
+			// matches. Split segments are deliberately NOT stored: a doc
+			// declaring spawnSingleAI is not the canonical answer for
+			// every query containing "spawn".
+			var declared []string
+			for _, id := range d.Idents {
+				lower := strings.ToLower(id)
+				declared = append(declared, lower)
+				collapsed := strings.ReplaceAll(strings.ReplaceAll(lower, "::", ""), "_", "")
+				if collapsed != lower {
+					declared = append(declared, collapsed)
+				}
+			}
+			if _, err := tx.Exec(`INSERT INTO docmeta(path, evidence, idents) VALUES(?,?,?)`,
+				d.Path, strings.Join(d.Evidence, "\n"), strings.Join(declared, " ")); err != nil {
 				tx.Rollback()
 				return nil, warnings, err
 			}
