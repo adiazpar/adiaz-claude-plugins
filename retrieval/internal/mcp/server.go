@@ -1,7 +1,7 @@
 // Package mcp implements a minimal MCP stdio server for re-search:
-// newline-delimited JSON-RPC 2.0 exposing one `query` tool. Stateless;
-// all knowledge state lives on disk, so any number of instances are
-// safe and a killed instance loses nothing.
+// newline-delimited JSON-RPC 2.0 exposing the `query` and `symbol`
+// tools. Stateless; all knowledge state lives on disk, so any number
+// of instances are safe and a killed instance loses nothing.
 package mcp
 
 import (
@@ -14,6 +14,9 @@ import (
 
 // QueryFunc answers one question with formatted text.
 type QueryFunc func(query string, opts search.QueryOptions) (string, error)
+
+// SymbolFunc resolves one symbol name with formatted text.
+type SymbolFunc func(name string, limit int) (string, error)
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -35,7 +38,7 @@ type rpcError struct {
 }
 
 // Serve reads newline-delimited JSON-RPC requests from in until EOF.
-func Serve(in io.Reader, out io.Writer, version string, query QueryFunc) error {
+func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol SymbolFunc) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 	enc := json.NewEncoder(out)
@@ -80,30 +83,50 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc) error {
 					},
 					"required": []string{"query"},
 				},
+			}, {
+				"name":        "symbol",
+				"description": "Look up one symbol (struct layout, constant, group) by exact name from the project's symbol table (.re-discipline/symbols.jsonl). Case-insensitive; falls back to substring matching when nothing matches exactly. Use for type layouts, field offsets, and constant values; use `query` for questions.",
+				"inputSchema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name":  map[string]any{"type": "string", "description": "symbol name, e.g. idLangDict_langEntry_t or TAG_LANGDICT"},
+						"limit": map[string]any{"type": "integer", "description": "max results (default 5)"},
+					},
+					"required": []string{"name"},
+				},
 			}}}
 		case "tools/call":
 			var p struct {
 				Name      string `json:"name"`
 				Arguments struct {
 					Query string `json:"query"`
+					Name  string `json:"name"`
 					Limit int    `json:"limit"`
 					Kind  string `json:"kind"`
 					Grade string `json:"grade"`
 				} `json:"arguments"`
 			}
 			json.Unmarshal(req.Params, &p)
-			if p.Name != "query" {
+			var text string
+			var err error
+			switch p.Name {
+			case "query":
+				text, err = query(p.Arguments.Query, search.QueryOptions{
+					Limit: p.Arguments.Limit,
+					Kind:  p.Arguments.Kind,
+					Grade: p.Arguments.Grade,
+				})
+			case "symbol":
+				text, err = symbol(p.Arguments.Name, p.Arguments.Limit)
+			default:
 				resp.Error = &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
+			}
+			if resp.Error != nil {
 				break
 			}
-			text, err := query(p.Arguments.Query, search.QueryOptions{
-				Limit: p.Arguments.Limit,
-				Kind:  p.Arguments.Kind,
-				Grade: p.Arguments.Grade,
-			})
 			if err != nil {
 				resp.Result = map[string]any{
-					"content": []map[string]any{{"type": "text", "text": "query error: " + err.Error()}},
+					"content": []map[string]any{{"type": "text", "text": p.Name + " error: " + err.Error()}},
 					"isError": true,
 				}
 				break

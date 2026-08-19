@@ -19,7 +19,8 @@ func IndexPath(root string) string {
 // tokenization, column composition), not just table shape — an index
 // built by an older binary must be rebuilt even when the corpus is
 // unchanged, or queries silently serve stale term data.
-const indexFormatVersion = "3"
+// 4: added the symbols table (exact-name lookup, outside FTS).
+const indexFormatVersion = "4"
 
 // relationLinkRe matches "- <Label>: ..." bullets inside a Relations
 // section ("- Depends on:", "- Split from:", and future labels alike).
@@ -59,6 +60,9 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 		return nil, nil, err
 	}
 	docs, warnings := LoadDocs(root, metas)
+	symMeta := ScanSymbols(root)
+	syms, symWarnings := LoadSymbols(root)
+	warnings = append(warnings, symWarnings...)
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -77,6 +81,12 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 		// expanded out of the title and body.
 		`CREATE TABLE docmeta(path TEXT PRIMARY KEY, evidence TEXT, idents TEXT)`,
 		`CREATE TABLE indexmeta(key TEXT PRIMARY KEY, value TEXT)`,
+		// Symbols are exact-name records (struct layouts, constants) from
+		// the optional .re-discipline/symbols.jsonl. They deliberately
+		// stay OUT of the docs FTS table: tens of thousands of bulk
+		// records would poison document frequencies for free-text search.
+		`CREATE TABLE symbols(name TEXT NOT NULL, kind TEXT NOT NULL, render TEXT NOT NULL, source TEXT NOT NULL)`,
+		`CREATE INDEX symbols_name ON symbols(name COLLATE NOCASE)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -131,6 +141,16 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 				return nil, warnings, err
 			}
 		}
+	}
+	for _, s := range syms {
+		if _, err := tx.Exec(`INSERT INTO symbols(name, kind, render, source) VALUES(?,?,?,?)`,
+			s.Name, s.Kind, s.Render, s.Source); err != nil {
+			tx.Rollback()
+			return nil, warnings, err
+		}
+	}
+	if symMeta != nil {
+		metas = append(metas, *symMeta)
 	}
 	for _, m := range metas {
 		if _, err := tx.Exec(`INSERT INTO manifest(path, mtime, size) VALUES(?,?,?)`, m.Path, m.MTime, m.Size); err != nil {

@@ -1,4 +1,4 @@
-# re-discipline 1.0
+# re-discipline 1.2
 
 An evidence-disciplined reverse-engineering knowledge system for Claude
 Code, Codex, and any MCP-capable agent. Two halves:
@@ -46,11 +46,86 @@ for 1.x upgrades.
 
 - `.re-discipline/bin/re-search.exe query "how do I …"` — search before
   investigating; agents get the same via the `query` MCP tool.
+- `query --kind fact` / `--kind ops` / `--kind reference`, and
+  `--grade direct` — narrow to one class of doc. Flags go BEFORE the
+  question text.
 - `/re-discipline:open-campaign` — start an investigation workspace.
 - Investigate; producers distill findings as they go (see the curate
   skill / `.re-discipline/CONVENTIONS.md`).
 - `/re-discipline:close-campaign` — promote, summarize, archive.
 - Wrong doc later? Edit it, mark `superseded`, link the replacement.
+
+## Symbol lookup
+
+Some knowledge is a table, not a document: struct layouts, enum values,
+constants. Turning tens of thousands of those into markdown would bury
+the docs and dilute the index for records nobody browses — you look a
+struct up by name or not at all.
+
+So `re-search` keeps them in a separate `symbols` table, deliberately
+outside the FTS doc index:
+
+```text
+re-search symbol idLangDict_langEntry_t
+
+[struct] reference/idlib_schema.json
+idLangDict_langEntry_t  size 32
+  id      unsigned int    +0x00  4
+  key     idAtomicString  +0x08  8
+  value   idAtomicString  +0x10  8
+  maxLen  unsigned int    +0x18  4
+  minLen  unsigned int    +0x1C  4
+```
+
+Exact match first, substring only as a fallback. Also available as the
+`symbol` MCP tool and `GET /symbol?name=…`.
+
+To populate it, write `.re-discipline/symbols.jsonl` — one object per
+line, `{name, kind, render, source}` — from whatever your project's
+type data happens to be. `render` is opaque pre-formatted text, so the
+tool never needs to learn your schema's shape. The file is optional;
+its absence is a no-op.
+
+Symbols stay behind the dedicated call rather than being appended to
+`query` results. That was measured, not assumed: across a 148-question
+golden set, 16 questions contained a token matching a symbol name and
+10 of those were ordinary English colliding with constants (`player`,
+`resource`, `encounter`). Blending would have attached noise to more
+queries than it helped, and the largest single render is 642 lines.
+
+## Mixing curated facts with generated reference material
+
+A knowledge base usually grows two kinds of doc: hard-won `kind: fact`
+claims, and bulk `kind: reference` entries generated one-per-item from a
+dump — every console command, every engine event, every type. Reference
+entries are numerous, short and keyword-dense, so left alone they bury
+the curated facts on ordinary questions.
+
+`re-search` handles this without a filter the caller has to remember:
+
+- **Ranking** weights `title` and the identifier column above `body`.
+- **Reference docs take a rank penalty on concept questions**, and are
+  exempt from it when the query names one of their declared `idents`.
+  So "why did the boss stand still" reaches a curated fact, while
+  "what does event `spawnSingleAI` do" reaches the reference entry.
+- **`idents:` frontmatter** declares the identifiers a doc owns. This is
+  what earns the exemption; without it a reference doc is only findable
+  by prose.
+- **Cross-reference bullets are stripped from the index** (not from your
+  files) — a "Depends on" list quoting other docs' titles makes every
+  doc compete for every other doc's topic.
+
+One rule when generating docs in bulk: **a phrase repeated across every
+generated doc destroys its own search weight.** Measured on a real
+11,000-doc corpus, writing one stock token into 1,611 docs took its
+document frequency from 22 docs to 1,633 and broke unrelated queries;
+a tag applied to 6,862 docs put that word in 64% of the corpus. Put
+provenance and confidence in frontmatter, keep body prose specific to
+the entry, and keep tags rare.
+
+Grow `golden.jsonl` before a bulk load, not after, and include questions
+whose expected answer is a reference doc — otherwise the bench can only
+measure harm to facts and never benefit to lookups.
 
 Windows-only. Requires nothing running in the background: the tool
 starts, answers, exits.

@@ -55,6 +55,11 @@ func EnsureFresh(root string) []string {
 	if err != nil {
 		return append(warnings, fmt.Sprintf("corpus scan failed: %v", err))
 	}
+	// The optional symbol corpus is manifest-tracked exactly like docs:
+	// editing or deleting .re-discipline/symbols.jsonl must rebuild.
+	if sm := ScanSymbols(root); sm != nil {
+		current = append(current, *sm)
+	}
 
 	stale := false
 	if stored, err := ReadManifest(dbPath); err != nil {

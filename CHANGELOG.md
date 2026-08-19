@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.2.0 - 2026-08-19
+
+Retrieval work driven by a corpus that grew from 254 to 11,054 docs,
+97% of it generated reference material. Ranking now weights title and
+identifiers above body, and strips cross-reference bullets from the
+index (not from your files), so a "Depends on" list quoting other docs'
+titles no longer makes every doc compete for every other doc's topic.
+That alone moved a 148-question benchmark from 89 to 98.
+
+Generated per-item docs get a new `kind: reference` and a rank penalty
+on natural-language questions, waived when the query names one of the
+doc's declared `idents`. A concept question therefore reaches curated
+facts while a name lookup reaches the reference entry. Tried and
+rejected: a hard tier and a default kind filter, both of which fixed
+the fact half by destroying the reference half, taking name lookups
+from 41/42 to 7/42.
+
+New `symbol` lookup for knowledge that is a table rather than a
+document — struct layouts, constants, enum groups — read from an
+optional `.re-discipline/symbols.jsonl` into a separate table outside
+the doc index, and reachable from the CLI, the MCP server and HTTP.
+Measurement kept it behind a dedicated call instead of blending into
+`query` results: most name collisions across a real golden set were
+ordinary English words matching constants.
+
+Also: `query` gains `--kind` and `--grade` filters on all three
+surfaces; `idents:` and `evidence:` frontmatter are parsed, the latter
+having been documented but silently dropped; snippets widen with match
+markers; and the index carries a format version so a content-shape
+change forces a rebuild instead of serving stale terms indefinitely.
+
 ## 1.1.0 - 2026-08-18
 
 Host-wiring correction, verified against Codex source and Claude Code

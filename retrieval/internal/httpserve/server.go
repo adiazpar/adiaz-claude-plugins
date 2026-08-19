@@ -13,8 +13,12 @@ import (
 // QueryFunc answers one question with ranked hits.
 type QueryFunc func(query string, opts search.QueryOptions) ([]search.Hit, error)
 
-// Handler serves GET /query?q=...&limit=N&kind=...&grade=... as JSON.
-func Handler(query QueryFunc) http.Handler {
+// SymbolFunc resolves one symbol name to its lookup result.
+type SymbolFunc func(name string, limit int) (search.SymbolHits, error)
+
+// Handler serves GET /query?q=...&limit=N&kind=...&grade=... and
+// GET /symbol?name=...&limit=N as JSON.
+func Handler(query QueryFunc, symbol SymbolFunc) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /query", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
@@ -37,12 +41,29 @@ func Handler(query QueryFunc) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
 	})
+	mux.HandleFunc("GET /symbol", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing name parameter"})
+			return
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		res, err := symbol(name, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if res.Symbols == nil {
+			res.Symbols = []search.Symbol{}
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
 	return mux
 }
 
 // ListenAndServe blocks serving the query API on addr.
-func ListenAndServe(addr string, query QueryFunc) error {
-	return http.ListenAndServe(addr, Handler(query))
+func ListenAndServe(addr string, query QueryFunc, symbol SymbolFunc) error {
+	return http.ListenAndServe(addr, Handler(query, symbol))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

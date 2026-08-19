@@ -16,6 +16,8 @@ func rpc(t *testing.T, lines ...string) []map[string]any {
 	var out bytes.Buffer
 	err := Serve(in, &out, "1.0.0-test", func(q string, opts search.QueryOptions) (string, error) {
 		return fmt.Sprintf("RESULT for %s kind=%q grade=%q limit=%d", q, opts.Kind, opts.Grade, opts.Limit), nil
+	}, func(name string, limit int) (string, error) {
+		return fmt.Sprintf("SYMBOL %s limit=%d", name, limit), nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +48,7 @@ func TestServeLifecycle(t *testing.T) {
 		t.Fatalf("init: %v", init)
 	}
 	tools := resps[1]["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 1 || tools[0].(map[string]any)["name"] != "query" {
+	if len(tools) != 2 || tools[0].(map[string]any)["name"] != "query" || tools[1].(map[string]any)["name"] != "symbol" {
 		t.Fatalf("tools: %v", tools)
 	}
 	content := resps[2]["result"].(map[string]any)["content"].([]any)
@@ -64,6 +66,25 @@ func TestServeKindGradePassthrough(t *testing.T) {
 	text := content[0].(map[string]any)["text"].(string)
 	if text != `RESULT for idle cvar kind="fact" grade="direct" limit=8` {
 		t.Fatalf("passthrough: %q", text)
+	}
+}
+
+func TestServeSymbolTool(t *testing.T) {
+	resps := rpc(t,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"symbol","arguments":{"name":"idLangDict_langEntry_t","limit":3}}}`,
+	)
+	content := resps[0]["result"].(map[string]any)["content"].([]any)
+	text := content[0].(map[string]any)["text"].(string)
+	if text != "SYMBOL idLangDict_langEntry_t limit=3" {
+		t.Fatalf("symbol passthrough: %q", text)
+	}
+}
+
+func TestServeUnknownTool(t *testing.T) {
+	resps := rpc(t, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"nope","arguments":{}}}`)
+	errObj := resps[0]["error"].(map[string]any)
+	if errObj["code"].(float64) != -32602 {
+		t.Fatalf("want -32602, got %v", errObj)
 	}
 }
 

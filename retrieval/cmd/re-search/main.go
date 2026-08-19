@@ -28,7 +28,7 @@ func run(args []string) error {
 		return nil
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: re-search [--version] <index|query|bench|serve> [flags]")
+		return fmt.Errorf("usage: re-search [--version] <index|query|symbol|bench|serve> [flags]")
 	}
 	cmd, rest := args[0], args[1:]
 
@@ -82,6 +82,28 @@ func run(args []string) error {
 		}
 		fmt.Print(search.FormatHits(hits))
 		return nil
+	case "symbol":
+		name := ""
+		if fs.NArg() > 0 {
+			name = fs.Arg(0)
+		}
+		if name == "" {
+			return fmt.Errorf("usage: re-search symbol \"<name>\"")
+		}
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		res, warnings, err := search.LookupSymbol(root, name, *limit)
+		printWarnings(warnings)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(res)
+		}
+		fmt.Print(search.FormatSymbols(name, res))
+		return nil
 	case "bench":
 		root, err := resolveRoot()
 		if err != nil {
@@ -105,9 +127,20 @@ func run(args []string) error {
 			}
 			return search.FormatHits(hits), nil
 		}
+		symbolText := func(name string, limit int) (string, error) {
+			root, err := resolveRoot()
+			if err != nil {
+				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
+			}
+			res, _, sErr := search.LookupSymbol(root, name, limit)
+			if sErr != nil {
+				return "", sErr
+			}
+			return search.FormatSymbols(name, res), nil
+		}
 		switch {
 		case *mcpMode:
-			return mcp.Serve(os.Stdin, os.Stdout, version, queryText)
+			return mcp.Serve(os.Stdin, os.Stdout, version, queryText, symbolText)
 		case *httpAddr != "":
 			return httpserve.ListenAndServe(*httpAddr, func(q string, opts search.QueryOptions) ([]search.Hit, error) {
 				root, err := resolveRoot()
@@ -116,6 +149,13 @@ func run(args []string) error {
 				}
 				hits, _, qErr := search.QueryOpts(root, q, opts)
 				return hits, qErr
+			}, func(name string, limit int) (search.SymbolHits, error) {
+				root, err := resolveRoot()
+				if err != nil {
+					return search.SymbolHits{}, err
+				}
+				res, _, sErr := search.LookupSymbol(root, name, limit)
+				return res, sErr
 			})
 		default:
 			return fmt.Errorf("serve requires --mcp or --http <addr>")
@@ -145,7 +185,11 @@ func runIndex(root string) error {
 	if err := search.WriteIndexMD(root, docs); err != nil {
 		return err
 	}
-	fmt.Printf("indexed %d docs\n", len(docs))
+	if n, err := search.CountSymbols(search.IndexPath(root)); err == nil && n > 0 {
+		fmt.Printf("indexed %d docs, %d symbols\n", len(docs), n)
+	} else {
+		fmt.Printf("indexed %d docs\n", len(docs))
+	}
 	return nil
 }
 
