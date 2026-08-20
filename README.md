@@ -95,6 +95,27 @@ golden set, 16 questions contained a token matching a symbol name and
 `resource`, `encounter`). Blending would have attached noise to more
 queries than it helped, and the largest single render is 642 lines.
 
+## Asking why something ranked where it did
+
+`query` gives an order. `explain` gives the reason for it:
+
+```
+re-search explain --json "what stops a demon attacking"
+```
+
+Every candidate comes back with its bm25 score, the penalty charged to it, and
+its rank before and after that penalty. A row that moved is a row the re-rank
+decided, and a reference entry that stayed put is one that declares a name you
+typed. `re-search stats` prints the matching census of the corpus and the
+ranking constants in force.
+
+Both run the same code paths as a real search -- `explain` calls the ranker
+`query` calls, not a reimplementation of it, and a test keeps the two orders
+identical.
+
+The `visualize` skill builds a page out of the two, showing a project its own
+knowledge base and walking two of its own questions through the ranking.
+
 ## When the doc's words are not the reader's words
 
 Search matches words, not meanings. A cvar documented by its engine help

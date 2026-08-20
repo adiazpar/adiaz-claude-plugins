@@ -81,8 +81,21 @@ func ExpandIdentifiers(text string) []string {
 // leave nothing, the unfiltered terms are used so an all-function-word
 // question still degrades to the old behavior instead of zero results.
 func BuildMatch(q string) string {
+	terms, _ := AnalyzeQuery(q)
+	quoted := make([]string, len(terms))
+	for i, t := range terms {
+		quoted[i] = `"` + t + `"`
+	}
+	return strings.Join(quoted, " OR ")
+}
+
+// AnalyzeQuery splits a question exactly as BuildMatch does, but reports
+// both halves: the terms that will be searched for, and the function
+// words discarded on the way. Explain surfaces the discarded half,
+// because "why did my question not find it" is usually answered by
+// seeing which words never reached the index.
+func AnalyzeQuery(q string) (terms, dropped []string) {
 	seen := map[string]bool{}
-	var terms, stopped []string
 	add := func(s string) {
 		s = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(s, `"`, ""), ":", " "))
 		for _, w := range strings.Fields(s) {
@@ -91,9 +104,9 @@ func BuildMatch(q string) string {
 			}
 			seen[w] = true
 			if stopTerms[w] {
-				stopped = append(stopped, `"`+w+`"`)
+				dropped = append(dropped, w)
 			} else {
-				terms = append(terms, `"`+w+`"`)
+				terms = append(terms, w)
 			}
 		}
 	}
@@ -103,8 +116,10 @@ func BuildMatch(q string) string {
 	for _, part := range ExpandIdentifiers(q) {
 		add(part)
 	}
+	// A question made entirely of function words would otherwise search
+	// for nothing; fall back to them rather than return no results.
 	if len(terms) == 0 {
-		terms = stopped
+		terms, dropped = dropped, nil
 	}
-	return strings.Join(terms, " OR ")
+	return terms, dropped
 }

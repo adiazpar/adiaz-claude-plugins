@@ -68,18 +68,56 @@ func Query(root, q string, limit int) ([]Hit, []string, error) {
 
 // QueryOpts is Query with optional kind/grade filtering.
 func QueryOpts(root, q string, opts QueryOptions) ([]Hit, []string, error) {
+	ranked, _, warnings, err := rank(root, q, opts)
+	if err != nil {
+		return nil, warnings, err
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 8
+	}
+	var hits []Hit
+	for _, s := range ranked {
+		if len(hits) >= limit {
+			break
+		}
+		hits = append(hits, s.Hit)
+	}
+	return hits, warnings, nil
+}
+
+// ScoredHit is one candidate with the ranking arithmetic left visible:
+// what bm25 said, what the reference penalty added, and what the two
+// came to. Explain reports these so a surprising result can be read
+// rather than guessed at.
+type ScoredHit struct {
+	Hit
+	Raw     float64 `json:"raw"`     // bm25, negative, more negative is better
+	Penalty float64 `json:"penalty"` // referencePenalty, or 0
+	Final   float64 `json:"final"`   // Raw + Penalty; the sort key
+	// Declares reports that this doc names one of the query's terms in
+	// its own idents frontmatter, which is what waives the penalty.
+	Declares   bool `json:"declares_query_term"`
+	Superseded bool `json:"superseded"`
+}
+
+// rank runs the whole ranking pipeline and returns every candidate it
+// considered, best first, alongside the FTS5 expression the question
+// became. QueryOpts pages it; Explain reports it. Both go through here
+// so the explanation can never drift from the answer.
+func rank(root, q string, opts QueryOptions) ([]ScoredHit, string, []string, error) {
 	warnings := EnsureFresh(root)
 	match := BuildMatch(q)
 	if match == "" {
-		return nil, warnings, nil
+		return nil, "", warnings, nil
 	}
 	dbPath := IndexPath(root)
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, append(warnings, "no index and rebuild unavailable; no results"), nil
+		return nil, match, append(warnings, "no index and rebuild unavailable; no results"), nil
 	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return nil, warnings, err
+		return nil, match, warnings, err
 	}
 	defer db.Close()
 	if opts.Limit <= 0 {
@@ -115,53 +153,44 @@ func QueryOpts(root, q string, opts QueryOptions) ([]Hit, []string, error) {
 	args = append(args, fetch)
 	rows, err := db.Query(q1, args...)
 	if err != nil {
-		return nil, warnings, fmt.Errorf("query failed: %w", err)
+		return nil, match, warnings, fmt.Errorf("query failed: %w", err)
 	}
 	defer rows.Close()
 	queryTerms := map[string]bool{}
 	for _, t := range strings.Split(match, " OR ") {
 		queryTerms[strings.Trim(t, `"`)] = true
 	}
-	type scored struct {
-		Hit
-		score      float64
-		superseded bool
-	}
-	var all []scored
+	var all []ScoredHit
 	for rows.Next() {
 		var h Hit
 		var evidence, declared string
 		var score float64
 		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &score); err != nil {
-			return nil, warnings, err
+			return nil, match, warnings, err
 		}
 		if evidence != "" {
 			h.Evidence = strings.Split(evidence, "\n")
 		}
-		if h.Kind == "reference" && !declaredIdentMatch(declared, queryTerms) {
-			score += referencePenalty
+		s := ScoredHit{Hit: h, Raw: score, Final: score,
+			Declares: declaredIdentMatch(declared, queryTerms), Superseded: h.Status == "superseded"}
+		if h.Kind == "reference" && !s.Declares {
+			s.Penalty = referencePenalty
+			s.Final = score + referencePenalty
 		}
-		all = append(all, scored{Hit: h, score: score, superseded: h.Status == "superseded"})
+		all = append(all, s)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, warnings, err
+		return nil, match, warnings, err
 	}
 	// Superseded-last stays the outermost sort key, exactly as in the
 	// SQL ORDER BY; the stable sort preserves bm25 order among ties.
 	sort.SliceStable(all, func(i, j int) bool {
-		if all[i].superseded != all[j].superseded {
-			return !all[i].superseded
+		if all[i].Superseded != all[j].Superseded {
+			return !all[i].Superseded
 		}
-		return all[i].score < all[j].score
+		return all[i].Final < all[j].Final
 	})
-	var hits []Hit
-	for _, s := range all {
-		if len(hits) >= opts.Limit {
-			break
-		}
-		hits = append(hits, s.Hit)
-	}
-	return hits, warnings, nil
+	return all, match, warnings, nil
 }
 
 // declaredIdentMatch reports whether any query term equals one of a

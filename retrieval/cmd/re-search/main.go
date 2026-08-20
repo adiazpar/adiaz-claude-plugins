@@ -28,7 +28,7 @@ func run(args []string) error {
 		return nil
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: re-search [--version] <index|query|symbol|bench|serve> [flags]")
+		return fmt.Errorf("usage: re-search [--version] <index|query|symbol|explain|stats|bench|serve> [flags]")
 	}
 	cmd, rest := args[0], args[1:]
 
@@ -103,6 +103,43 @@ func run(args []string) error {
 			return json.NewEncoder(os.Stdout).Encode(res)
 		}
 		fmt.Print(search.FormatSymbols(name, res))
+		return nil
+	case "stats":
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		st, warnings, err := search.Stats(root)
+		printWarnings(warnings)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(st)
+		}
+		fmt.Print(search.FormatStats(st))
+		return nil
+	case "explain":
+		q := ""
+		if fs.NArg() > 0 {
+			q = fs.Arg(0)
+		}
+		if q == "" {
+			return fmt.Errorf("usage: re-search explain \"<question>\"")
+		}
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		ex, warnings, err := search.Explain(root, q, *limit)
+		printWarnings(warnings)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(ex)
+		}
+		fmt.Print(search.FormatExplain(ex))
 		return nil
 	case "bench":
 		root, err := resolveRoot()

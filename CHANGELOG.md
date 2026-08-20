@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.5.0 - 2026-08-19
+
+Two new commands and a skill that draws the result.
+
+`re-search explain "<question>"` answers a question and shows its working:
+every candidate considered, its bm25 score, the penalty applied to it, and its
+rank before and after that penalty. A row whose two ranks differ is one the
+re-rank moved, which is usually the whole answer to "why did this come back
+first". It runs the same ranking code as `query` rather than a copy of it, and
+a test pins the two orders together, so the explanation cannot drift into a
+plausible lie.
+
+`re-search stats` is the census: documents by kind, status and grade, symbol
+and golden-question counts, index format, and the ranking constants this build
+uses. Both commands take `--json`. Flags go before the question, as everywhere
+else in this CLI.
+
+The new `visualize` skill turns those two commands into a page: what is in a
+knowledge base, and how a question becomes ranked answers, walked through two
+real questions from that project with its own numbers. It ships a
+project-neutral template and fills it from the probe, so nothing on the page is
+borrowed from somewhere else.
+
+The `curate` skill now documents `idents` and `aliases`. It had never mentioned
+either, which meant an agent following it wrote documents that the ranking
+could not favour and that aliases could not reach -- the engine supported them
+and the instructions did not.
+
 ## 1.4.0 - 2026-08-19
 
 Three changes, each measured on a 12,314-doc corpus against a 231-question
