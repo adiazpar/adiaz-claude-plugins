@@ -61,8 +61,8 @@ h1 em{font-style:normal;color:var(--signal)}
 .figs{display:grid;gap:16px;margin-top:26px}
 figure{margin:0}
 .fig{background:var(--panel);border:1px solid var(--rule);border-radius:3px;
-  padding:18px 16px 14px;box-shadow:var(--shadow);overflow-x:auto;-webkit-overflow-scrolling:touch}
-.fig svg{display:block;width:100%;min-width:680px;height:auto}
+  padding:18px 16px 14px;box-shadow:var(--shadow)}
+.fig svg{display:block;width:100%;height:auto}
 figcaption{margin-top:14px;padding-top:12px;border-top:1px solid var(--rule-soft);
   font-size:13px;color:var(--ink-soft);line-height:1.55}
 figcaption b{color:var(--ink);font-weight:600}
@@ -246,83 +246,7 @@ footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--rule-soft);
   <div class="figs">
   <figure>
     <div class="fig">
-      <svg viewBox="0 0 940 442" role="img" aria-label="System map: campaign findings are promoted into docs, which the indexer reads to build the index database; the query, symbol and bench readers read that database; a manifest of file times triggers a rebuild when documents change.">
-        <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><polygon class="ah" points="0,1 10,5 0,9"></polygon></marker></defs>
-        <text class="zh" x="16" y="22">AUTHORING</text>
-        <text class="zh" x="272" y="22">INDEX BUILD</text>
-        <text class="zh" x="532" y="22">INDEX.DB</text>
-        <text class="zh" x="772" y="22">READERS</text>
-
-        <rect class="bx" x="16" y="40" width="196" height="40" rx="2"></rect>
-        <text class="t" x="30" y="65">campaign findings/</text>
-        <line class="ln" x1="114" y1="80" x2="114" y2="106" marker-end="url(#ar1)"></line>
-        <text class="al" x="124" y="98">manager promotes</text>
-
-        <rect class="bx-i" x="16" y="110" width="196" height="48" rx="2"></rect>
-        <text class="t-i" x="30" y="133">docs/</text>
-        <text class="t2" x="30" y="150" id="f-docs"></text>
-
-        <rect class="bx" x="16" y="180" width="196" height="46" rx="2" id="f-symbox"></rect>
-        <text class="t" x="30" y="202" id="f-symlbl">symbols.jsonl</text>
-        <text class="t2" x="30" y="218" id="f-syms"></text>
-
-        <rect class="bx" x="16" y="248" width="196" height="46" rx="2" id="f-goldbox"></rect>
-        <text class="t" x="30" y="270" id="f-goldlbl">golden.jsonl</text>
-        <text class="t2" x="30" y="286" id="f-gold"></text>
-
-        <rect class="bx-o" x="272" y="40" width="200" height="254" rx="2"></rect>
-        <text class="t" x="286" y="64">re-search index</text>
-        <text class="al" x="286" y="98">1 &nbsp;compare mtime + size</text>
-        <text class="al" x="286" y="126">2 &nbsp;parse frontmatter</text>
-        <text class="al" x="286" y="154">3 &nbsp;expand identifiers</text>
-        <text class="al" x="286" y="182">4 &nbsp;write the tables</text>
-        <text class="t2" x="286" y="222">Runs only when a file</text>
-        <text class="t2" x="286" y="238">changed. Never during</text>
-        <text class="t2" x="286" y="254">a search.</text>
-
-        <rect class="bx-i" x="532" y="40" width="180" height="66" rx="2"></rect>
-        <text class="t-i" x="546" y="62">docs</text>
-        <text class="t2" x="546" y="79">title &middot; body &middot; idents</text>
-        <text class="t2" x="546" y="95" id="f-tok"></text>
-
-        <rect class="bx" x="532" y="122" width="180" height="46" rx="2"></rect>
-        <text class="t" x="546" y="144">docmeta</text>
-        <text class="t2" x="546" y="160">declared idents, evidence</text>
-
-        <rect class="bx" x="532" y="184" width="180" height="46" rx="2" id="f-symtbl"></rect>
-        <text class="t" x="546" y="206">symbols</text>
-        <text class="t2" x="546" y="222">outside the word counts</text>
-
-        <rect class="bx" x="532" y="246" width="180" height="46" rx="2"></rect>
-        <text class="t" x="546" y="268">manifest</text>
-        <text class="t2" x="546" y="284">mtime + size per file</text>
-
-        <rect class="bx-s" x="772" y="40" width="152" height="46" rx="2"></rect>
-        <text class="t-s" x="786" y="62">query</text>
-        <text class="t2" x="786" y="78">ranked answers</text>
-
-        <rect class="bx" x="772" y="102" width="152" height="46" rx="2" id="f-symrdr"></rect>
-        <text class="t" x="786" y="124">symbol</text>
-        <text class="t2" x="786" y="140">exact-name lookup</text>
-
-        <rect class="bx" x="772" y="164" width="152" height="46" rx="2" id="f-benchbox"></rect>
-        <text class="t" x="786" y="186">bench</text>
-        <text class="t2" x="786" y="202">did ranking regress?</text>
-
-        <line class="ln" x1="212" y1="134" x2="266" y2="134" marker-end="url(#ar1)"></line>
-        <text class="al" x="218" y="127">reads</text>
-        <line class="ln" x1="212" y1="203" x2="266" y2="203" marker-end="url(#ar1)" id="f-symarrow"></line>
-        <line class="ln" x1="472" y1="160" x2="526" y2="160" marker-end="url(#ar1)"></line>
-        <text class="al" x="478" y="153">writes</text>
-        <line class="ln" x1="712" y1="120" x2="766" y2="120" marker-end="url(#ar1)"></line>
-        <text class="al" x="718" y="113">reads</text>
-
-        <path class="ln-d" d="M532 269 H500 V330 H372 V300" marker-end="url(#ar1)"></path>
-        <text class="al" x="386" y="324">anything changed? rebuild first</text>
-
-        <path class="ln-d" d="M114 294 V402 H848 V216" marker-end="url(#ar1)" id="f-goldrail"></path>
-        <text class="al" x="470" y="394" text-anchor="middle" id="f-goldlabel">every question, checked against the ranking</text>
-      </svg>
+      <div id="fig-system"></div>
     </div>
     <figcaption><b>Indexing and searching are separate machines.</b> The build runs only when a
     document changes &mdash; the manifest of file times is how it knows &mdash; so a search never
@@ -331,54 +255,7 @@ footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--rule-soft);
 
   <figure>
     <div class="fig">
-      <svg viewBox="0 0 940 238" role="img" aria-label="Query path: a question becomes terms, terms match candidate documents, candidates are scored and re-ranked, and the top results are returned.">
-        <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><polygon class="ah" points="0,1 10,5 0,9"></polygon></marker></defs>
-        <text class="zh" x="14" y="22">THE PATH ONE QUESTION TAKES</text>
-
-        <rect class="bx-s" x="14" y="54" width="132" height="58" rx="2"></rect>
-        <text class="t-s" x="28" y="79">a question</text>
-        <text class="t2" x="28" y="97">plain English</text>
-
-        <rect class="bx" x="186" y="54" width="148" height="58" rx="2"></rect>
-        <text class="t" x="200" y="79">terms</text>
-        <text class="t2" x="200" y="97">BuildMatch</text>
-
-        <rect class="bx" x="374" y="54" width="148" height="58" rx="2"></rect>
-        <text class="t" x="388" y="79">candidates</text>
-        <text class="t2" x="388" y="97">FTS5 MATCH</text>
-
-        <rect class="bx" x="562" y="54" width="168" height="58" rx="2"></rect>
-        <text class="t" x="576" y="79">an order</text>
-        <text class="t2" x="576" y="97">BM25, then re-rank</text>
-
-        <rect class="bx-i" x="770" y="54" width="154" height="58" rx="2"></rect>
-        <text class="t-i" x="784" y="79" id="f-top"></text>
-        <text class="t2" x="784" y="97">what you read</text>
-
-        <line class="ln" x1="146" y1="83" x2="180" y2="83" marker-end="url(#ar2)"></line>
-        <line class="ln" x1="334" y1="83" x2="368" y2="83" marker-end="url(#ar2)"></line>
-        <line class="ln" x1="522" y1="83" x2="556" y2="83" marker-end="url(#ar2)"></line>
-        <line class="ln" x1="730" y1="83" x2="764" y2="83" marker-end="url(#ar2)"></line>
-        <text class="al" x="163" y="45" text-anchor="middle">split</text>
-        <text class="al" x="351" y="45" text-anchor="middle">match</text>
-        <text class="al" x="539" y="45" text-anchor="middle">score</text>
-        <text class="al" x="747" y="45" text-anchor="middle">cut</text>
-
-        <line class="ln-d" x1="260" y1="112" x2="260" y2="140"></line>
-        <text class="al" x="260" y="158" text-anchor="middle" id="f-stop"></text>
-        <text class="al" x="260" y="176" text-anchor="middle">identifiers expanded</text>
-
-        <line class="ln-d" x1="448" y1="112" x2="448" y2="140"></line>
-        <text class="al" x="448" y="158" text-anchor="middle">any term, not all</text>
-        <text class="al" x="448" y="176" text-anchor="middle" id="f-fetch"></text>
-
-        <line class="ln-d" x1="646" y1="112" x2="646" y2="140"></line>
-        <text class="al" x="646" y="158" text-anchor="middle" id="f-weights"></text>
-        <text class="al" x="646" y="176" text-anchor="middle" id="f-penalty"></text>
-
-        <text class="t2" x="14" y="214">Matching is deliberately generous and scoring is where it narrows. Nothing is filtered out for
-        being a weak match &mdash; it is simply outscored.</text>
-      </svg>
+      <div id="fig-path"></div>
     </div>
     <figcaption><b id="cap-fetch-h"></b> <span id="cap-fetch"></span></figcaption>
   </figure>
@@ -558,31 +435,78 @@ document.getElementById('stats').innerHTML = cells
   .map(c => '<div class="stat"><b>' + c[0] + '</b><span>' + c[1] + '</span></div>').join('');
 
 // ---- figures --------------------------------------------------------
-set('f-docs', num(S.documents) + ' documents');
-set('f-tok', 'FTS5, ' + R.tokenizer.split(' ')[0] + ' stemming');
-set('f-top', 'top ' + R.default_limit);
-set('f-stop', R.stop_words + ' function words dropped');
-set('f-fetch', num(fetchN) + ' fetched, not ' + R.default_limit);
-set('f-weights', 'title ×' + R.title_weight + ' · idents ×' + R.idents_weight + ' · body ×' + R.body_weight);
-set('f-penalty', '+' + R.reference_penalty + ' to unowned reference docs');
+// Declared once, laid out per width by figures.js below.
+var hasSym = S.symbols > 0, hasGold = S.golden_questions > 0;
+function keep(list) { return list.filter(Boolean); }
 
-if (S.symbols > 0) {
-  set('f-syms', num(S.symbols) + ' exact names');
-  html('cap-symbols', 'Symbols live in the same database but outside the searchable text, because '
-    + num(S.symbols) + ' bulk records would distort the word counts that ranking depends on.');
-} else {
-  ['f-symbox', 'f-symlbl', 'f-syms', 'f-symtbl', 'f-symrdr', 'f-symarrow'].forEach(hide);
-  html('cap-symbols', 'This project ships no symbol file, so the exact-name table is empty.');
-}
-if (S.golden_questions > 0) {
-  set('f-gold', num(S.golden_questions) + ' known questions');
-} else {
-  ['f-goldbox', 'f-goldlbl', 'f-gold', 'f-benchbox', 'f-goldrail', 'f-goldlabel'].forEach(hide);
-}
+window.SYSTEM_SPEC = {
+  aria: 'System map: findings are promoted into documents, the indexer reads them to build the ' +
+        'index database, and the readers query that database. A manifest of file times triggers ' +
+        'a rebuild when documents change.',
+  zones: [
+    { h: 'AUTHORING', gap: 30, boxes: keep([
+      { id: 'findings', t: 'campaign findings/' },
+      { id: 'docs', t: 'docs/', s: [num(S.documents) + ' documents'], k: 'i' },
+      hasSym && { id: 'syms', t: 'symbols.jsonl', s: [num(S.symbols) + ' exact names'] },
+      hasGold && { id: 'gold', t: 'golden.jsonl', s: [num(S.golden_questions) + ' known questions'] }
+    ]) },
+    { h: 'INDEX BUILD', boxes: [
+      { id: 'indexer', t: 're-search index', k: 'o',
+        lines: ['1  compare mtime + size', '2  parse frontmatter', '3  expand identifiers', '4  write the tables'],
+        note: ['Runs only when a file', 'changed. Never during', 'a search.'] }
+    ] },
+    { h: 'INDEX.DB', boxes: keep([
+      { id: 'tdocs', t: 'docs', s: ['title, body, idents', 'FTS5, ' + R.tokenizer.split(' ')[0] + ' stemming'], k: 'i' },
+      { id: 'tmeta', t: 'docmeta', s: ['declared idents, evidence'] },
+      hasSym && { id: 'tsym', t: 'symbols', s: ['outside the word counts'] },
+      { id: 'tman', t: 'manifest', s: ['mtime + size per file'] }
+    ]) },
+    { h: 'READERS', boxes: keep([
+      { id: 'rquery', t: 'query', s: ['ranked answers'], k: 's' },
+      hasSym && { id: 'rsym', t: 'symbol', s: ['exact-name lookup'] },
+      hasGold && { id: 'rbench', t: 'bench', s: ['did ranking regress?'] }
+    ]) }
+  ],
+  edges: keep([
+    { from: 'findings', to: 'docs', label: 'manager promotes' },
+    { from: 'docs', to: 'indexer', label: 'reads' },
+    hasSym && { from: 'syms', to: 'indexer', label: 'reads' },
+    { from: 'indexer', to: 'tdocs', label: 'writes' },
+    { from: 'tdocs', to: 'rquery', label: 'reads' },
+    { from: 'tman', to: 'indexer', label: 'anything changed? rebuild first', back: true },
+    hasGold && { from: 'gold', to: 'rbench', label: 'every question, checked against the ranking', rail: true }
+  ]),
+  bandLabels: ['reads', 'writes', 'reads'],
+  backEdge: { from: 'tman', to: 'indexer' }
+};
+
+window.PATH_SPEC = {
+  head: 'THE PATH ONE QUESTION TAKES',
+  aria: 'Query path: a question becomes terms, terms match candidate documents, candidates are ' +
+        'scored and re-ranked, and the top results are returned.',
+  steps: [
+    { t: 'a question', sub: 'plain English', k: 's', edge: 'split' },
+    { t: 'terms', sub: 'BuildMatch', edge: 'match',
+      notes: [R.stop_words + ' function words dropped', 'identifiers expanded'] },
+    { t: 'candidates', sub: 'FTS5 MATCH', edge: 'score',
+      notes: ['any term, not all', num(fetchN) + ' fetched, not ' + R.default_limit] },
+    { t: 'an order', sub: 'BM25, then re-rank', edge: 'cut',
+      notes: ['title x' + R.title_weight + ', idents x' + R.idents_weight + ', body x' + R.body_weight,
+              '+' + R.reference_penalty + ' to unowned reference docs'] },
+    { t: 'top ' + R.default_limit, sub: 'what you read', k: 'i' }
+  ],
+  foot: 'Matching is deliberately generous and scoring is where it narrows. Nothing is filtered ' +
+        'out for being a weak match. It is simply outscored.'
+};
+
+html('cap-symbols', hasSym
+  ? 'Symbols live in the same database but outside the searchable text, because ' + num(S.symbols) +
+    ' bulk records would distort the word counts that ranking depends on.'
+  : 'This project ships no symbol file, so the exact-name table is empty.');
 set('cap-fetch-h', 'Why ' + num(fetchN) + ' candidates for a page of ' + R.default_limit + '.');
-set('cap-fetch', 'The penalty is applied after scoring, in code rather than in SQL, so it has to '
-  + 'see far enough down the list that demoting a run of reference entries cannot leave the page '
-  + 'short of the facts sitting underneath them.');
+set('cap-fetch', 'The penalty is applied after scoring, in code rather than in SQL, so it has to ' +
+  'see far enough down the list that demoting a run of reference entries cannot leave the page ' +
+  'short of the facts sitting underneath them.');
 
 // ---- act one --------------------------------------------------------
 const sm = DATA.sample, rows = [];
@@ -727,4 +651,196 @@ Array.prototype.forEach.call(document.querySelectorAll('.pick'), b => {
 document.getElementById('apply').addEventListener('click', () => { applied = !applied; place(); });
 window.addEventListener('resize', place);
 render();
+// Both diagrams are drawn from one description each, laid out for the
+// width actually available. A four-column flow that reads left to right
+// on a desktop has to become a single top-to-bottom stack on a phone --
+// the same mechanism, re-drawn, rather than the same picture scrolled
+// sideways. Re-runs on resize.
+(function () {
+  var LINE = 16, PADX = 14;
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function boxH(b) {
+    if (b.lines) return 34 + b.lines.length * 28 + (b.note ? b.note.length * LINE + 14 : 0);
+    return 30 + (1 + (b.s ? b.s.length : 0)) * LINE;
+  }
+  function rect(b, r) {
+    var cls = b.k === 'i' ? 'bx-i' : b.k === 's' ? 'bx-s' : b.k === 'o' ? 'bx-o' : 'bx';
+    var out = '<rect class="' + cls + '" x="' + r.x + '" y="' + r.y + '" width="' + r.w +
+      '" height="' + r.h + '" rx="2"></rect>';
+    var tc = b.k === 'i' ? 't-i' : b.k === 's' ? 't-s' : 't';
+    var y = r.y + 22;
+    out += '<text class="' + tc + '" x="' + (r.x + PADX) + '" y="' + y + '">' + esc(b.t) + '</text>';
+    if (b.lines) {
+      y += 12;
+      b.lines.forEach(function (l) { y += 28; out += '<text class="al" x="' + (r.x + PADX) + '" y="' + y + '">' + esc(l) + '</text>'; });
+      if (b.note) { y += 22; b.note.forEach(function (l) { out += '<text class="t2" x="' + (r.x + PADX) + '" y="' + y + '">' + esc(l) + '</text>'; y += LINE; }); }
+    } else if (b.s) {
+      b.s.forEach(function (l) { y += LINE; out += '<text class="t2" x="' + (r.x + PADX) + '" y="' + y + '">' + esc(l) + '</text>'; });
+    }
+    return out;
+  }
+  function arrow(d, dashed, id) {
+    return '<path class="' + (dashed ? 'ln-d' : 'ln') + '" d="' + d + '" marker-end="url(#' + id + ')"></path>';
+  }
+  function label(x, y, text, anchor) {
+    return '<text class="al" x="' + x + '" y="' + y + '"' +
+      (anchor ? ' text-anchor="' + anchor + '"' : '') + '>' + esc(text) + '</text>';
+  }
+  function svg(id, W, H, body, aria) {
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(aria) + '">' +
+      '<defs><marker id="' + id + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" ' +
+      'markerHeight="6" orient="auto-start-reverse"><polygon class="ah" points="0,1 10,5 0,9">' +
+      '</polygon></marker></defs>' + body + '</svg>';
+  }
+
+  // ---- figure one: the system -------------------------------------
+  function drawSystem(host, spec) {
+    var W = Math.max(300, Math.min(940, host.clientWidth || 940));
+    var wide = W >= 820, zones = spec.zones, body = '', at = {}, H;
+
+    if (wide) {
+      var gap = 40, colW = Math.floor((W - 32 - gap * (zones.length - 1)) / zones.length), bottom = 0;
+      zones.forEach(function (z, zi) {
+        var x = 16 + zi * (colW + gap), y = 40;
+        body += '<text class="zh" x="' + x + '" y="22">' + esc(z.h) + '</text>';
+        z.boxes.forEach(function (b) {
+          var h = boxH(b), r = { x: x, y: y, w: colW, h: h };
+          at[b.id] = r; body += rect(b, r); y += h + (z.gap || 16);
+        });
+        bottom = Math.max(bottom, y);
+      });
+      // Forward edges run between neighbouring columns; the two dashed
+      // feedback edges take rails under the diagram.
+      var railTop = bottom + 14, railBot = bottom + 62;
+      spec.edges.forEach(function (e) {
+        var a = at[e.from], b = at[e.to];
+        if (!a || !b) return;
+        if (e.back) {
+          var y1 = a.y + a.h / 2;
+          body += arrow('M' + a.x + ' ' + y1 + ' H' + (a.x - 22) + ' V' + railTop +
+            ' H' + (b.x + b.w / 2) + ' V' + (b.y + b.h + 6), true, 'ar1');
+          body += label(b.x + b.w / 2 + 14, railTop - 6, e.label);
+        } else if (e.rail) {
+          body += arrow('M' + (a.x + a.w / 2) + ' ' + (a.y + a.h) + ' V' + railBot +
+            ' H' + (b.x + b.w / 2) + ' V' + (b.y + b.h + 6), true, 'ar1');
+          body += label((a.x + b.x + b.w) / 2, railBot - 8, e.label, 'middle');
+        } else if (a.x === b.x) {
+          var mx = a.x + a.w / 2;
+          body += arrow('M' + mx + ' ' + (a.y + a.h) + ' V' + (b.y - 6), false, 'ar1');
+          body += label(mx + 10, a.y + a.h + 15, e.label);
+        } else {
+          var ay = a.y + a.h / 2;
+          body += arrow('M' + (a.x + a.w) + ' ' + ay + ' H' + (b.x - 6), false, 'ar1');
+          body += label(a.x + a.w + 6, ay - 7, e.label);
+        }
+      });
+      H = railBot + 20;
+    } else {
+      // One column: zones become labelled bands, and the arrows connect
+      // zone to zone rather than box to box, which keeps a phone-sized
+      // drawing from turning into a ladder of eleven hops.
+      var x = 16, w = W - 32 - 20, y = 8, first = {}, last = {};
+      zones.forEach(function (z, zi) {
+        y += 22;
+        body += '<text class="zh" x="' + x + '" y="' + y + '">' + esc(z.h) + '</text>';
+        y += 12;
+        z.boxes.forEach(function (b, bi) {
+          var h = boxH(b), r = { x: x, y: y, w: w, h: h };
+          at[b.id] = r; body += rect(b, r);
+          if (bi === 0) first[zi] = r;
+          last[zi] = r;
+          y += h + 12;
+        });
+        if (zi < zones.length - 1) y += 30;
+      });
+      for (var zi = 0; zi < zones.length - 1; zi++) {
+        var a = last[zi], b = first[zi + 1], mx = x + w / 2;
+        body += arrow('M' + mx + ' ' + (a.y + a.h + 4) + ' V' + (b.y - 6), false, 'ar1');
+        body += label(mx + 12, a.y + a.h + 24, spec.bandLabels[zi]);
+      }
+      // The rebuild loop rides the right margin, back up to the builder.
+      var src = at[spec.backEdge.from], dst = at[spec.backEdge.to];
+      if (src && dst) {
+        var rx = x + w + 12;
+        body += arrow('M' + (x + w) + ' ' + (src.y + src.h / 2) + ' H' + rx +
+          ' V' + (dst.y + dst.h / 2) + ' H' + (x + w + 6), true, 'ar1');
+      }
+      H = y + 8;
+    }
+    host.innerHTML = svg('ar1', W, H, body, spec.aria);
+  }
+
+  // ---- figure two: the query path ---------------------------------
+  function drawPath(host, spec) {
+    var W = Math.max(300, Math.min(940, host.clientWidth || 940));
+    var wide = W >= 820, steps = spec.steps, body = '', H;
+    body += '<text class="zh" x="14" y="22">' + esc(spec.head) + '</text>';
+
+    if (wide) {
+      var gap = 40, n = steps.length, sw = Math.floor((W - 28 - gap * (n - 1)) / n), y = 54, h = 58;
+      steps.forEach(function (s, i) {
+        var x = 14 + i * (sw + gap);
+        body += rect({ t: s.t, s: [s.sub], k: s.k }, { x: x, y: y, w: sw, h: h });
+        if (i < n - 1) {
+          var ax = x + sw, bx = x + sw + gap;
+          body += arrow('M' + (ax + 4) + ' ' + (y + h / 2) + ' H' + (bx - 6), false, 'ar2');
+          body += label((ax + bx) / 2, y + h / 2 - 38, s.edge, 'middle');
+        }
+        if (s.notes) {
+          var cx = x + sw / 2, ny = y + h + 28;
+          body += '<line class="ln-d" x1="' + cx + '" y1="' + (y + h) + '" x2="' + cx + '" y2="' + (y + h + 22) + '"></line>';
+          s.notes.forEach(function (t) { body += label(cx, ny, t, 'middle'); ny += 18; });
+        }
+      });
+      body += '<text class="t2" x="14" y="' + (y + h + 100) + '">' + esc(spec.foot) + '</text>';
+      H = y + h + 116;
+    } else {
+      var x = 14, w = W - 28, y = 40;
+      steps.forEach(function (s, i) {
+        var lines = [s.sub].concat(s.notes || []);
+        var h = 30 + (1 + lines.length) * LINE;
+        body += rect({ t: s.t, s: lines, k: s.k }, { x: x, y: y, w: w, h: h });
+        y += h;
+        if (i < steps.length - 1) {
+          var mx = x + w / 2;
+          body += arrow('M' + mx + ' ' + (y + 4) + ' V' + (y + 30), false, 'ar2');
+          body += label(mx + 12, y + 22, s.edge);
+          y += 38;
+        }
+      });
+      y += 26;
+      wrap(spec.foot, Math.floor(w / 6.2)).forEach(function (l) {
+        body += '<text class="t2" x="' + x + '" y="' + y + '">' + esc(l) + '</text>'; y += LINE;
+      });
+      H = y + 4;
+    }
+    host.innerHTML = svg('ar2', W, H, body, spec.aria);
+  }
+
+  function wrap(text, chars) {
+    var words = text.split(' '), out = [], line = '';
+    words.forEach(function (w) {
+      if ((line + ' ' + w).trim().length > chars) { out.push(line.trim()); line = w; }
+      else line += ' ' + w;
+    });
+    if (line.trim()) out.push(line.trim());
+    return out;
+  }
+
+  var pending;
+  function draw() {
+    var a = document.getElementById('fig-system'), b = document.getElementById('fig-path');
+    if (a && window.SYSTEM_SPEC) drawSystem(a, window.SYSTEM_SPEC);
+    if (b && window.PATH_SPEC) drawPath(b, window.PATH_SPEC);
+  }
+  window.drawFigures = draw;
+  window.addEventListener('resize', function () {
+    clearTimeout(pending); pending = setTimeout(draw, 120);
+  });
+})();
+
+drawFigures();
 </script>

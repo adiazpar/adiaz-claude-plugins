@@ -72,8 +72,10 @@ copy those, rather than working the split out by hand.
 ## 4. Build the page
 
 `template.html` sits next to this file. Copy it, replace the single
-`__DATA__` token with the JSON object below, and publish the result as
-an artifact. Do not edit anything else in the template: it is
+`__DATA__` token with the JSON object below, replace the placeholder
+`<title>` with a name for this project's page, and publish the result
+as an artifact. Keep that title stable across redraws so the artifact
+keeps its identity. Do not edit anything else in the template: it is
 project-neutral by construction, and every project-specific word on the
 page comes through this object.
 
